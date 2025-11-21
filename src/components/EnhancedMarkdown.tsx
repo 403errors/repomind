@@ -1,50 +1,49 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { RepoCard } from "./RepoCard";
 import { DeveloperCard } from "./DeveloperCard";
-import ReactMarkdown from "react-markdown";
 
 interface ParsedContent {
     type: "markdown" | "repo-card" | "developer-card";
     content: string | Record<string, string>;
 }
 
+/**
+ * Parse a string that may contain custom card blocks (repo-card / developer-card)
+ * and split it into an ordered list of markdown fragments and card data.
+ */
 export function parseCardContent(text: string): ParsedContent[] {
     const parts: ParsedContent[] = [];
     let currentIndex = 0;
-
-    // Regex to match custom cards
     const cardRegex = /:::(repo-card|developer-card)\n([\s\S]*?):::/g;
-    let match;
+    let match: RegExpExecArray | null;
 
     while ((match = cardRegex.exec(text)) !== null) {
-        // Add markdown before the card
+        // Push any preceding markdown
         if (match.index > currentIndex) {
-            const markdownText = text.slice(currentIndex, match.index).trim();
-            if (markdownText) {
-                parts.push({ type: "markdown", content: markdownText });
+            const markdown = text.slice(currentIndex, match.index).trim();
+            if (markdown) {
+                parts.push({ type: "markdown", content: markdown });
             }
         }
-
-        // Parse card data
         const cardType = match[1] as "repo-card" | "developer-card";
-        const cardContent = match[2];
+        const cardBody = match[2];
         const cardData: Record<string, string> = {};
-
-        cardContent.split("\n").forEach((line) => {
-            const [key, ...values] = line.split(":");
-            if (key && values.length > 0) {
-                cardData[key.trim()] = values.join(":").trim();
+        cardBody.split("\n").forEach((line) => {
+            const [key, ...rest] = line.split(":");
+            if (key && rest.length) {
+                cardData[key.trim()] = rest.join(":").trim();
             }
         });
-
         parts.push({ type: cardType, content: cardData });
         currentIndex = match.index + match[0].length;
     }
 
-    // Add remaining markdown after the last card
+    // Remaining markdown after last card
     if (currentIndex < text.length) {
-        const markdownText = text.slice(currentIndex).trim();
-        if (markdownText) {
-            parts.push({ type: "markdown", content: markdownText });
+        const markdown = text.slice(currentIndex).trim();
+        if (markdown) {
+            parts.push({ type: "markdown", content: markdown });
         }
     }
 
@@ -58,17 +57,21 @@ interface EnhancedMarkdownProps {
 
 export function EnhancedMarkdown({ content, components }: EnhancedMarkdownProps) {
     const parts = parseCardContent(content);
-
     return (
         <>
             {parts.map((part, index) => {
                 if (part.type === "markdown") {
                     return (
-                        <ReactMarkdown key={index} components={components}>
+                        <ReactMarkdown
+                            key={index}
+                            components={components}
+                            remarkPlugins={[remarkGfm]}
+                        >
                             {part.content as string}
                         </ReactMarkdown>
                     );
-                } else if (part.type === "repo-card") {
+                }
+                if (part.type === "repo-card") {
                     const data = part.content as Record<string, string>;
                     return (
                         <RepoCard
@@ -81,7 +84,8 @@ export function EnhancedMarkdown({ content, components }: EnhancedMarkdownProps)
                             language={data.language}
                         />
                     );
-                } else if (part.type === "developer-card") {
+                }
+                if (part.type === "developer-card") {
                     const data = part.content as Record<string, string>;
                     return (
                         <DeveloperCard

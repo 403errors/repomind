@@ -1,39 +1,73 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, Bot, User, Github, MapPin, Link as LinkIcon, Users, BookMarked, ArrowLeft, Sparkles } from "lucide-react";
+import { Send, Loader2, FileCode, ChevronRight, Bot, User, ArrowLeft, Sparkles, Github } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { processProfileQuery } from "@/app/actions";
+import { processChatQuery } from "@/app/actions";
 import { cn } from "@/lib/utils";
-import { GitHubProfile } from "@/lib/github";
+import mermaid from "mermaid";
 import { EnhancedMarkdown } from "./EnhancedMarkdown";
 import Link from "next/link";
+
+// Initialize mermaid
+mermaid.initialize({
+    startOnLoad: false,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: {
+        primaryColor: '#18181b', // zinc-900
+        primaryTextColor: '#e4e4e7', // zinc-200
+        primaryBorderColor: '#3f3f46', // zinc-700
+        lineColor: '#a1a1aa', // zinc-400
+        secondaryColor: '#27272a', // zinc-800
+        tertiaryColor: '#27272a', // zinc-800
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+    }
+});
+
+const Mermaid = ({ chart }: { chart: string }) => {
+    const [svg, setSvg] = useState<string>("");
+    const id = useRef(`mermaid-${Math.random().toString(36).substr(2, 9)}`);
+
+    useEffect(() => {
+        if (chart) {
+            mermaid.render(id.current, chart).then(({ svg }) => {
+                setSvg(svg);
+            }).catch((error) => {
+                console.error("Mermaid render error:", error);
+                setSvg(`<div class="text-red-500 text-xs p-2">Failed to render diagram</div>`);
+            });
+        }
+    }, [chart]);
+
+    return <div className="my-4 overflow-x-auto bg-zinc-950/50 p-4 rounded-lg" dangerouslySetInnerHTML={{ __html: svg }} />;
+};
+
+const REPO_SUGGESTIONS = [
+    "Show me the user flow chart",
+    "Find security vulnerabilities",
+    "Evaluate code quality",
+    "What's the tech stack?",
+    "Explain the architecture",
+];
 
 interface Message {
     id: string;
     role: "user" | "model";
     content: string;
+    relevantFiles?: string[];
 }
 
-interface ProfileChatInterfaceProps {
-    profile: GitHubProfile;
-    profileReadme: string | null;
-    repoReadmes: { repo: string; content: string }[];
+interface ChatInterfaceProps {
+    repoContext: { owner: string; repo: string; fileTree: any[] };
 }
 
-const PROFILE_SUGGESTIONS = [
-    "What projects is he/she known for?",
-    "What are his/her main skills and expertise?",
-    "Summarize his/her most popular repositories",
-    "What programming languages does he/she use?",
-];
-
-export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: ProfileChatInterfaceProps) {
+export function ChatInterface({ repoContext }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<Message[]>([
         {
             id: "welcome",
             role: "model",
-            content: `Hello! I've analyzed **${profile.login}**'s GitHub profile${profileReadme ? ' and profile README' : ''}${repoReadmes.length > 0 ? `, along with ${repoReadmes.length} repository READMEs` : ''}. Ask me anything about their projects, skills, or contributions!`,
+            content: `Hello! I've analyzed **${repoContext.owner}/${repoContext.repo}**. Ask me anything about the code structure, dependencies, or specific features.`,
         },
     ]);
     const [input, setInput] = useState("");
@@ -71,73 +105,55 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
         setLoading(true);
 
         try {
-            const result = await processProfileQuery(userMsg.content, {
-                username: profile.login,
-                profileReadme,
-                repoReadmes,
+            const filePaths = repoContext.fileTree.map((f: any) => f.path);
+            const result = await processChatQuery(userMsg.content, {
+                owner: repoContext.owner,
+                repo: repoContext.repo,
+                filePaths
             });
 
             const modelMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "model",
                 content: result.answer,
+                relevantFiles: result.relevantFiles,
             };
 
             setMessages((prev) => [...prev, modelMsg]);
         } catch (error) {
             console.error(error);
+            // Handle error
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="flex flex-col h-[100dvh] bg-black text-white">
-            {/* Profile Header */}
-            <div className="border-b border-white/10 p-6 bg-zinc-900/50 backdrop-blur-sm">
-                <div className="flex items-start gap-6 max-w-3xl mx-auto">
-                    <Link
-                        href="/"
-                        className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-                        title="Back to home"
-                    >
-                        <ArrowLeft className="w-5 h-5 text-zinc-400 hover:text-white" />
-                    </Link>
-                    <img
-                        src={profile.avatar_url}
-                        alt={profile.login}
-                        className="w-20 h-20 rounded-xl border-2 border-white/20"
-                    />
-                    <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                            <h1 className="text-2xl font-bold">{profile.name || profile.login}</h1>
-                            <a
-                                href={profile.html_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-zinc-400 hover:text-white transition-colors"
-                            >
-                                <Github className="w-5 h-5" />
-                            </a>
-                        </div>
-                        {profile.bio && (
-                            <p className="text-zinc-400 mb-3">{profile.bio}</p>
-                        )}
-                        <div className="flex gap-4 text-sm text-zinc-500">
-                            <span className="flex items-center gap-1">
-                                <BookMarked className="w-4 h-4" />
-                                {profile.public_repos} repos
-                            </span>
-                            <span className="flex items-center gap-1">
-                                <Users className="w-4 h-4" />
-                                {profile.followers} followers
-                            </span>
-                        </div>
-                    </div>
+        <div className="flex flex-col h-full bg-black text-white">
+            {/* Repo Header */}
+            <div className="border-b border-white/10 px-6 py-4 bg-zinc-900/50 backdrop-blur-sm flex items-center gap-4">
+                <Link
+                    href="/"
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                    title="Back to home"
+                >
+                    <ArrowLeft className="w-5 h-5 text-zinc-400 hover:text-white" />
+                </Link>
+                <div className="flex items-center gap-3">
+                    <Github className="w-5 h-5 text-zinc-400" />
+                    <h1 className="text-lg font-semibold text-zinc-100">{repoContext.owner}/{repoContext.repo}</h1>
                 </div>
+                <a
+                    href={`https://github.com/${repoContext.owner}/${repoContext.repo}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-sm px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors flex items-center gap-2"
+                >
+                    <Github className="w-4 h-4" />
+                    View on GitHub
+                </a>
             </div>
 
-            {/* Chat Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-6">
                 <AnimatePresence initial={false}>
                     {messages.map((msg) => (
@@ -179,6 +195,12 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                             components={{
                                                 code: ({ className, children, ...props }: any) => {
                                                     const match = /language-(\w+)/.exec(className || "");
+                                                    const isMermaid = match && match[1] === "mermaid";
+
+                                                    if (isMermaid) {
+                                                        return <Mermaid chart={String(children).replace(/\n$/, "")} />;
+                                                    }
+
                                                     return match ? (
                                                         <div className="overflow-auto w-full my-2 bg-black/50 p-2 rounded-lg">
                                                             <code className={className} {...props}>
@@ -222,6 +244,21 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                         />
                                     </div>
                                 </div>
+
+                                {msg.relevantFiles && msg.relevantFiles.length > 0 && (
+                                    <details className="group mt-1">
+                                        <summary className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors select-none">
+                                            <FileCode className="w-3 h-3" />
+                                            <span>{msg.relevantFiles.length} files analyzed</span>
+                                            <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
+                                        </summary>
+                                        <ul className="mt-2 space-y-1 text-xs text-zinc-600 pl-4">
+                                            {msg.relevantFiles.map((file, i) => (
+                                                <li key={i} className="font-mono">{file}</li>
+                                            ))}
+                                        </ul>
+                                    </details>
+                                )}
                             </div>
                         </motion.div>
                     ))}
@@ -238,14 +275,13 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                         </div>
                         <div className="bg-zinc-900 border border-white/10 p-4 rounded-2xl rounded-tl-none flex items-center gap-2">
                             <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
-                            <span className="text-zinc-400 text-sm">Analyzing profile...</span>
+                            <span className="text-zinc-400 text-sm">Analyzing code...</span>
                         </div>
                     </motion.div>
                 )}
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
             <div className="p-4 border-t border-white/10 bg-black/50 backdrop-blur-lg space-y-3">
                 {/* Suggestions */}
                 {showSuggestions && messages.length === 1 && (
@@ -256,10 +292,10 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                     >
                         <div className="flex items-center gap-2 mb-2">
                             <Sparkles className="w-4 h-4 text-purple-400" />
-                            <span className="text-sm text-zinc-400">Suggested questions:</span>
+                            <span className="text-sm text-zinc-400">Try asking:</span>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                            {PROFILE_SUGGESTIONS.map((suggestion, index) => (
+                            {REPO_SUGGESTIONS.map((suggestion, index) => (
                                 <button
                                     key={index}
                                     onClick={() => handleSuggestionClick(suggestion)}
@@ -277,7 +313,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask about their projects, skills, or contributions..."
+                        placeholder="Ask a question about the code..."
                         className="w-full bg-zinc-900 border border-white/10 rounded-xl px-4 py-3 pr-12 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-600/50 transition-all"
                     />
                     <button

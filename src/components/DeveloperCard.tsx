@@ -26,17 +26,19 @@ export function DeveloperCard({ username, name, avatar, bio, location, blog }: D
 
                 <div className="relative flex gap-4">
                     {/* Avatar */}
-                    {avatar ? (
-                        <img
-                            src={avatar}
-                            alt={username}
-                            className="w-16 h-16 rounded-xl border-2 border-white/20"
-                        />
-                    ) : (
-                        <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
-                            <User className="w-8 h-8 text-white" />
-                        </div>
-                    )}
+                    <img
+                        src={avatar || `https://github.com/${username}.png`}
+                        alt={username}
+                        className="w-16 h-16 rounded-xl border-2 border-white/20 bg-zinc-800"
+                        onError={(e) => {
+                            // Fallback to icon if image fails to load
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
+                    />
+                    <div className="hidden w-16 h-16 rounded-xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
+                        <User className="w-8 h-8 text-white" />
+                    </div>
 
                     <div className="flex-1">
                         {/* Name & Username */}

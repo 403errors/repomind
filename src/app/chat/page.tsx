@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { fetchGitHubData } from "../actions";
-import { ProfileChatInterface } from "@/components/ProfileChatInterface";
+import { ProfileLoader } from "@/components/ProfileLoader";
 import { RepoLayout } from "@/components/RepoLayout";
 import { Loader2, AlertCircle, ArrowLeft, Github, Search } from "lucide-react";
 import { GitHubRepo } from "@/lib/github";
@@ -27,10 +27,15 @@ export default async function ChatPage({
         );
     }
 
+    // If it's a profile query (no slash), load immediately with ProfileLoader
+    if (!query.includes("/")) {
+        return <ProfileLoader username={query} />;
+    }
+
+    // For repos, we still fetch server-side for now
     const data = await fetchGitHubData(query);
 
     if (data.error) {
-        const isProfile = !query.includes("/");
         const errorMessage = data.error === "User not found"
             ? `GitHub user "${query}" was not found. Please check the username.`
             : data.error === "Repository not found"
@@ -48,7 +53,7 @@ export default async function ChatPage({
                         Back to Home
                     </Link>
                     <a
-                        href={isProfile ? `https://github.com/${query}` : `https://github.com/${query}`}
+                        href={`https://github.com/${query}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-6 py-3 bg-zinc-800 text-white rounded-lg hover:bg-zinc-700 transition-colors flex items-center gap-2"
@@ -62,15 +67,8 @@ export default async function ChatPage({
     }
 
     if (data.type === "profile") {
-        return (
-            <div className="h-screen bg-black">
-                <ProfileChatInterface
-                    profile={data.data as any}
-                    profileReadme={data.profileReadme as any}
-                    repoReadmes={data.repoReadmes as any}
-                />
-            </div>
-        );
+        // This path might not be reached now for initial load, but good to keep as fallback
+        return <ProfileLoader username={query} />;
     }
 
     if (data.type !== "repo") {

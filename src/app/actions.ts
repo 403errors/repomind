@@ -11,10 +11,10 @@ export async function fetchGitHubData(input: string) {
         // Profile Mode
         const username = parts[0];
         try {
+            // We just return basic profile info here for the initial load
+            // The rest will be loaded by the client component
             const profile = await getProfile(username);
-            const profileReadme = await getProfileReadme(username);
-            const repoReadmes = await getAllRepoReadmes(username);
-            return { type: "profile", data: profile, profileReadme, repoReadmes };
+            return { type: "profile", data: profile };
         } catch (e) {
             return { error: "User not found" };
         }
@@ -31,6 +31,18 @@ export async function fetchGitHubData(input: string) {
     }
 
     return { error: "Invalid input format" };
+}
+
+export async function fetchProfile(username: string) {
+    return await getProfile(username);
+}
+
+export async function fetchProfileReadme(username: string) {
+    return await getProfileReadme(username);
+}
+
+export async function fetchUserRepos(username: string) {
+    return await getAllRepoReadmes(username);
 }
 
 export async function processChatQuery(
