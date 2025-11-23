@@ -9,11 +9,11 @@ const montserrat = Montserrat({
 });
 
 export const metadata: Metadata = {
-  title: "RepoMind - AI Code Assistant",
-  description: "Deep dive into any GitHub repository with AI-powered analysis. Chat with your code, understand complex logic, and find bugs instantly.",
+  title: "RepoMind: Stop reading code. Start talking to it.",
+  description: "Don't just stare at the repo, interrogate it. Deep dive into logic, squash vulnerabilities and ship faster with AI-powered robust analysis.",
   openGraph: {
-    title: "RepoMind - AI Code Assistant",
-    description: "Deep dive into any GitHub repository with AI-powered analysis.",
+    title: "RepoMind: Stop reading code. Start talking to it.",
+    description: "Don't just stare at the repo, interrogate it. Deep dive into logic, squash vulnerabilities and ship faster with AI-powered robust analysis.",
     url: "https://repomind-ai.vercel.app",
     siteName: "RepoMind",
     images: [
@@ -29,8 +29,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "RepoMind - AI Code Assistant",
-    description: "Deep dive into any GitHub repository with AI-powered analysis.",
+    title: "RepoMind: Stop reading code. Start talking to it.",
+    description: "Don't just stare at the repo, interrogate it. Deep dive into logic, squash vulnerabilities and ship faster with AI-powered robust analysis.",
     images: ["/repomind.png"],
   },
 };
