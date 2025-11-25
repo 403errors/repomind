@@ -386,12 +386,20 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
 
             // Step 3: Generate response
             setStreamingStatus({ message: "Generating response...", progress: 70 });
+            // Get visitor ID
+            let visitorId = localStorage.getItem("visitor_id");
+            if (!visitorId) {
+                visitorId = crypto.randomUUID();
+                localStorage.setItem("visitor_id", visitorId);
+            }
+
             const answer = await generateAnswer(
                 input,
                 context,
                 { owner: repoContext.owner, repo: repoContext.repo },
                 messages.map(m => ({ role: m.role, content: m.content })),
-                ownerProfile // Pass profile data for developer cards
+                ownerProfile, // Pass profile data for developer cards
+                visitorId
             );
 
             const modelMsg: Message = {

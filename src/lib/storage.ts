@@ -145,6 +145,18 @@ export function loadProfileConversation(username: string): Message[] | null {
 }
 
 /**
+ * Clear profile conversation from localStorage
+ */
+export function clearProfileConversation(username: string): void {
+    try {
+        const key = `${PROFILE_PREFIX}${username}`;
+        localStorage.removeItem(key);
+    } catch (e) {
+        console.error('Failed to clear profile conversation:', e);
+    }
+}
+
+/**
  * Calculate total storage size used by RepoMind
  */
 export function getStorageSize(): number {

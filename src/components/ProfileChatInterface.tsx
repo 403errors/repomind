@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Send, Loader2, Github, MapPin, Link as LinkIcon, Users, BookMarked, ArrowLeft, Sparkles, MessageCircle } from "lucide-react";
+import { Send, Loader2, Github, MapPin, Link as LinkIcon, Users, BookMarked, ArrowLeft, Sparkles, MessageCircle, Trash2 } from "lucide-react";
 import { BotIcon } from "@/components/icons/BotIcon";
 import { UserIcon } from "@/components/icons/UserIcon";
 import { motion, AnimatePresence } from "framer-motion";
@@ -10,7 +10,8 @@ import { GitHubProfile } from "@/lib/github";
 import { EnhancedMarkdown } from "./EnhancedMarkdown";
 import { countMessageTokens, formatTokenCount, getTokenWarningLevel, isRateLimitError, getRateLimitErrorMessage } from "@/lib/tokens";
 import { validateMermaidSyntax, sanitizeMermaidCode, getFallbackTemplate, generateMermaidFromJSON } from "@/lib/diagram-utils";
-import { saveProfileConversation, loadProfileConversation } from "@/lib/storage";
+import { saveProfileConversation, loadProfileConversation, clearProfileConversation } from "@/lib/storage";
+import { ConfirmDialog } from "./ConfirmDialog";
 import Link from "next/link";
 import mermaid from "mermaid";
 import { CodeBlock } from "./CodeBlock";
@@ -153,6 +154,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
     const [showSuggestions, setShowSuggestions] = useState(true);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [initialized, setInitialized] = useState(false);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
 
     // Load conversation on mount
     const toastShownRef = useRef(false);
@@ -213,12 +215,19 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
         setLoading(true);
 
         try {
+            // Get visitor ID
+            let visitorId = localStorage.getItem("visitor_id");
+            if (!visitorId) {
+                visitorId = crypto.randomUUID();
+                localStorage.setItem("visitor_id", visitorId);
+            }
+
             const result = await processProfileQuery(userMsg.content, {
                 username: profile.login,
                 profile: profile, // Pass full profile object
                 profileReadme,
                 repoReadmes,
-            });
+            }, visitorId);
 
             const modelMsg: Message = {
                 id: (Date.now() + 1).toString(),
@@ -252,6 +261,19 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleClearChat = () => {
+        clearProfileConversation(profile.login);
+        setMessages([
+            {
+                id: "welcome",
+                role: "model",
+                content: `Hello! I've analyzed **${profile.login}**'s GitHub profile${profileReadme ? ' and profile README' : ''}${repoReadmes.length > 0 ? `, along with ${repoReadmes.length} repository READMEs` : ''}. Ask me anything about their projects, skills, or contributions!`,
+            },
+        ]);
+        setShowSuggestions(true);
+        toast.success("Chat history cleared");
     };
 
     return (
@@ -293,6 +315,22 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                 <MessageCircle className="w-3.5 h-3.5" />
                                 <span>{formatTokenCount(totalTokens)} / 1M tokens</span>
                             </div>
+
+                            <button
+                                onClick={() => setShowClearConfirm(true)}
+                                className="hidden md:block p-2 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors"
+                                title="Clear Chat"
+                            >
+                                <Trash2 className="w-5 h-5" />
+                            </button>
+
+                            <button
+                                onClick={() => setShowClearConfirm(true)}
+                                className="md:hidden ml-auto p-2 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors"
+                                title="Clear Chat"
+                            >
+                                <Trash2 className="w-5 h-5" />
+                            </button>
                         </div>
                         {profile.bio && (
                             <p className="text-zinc-400 mb-3 line-clamp-2 hidden md:block">{profile.bio}</p>
@@ -418,6 +456,17 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                     </button>
                 </form>
             </div>
-        </div>
+
+            <ConfirmDialog
+                isOpen={showClearConfirm}
+                title="Clear Chat History?"
+                message="This will permanently delete all messages in this conversation. This action cannot be undone."
+                confirmText="Clear Chat"
+                cancelText="Cancel"
+                confirmVariant="danger"
+                onConfirm={handleClearChat}
+                onCancel={() => setShowClearConfirm(false)}
+            />
+        </div >
     );
 }

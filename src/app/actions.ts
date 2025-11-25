@@ -120,10 +120,32 @@ export async function generateAnswer(
     context: string,
     repoDetails: { owner: string; repo: string },
     history: { role: "user" | "model"; content: string }[] = [],
-    profileData?: any // Optional profile data
+    profileData?: any, // Optional profile data
+    visitorId?: string
 ): Promise<string> {
+    // Track analytics
+    try {
+        if (visitorId) {
+            const headersList = await headers();
+            const userAgent = headersList.get("user-agent") || "";
+            const country = headersList.get("x-vercel-ip-country") || "Unknown";
+            const isMobile = /mobile/i.test(userAgent);
+
+            await trackEvent(visitorId, 'query', {
+                country,
+                device: isMobile ? 'mobile' : 'desktop',
+                userAgent
+            });
+        }
+    } catch (e) {
+        console.error("Analytics tracking failed:", e);
+    }
+
     return await answerWithContext(query, context, repoDetails, profileData, history);
 }
+
+import { headers } from "next/headers";
+import { trackEvent } from "@/lib/analytics";
 
 export async function processProfileQuery(
     query: string,
@@ -132,8 +154,27 @@ export async function processProfileQuery(
         profile: any; // Full GitHub profile object
         profileReadme: string | null;
         repoReadmes: { repo: string; content: string; updated_at: string; description: string | null }[]
-    }
+    },
+    visitorId?: string
 ) {
+    // Track analytics
+    try {
+        if (visitorId) {
+            const headersList = await headers();
+            const userAgent = headersList.get("user-agent") || "";
+            const country = headersList.get("x-vercel-ip-country") || "Unknown";
+            const isMobile = /mobile/i.test(userAgent);
+
+            await trackEvent(visitorId, 'query', {
+                country,
+                device: isMobile ? 'mobile' : 'desktop',
+                userAgent
+            });
+        }
+    } catch (e) {
+        console.error("Analytics tracking failed:", e);
+    }
+
     // Build context from profile data, README and repo READMEs
     let context = "";
 
