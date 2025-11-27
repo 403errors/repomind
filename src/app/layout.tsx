@@ -10,8 +10,25 @@ const montserrat = Montserrat({
 });
 
 export const metadata: Metadata = {
-  title: "RepoMind: Stop reading code. Start talking to it.",
+  metadataBase: new URL("https://repomind-ai.vercel.app"),
+  title: {
+    default: "RepoMind: Stop reading code. Start talking to it.",
+    template: "%s | RepoMind",
+  },
   description: "Don't just stare at the repo, interrogate it. Deep dive into logic, squash vulnerabilities and ship faster with AI-powered robust analysis.",
+  keywords: [
+    "github repo visualizer",
+    "codebase analysis",
+    "ai code assistant",
+    "github repo answering",
+    "repository chat",
+    "code understanding",
+    "developer tools",
+    "static analysis",
+  ],
+  alternates: {
+    canonical: "/",
+  },
   openGraph: {
     title: "RepoMind: Stop reading code. Start talking to it.",
     description: "Don't just stare at the repo, interrogate it. Deep dive into logic, squash vulnerabilities and ship faster with AI-powered robust analysis.",
@@ -22,7 +39,7 @@ export const metadata: Metadata = {
         url: "/repomind.png",
         width: 1200,
         height: 630,
-        alt: "RepoMind AI",
+        alt: "RepoMind AI - GitHub Repository Visualizer and Chat",
       },
     ],
     locale: "en_US",
@@ -33,6 +50,18 @@ export const metadata: Metadata = {
     title: "RepoMind: Stop reading code. Start talking to it.",
     description: "Don't just stare at the repo, interrogate it. Deep dive into logic, squash vulnerabilities and ship faster with AI-powered robust analysis.",
     images: ["/repomind.png"],
+    creator: "@repomind",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
   },
 };
 

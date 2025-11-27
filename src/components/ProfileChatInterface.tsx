@@ -232,12 +232,17 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                 localStorage.setItem("visitor_id", visitorId);
             }
 
+            const history = messages.map(m => ({
+                role: m.role,
+                content: m.content
+            }));
+
             const result = await processProfileQuery(userMsg.content, {
                 username: profile.login,
                 profile: profile, // Pass full profile object
                 profileReadme,
                 repoReadmes,
-            }, visitorId);
+            }, visitorId, history);
 
             const modelMsg: Message = {
                 id: (Date.now() + 1).toString(),

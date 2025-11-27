@@ -168,7 +168,8 @@ export async function processProfileQuery(
         profileReadme: string | null;
         repoReadmes: { repo: string; content: string; updated_at: string; description: string | null }[]
     },
-    visitorId?: string
+    visitorId?: string,
+    history: { role: "user" | "model"; content: string }[] = []
 ) {
     // Track analytics
     try {
@@ -224,7 +225,8 @@ export async function processProfileQuery(
         query,
         context,
         { owner: profileContext.username, repo: "profile" },
-        profileContext.profile // Pass profile data
+        profileContext.profile, // Pass profile data
+        history // Pass conversation history
     );
     return { answer };
 }

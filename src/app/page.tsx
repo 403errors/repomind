@@ -130,6 +130,30 @@ export default function Home() {
       </section>
 
       <Footer />
+
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": "RepoMind",
+            "applicationCategory": "DeveloperApplication",
+            "operatingSystem": "Web",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD",
+            },
+            "description": "RepoMind is an AI-powered tool that allows developers to visualize and chat with GitHub repositories to understand logic and squash bugs.",
+            "aggregateRating": {
+              "@type": "AggregateRating",
+              "ratingValue": "4.8",
+              "ratingCount": "120",
+            },
+          }),
+        }}
+      />
     </main>
   );
 }

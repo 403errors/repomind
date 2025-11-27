@@ -18,7 +18,8 @@ export function WhatsNewModal({ isOpen, onClose }: WhatsNewModalProps) {
             isNew: true,
             features: [
                 "Increased accuracy in complex flowchart generation from 70% to 95+%",
-                "Improved error handling: Mermaid syntax errors are now hidden from the UI"
+                "Improved error handling: Mermaid syntax errors are now hidden from the UI",
+                "Added context for better chat results"
             ]
         },
         {
