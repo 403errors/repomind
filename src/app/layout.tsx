@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
+import JsonLd from "./components/json-ld";
 
 const montserrat = Montserrat({
   variable: "--font-montserrat",
@@ -11,9 +12,10 @@ const montserrat = Montserrat({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://repomind-ai.vercel.app"),
+  applicationName: "RepoMind",
   title: {
-    default: "RepoMind: Stop reading code. Start talking to it.",
-    template: "%s | RepoMind",
+    default: "Stop reading code. Start talking to it.",
+    template: "%s",
   },
   description: "Don't just stare at the repo, interrogate it. Deep dive into logic, squash vulnerabilities and ship faster with AI-powered robust analysis.",
   keywords: [
@@ -26,6 +28,13 @@ export const metadata: Metadata = {
     "developer tools",
     "static analysis",
   ],
+  icons: {
+    icon: "/favicon.ico",
+  },
+  appleWebApp: {
+    title: "RepoMind",
+    statusBarStyle: "default",
+  },
   alternates: {
     canonical: "/",
   },
@@ -76,6 +85,7 @@ export default function RootLayout({
         className="antialiased font-sans"
         suppressHydrationWarning
       >
+        <JsonLd />
         {children}
         <Toaster
           position="top-right"
