@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { Send, Loader2, Github, MapPin, Link as LinkIcon, Users, BookMarked, ArrowLeft, Sparkles, MessageCircle, Trash2, Download } from "lucide-react";
 import { BotIcon } from "@/components/icons/BotIcon";
 import { UserIcon } from "@/components/icons/UserIcon";
+import { CopySquaresIcon } from "@/components/icons/CopySquaresIcon";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { processProfileQuery } from "@/app/actions";
@@ -11,7 +12,8 @@ import { EnhancedMarkdown } from "./EnhancedMarkdown";
 import { countMessageTokens, formatTokenCount, getTokenWarningLevel, isRateLimitError, getRateLimitErrorMessage, MAX_TOKENS } from "@/lib/tokens";
 import { validateMermaidSyntax, sanitizeMermaidCode, getFallbackTemplate, generateMermaidFromJSON } from "@/lib/diagram-utils";
 import { saveProfileConversation, loadProfileConversation, clearProfileConversation } from "@/lib/storage";
-import { exportChatToMarkdownFile } from "@/lib/chat-export";
+import { exportChatToMarkdownFile, convertChartsToImages } from "@/lib/chat-export";
+import { renderMarkdownToHtml } from "@/lib/clipboard-utils";
 import { ConfirmDialog } from "./ConfirmDialog";
 import Link from "next/link";
 import mermaid from "mermaid";
@@ -165,6 +167,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [initialized, setInitialized] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
     // Load conversation on mount
     const toastShownRef = useRef(false);
@@ -300,6 +303,55 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
         toast.success("Chat history cleared");
     };
 
+    const handleCopyMessage = async (message: Message) => {
+        try {
+            // Convert mermaid blocks to inline SVG data URIs before clipboard copy.
+            const markdown = await convertChartsToImages(message.content, {
+                renderMermaid: (code, id) => mermaid.render(id, code).then((out) => out.svg),
+                convertMermaidJson: (json) => {
+                    try {
+                        return generateMermaidFromJSON(JSON.parse(json));
+                    } catch {
+                        return null;
+                    }
+                },
+            });
+            // Render markdown to static HTML for rich clipboard paste into docs.
+            const html = renderMarkdownToHtml(markdown);
+            if ("ClipboardItem" in window && navigator.clipboard.write) {
+                try {
+                    // Prefer HTML + plain text for best compatibility.
+                    const item = new ClipboardItem({
+                        "text/html": new Blob([html], { type: "text/html" }),
+                        "text/plain": new Blob([markdown], { type: "text/plain" }),
+                    });
+                    await navigator.clipboard.write([item]);
+                } catch {
+                    try {
+                        // Fallback to markdown + plain text if HTML write is blocked.
+                        const item = new ClipboardItem({
+                            "text/markdown": new Blob([markdown], { type: "text/markdown" }),
+                            "text/plain": new Blob([markdown], { type: "text/plain" }),
+                        });
+                        await navigator.clipboard.write([item]);
+                    } catch {
+                        // Final fallback for browsers that only allow writeText.
+                        await navigator.clipboard.writeText(markdown);
+                    }
+                }
+            } else {
+                await navigator.clipboard.writeText(markdown);
+            }
+            setCopiedMessageId(message.id);
+            setTimeout(() => {
+                setCopiedMessageId((current) => (current === message.id ? null : current));
+            }, 1500);
+            toast.success("Response copied");
+        } catch {
+            toast.error("Failed to copy response");
+        }
+    };
+
     const handleExportChat = async () => {
         const contextLabel = profile.login;
         await exportChatToMarkdownFile({
@@ -430,11 +482,25 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                 msg.role === "user" ? "items-end max-w-[80%]" : "items-start w-full min-w-0"
                             )}>
                                 <div className={cn(
-                                    "p-4 rounded-2xl overflow-hidden min-w-0",
+                                    "relative p-4 rounded-2xl overflow-hidden min-w-0",
                                     msg.role === "user"
                                         ? "bg-blue-600 text-white rounded-tr-none"
                                         : "bg-zinc-900 border border-white/10 rounded-tl-none"
                                 )}>
+                                    {msg.role === "model" && (
+                                        <button
+                                            onClick={() => handleCopyMessage(msg)}
+                                            className="absolute top-2 right-2 p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
+                                            title="Copy response"
+                                        >
+                                            <CopySquaresIcon
+                                                className={cn(
+                                                    "w-4 h-4",
+                                                    copiedMessageId === msg.id && "text-emerald-400"
+                                                )}
+                                            />
+                                        </button>
+                                    )}
                                     <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words overflow-hidden w-full min-w-0">
                                         <MessageContent content={msg.content} messageId={msg.id} />
                                     </div>
