@@ -9,9 +9,10 @@ interface ChatInputProps {
     placeholder?: string;
     disabled?: boolean;
     loading?: boolean;
+    allowEmptySubmit?: boolean;
 }
 
-export function ChatInput({ value, onChange, onSubmit, placeholder, disabled, loading }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSubmit, placeholder, disabled, loading, allowEmptySubmit }: ChatInputProps) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [isMobile, setIsMobile] = useState(false);
 
@@ -47,6 +48,7 @@ export function ChatInput({ value, onChange, onSubmit, placeholder, disabled, lo
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey && !isMobile) {
             e.preventDefault();
+            if (!value.trim() && !allowEmptySubmit) return;
             onSubmit(e);
         }
     };
@@ -73,7 +75,7 @@ export function ChatInput({ value, onChange, onSubmit, placeholder, disabled, lo
             />
             <button
                 type="submit"
-                disabled={!value.trim() || loading || disabled}
+                disabled={loading || disabled || (!value.trim() && !allowEmptySubmit)}
                 className="absolute right-2 bottom-2 p-2 text-zinc-400 hover:text-white disabled:opacity-50 transition-colors"
             >
                 <Send className="w-5 h-5" />

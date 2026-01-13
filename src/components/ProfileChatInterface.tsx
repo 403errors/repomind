@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Send, Loader2, Github, MapPin, Link as LinkIcon, Users, BookMarked, ArrowLeft, Sparkles, MessageCircle, Trash2, Download } from "lucide-react";
+import { Send, Loader2, Github, MapPin, Link as LinkIcon, Users, BookMarked, ArrowLeft, Sparkles, MessageCircle, Trash2, Download, X } from "lucide-react";
 import { BotIcon } from "@/components/icons/BotIcon";
 import { UserIcon } from "@/components/icons/UserIcon";
 import { CopySquaresIcon } from "@/components/icons/CopySquaresIcon";
@@ -165,9 +165,13 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
     const [loading, setLoading] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(true);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const chatScrollRef = useRef<HTMLDivElement>(null);
     const [initialized, setInitialized] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+    const [selectionText, setSelectionText] = useState("");
+    const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number } | null>(null);
+    const [referenceText, setReferenceText] = useState("");
 
     // Load conversation on mount
     const toastShownRef = useRef(false);
@@ -213,7 +217,8 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || loading) return;
+        const trimmedInput = input.trim();
+        if ((!trimmedInput && !referenceText) || loading) return;
 
         // Check token limit
         if (totalTokens >= MAX_TOKENS) {
@@ -226,14 +231,19 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
 
         setShowSuggestions(false);
 
+        const combinedInput = referenceText
+            ? `Reference:\n> ${referenceText.replace(/\n/g, "\n> ")}\n\n${trimmedInput || "Please continue."}`
+            : trimmedInput;
+
         const userMsg: Message = {
             id: Date.now().toString(),
             role: "user",
-            content: input,
+            content: combinedInput,
         };
 
         setMessages((prev) => [...prev, userMsg]);
         setInput("");
+        setReferenceText("");
         setLoading(true);
 
         try {
@@ -249,7 +259,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                 content: m.content
             }));
 
-            const result = await processProfileQuery(userMsg.content, {
+            const result = await processProfileQuery(combinedInput, {
                 username: profile.login,
                 profile: profile, // Pass full profile object
                 profileReadme,
@@ -288,6 +298,62 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleSelection = () => {
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed) {
+            setSelectionAnchor(null);
+            setSelectionText("");
+            return;
+        }
+
+        const anchorNode = selection.anchorNode;
+        const focusNode = selection.focusNode;
+        const getModelContainer = (node: Node | null) => {
+            const element = node instanceof Element ? node : node?.parentElement;
+            return element?.closest('[data-message-role="model"]') || null;
+        };
+
+        const startContainer = getModelContainer(anchorNode);
+        const endContainer = getModelContainer(focusNode);
+        if (!startContainer || startContainer !== endContainer) {
+            setSelectionAnchor(null);
+            setSelectionText("");
+            return;
+        }
+
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        const scrollContainer = chatScrollRef.current;
+        if (!scrollContainer) return;
+
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const x = rect.left - containerRect.left + rect.width / 2;
+        const y = rect.top - containerRect.top + scrollContainer.scrollTop;
+        const text = selection.toString().trim();
+
+        if (!text) {
+            setSelectionAnchor(null);
+            setSelectionText("");
+            return;
+        }
+
+        setSelectionAnchor({ x, y });
+        setSelectionText(text);
+    };
+
+    const handleAskFromSelection = () => {
+        if (!selectionText) return;
+        setReferenceText(selectionText);
+        setSelectionAnchor(null);
+        setSelectionText("");
+        setInput((current) => current);
+        chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" });
+    };
+
+    const clearReference = () => {
+        setReferenceText("");
     };
 
     const handleClearChat = () => {
@@ -452,7 +518,20 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
             </div>
 
             {/* Chat Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <div
+                ref={chatScrollRef}
+                onMouseUp={handleSelection}
+                className="flex-1 overflow-y-auto p-4 space-y-6 relative"
+            >
+                {selectionAnchor && (
+                    <button
+                        onClick={handleAskFromSelection}
+                        className="absolute z-20 -translate-y-full -mt-2 px-3 py-1 bg-white text-black text-xs rounded-full shadow-lg border border-black/10 transition-transform transition-shadow duration-150 ease-out hover:-translate-y-[110%] hover:scale-105 hover:shadow-xl"
+                        style={{ left: selectionAnchor.x, top: selectionAnchor.y }}
+                    >
+                        Ask RepoMindAI
+                    </button>
+                )}
                 <AnimatePresence initial={false}>
                     {messages.map((msg) => (
                         <motion.div
@@ -486,7 +565,9 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                     msg.role === "user"
                                         ? "bg-blue-600 text-white rounded-tr-none"
                                         : "bg-zinc-900 border border-white/10 rounded-tl-none"
-                                )}>
+                                )}
+                                data-message-role={msg.role}
+                                >
                                     {msg.role === "model" && (
                                         <button
                                             onClick={() => handleCopyMessage(msg)}
@@ -530,6 +611,21 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
 
             {/* Input Area */}
             <div className="p-4 border-t border-white/10 bg-black/50 backdrop-blur-lg space-y-3">
+                {referenceText && (
+                    <div className="max-w-3xl mx-auto">
+                        <div className="flex items-center gap-2 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-300">
+                            <span className="text-zinc-400">Ask RepoMindAI</span>
+                            <span className="truncate">{referenceText}</span>
+                            <button
+                                onClick={clearReference}
+                                className="ml-auto p-1 text-zinc-400 hover:text-white hover:bg-white/10 rounded"
+                                title="Clear reference"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    </div>
+                )}
                 {/* Suggestions */}
                 {showSuggestions && messages.length === 1 && (
                     <motion.div
@@ -563,6 +659,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                         placeholder={totalTokens >= MAX_TOKENS ? "Conversation limit reached. Please clear chat." : "Ask about their projects, skills, or contributions..."}
                         disabled={totalTokens >= MAX_TOKENS}
                         loading={loading}
+                        allowEmptySubmit={Boolean(referenceText)}
                     />
                 </form>
             </div>
