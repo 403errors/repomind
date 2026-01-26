@@ -3,7 +3,7 @@
 import { getProfile, getRepo, getRepoFileTree, getFileContent, getProfileReadme, getReposReadmes, getFileContentBatch, getUserRepos, getRepoReadme } from "@/lib/github";
 import { analyzeFileSelection, answerWithContext, answerWithContextStream } from "@/lib/gemini";
 import { scanFiles, getScanSummary, groupBySeverity, type SecurityFinding, type ScanSummary } from "@/lib/security-scanner";
-import { analyzeCodeWithGemini } from "@/lib/gemini-security";
+import { analyzeCodeWithGemini, generateSecurityPatch } from "@/lib/gemini-security";
 import { countTokens } from "@/lib/tokens";
 import type { StreamUpdate } from "@/lib/streaming-types";
 
@@ -328,16 +328,90 @@ export async function* processProfileQueryStream(
  * Scan repository for security vulnerabilities
  * Uses pattern-based detection + Gemini AI analysis
  */
+export interface SecurityScanOptions {
+    includePatterns?: string[];
+    excludePatterns?: string[];
+    maxFiles?: number;
+    depth?: 'quick' | 'deep';
+    enableAi?: boolean;
+    aiMaxFiles?: number;
+    filePaths?: string[];
+}
+
+function normalizePatterns(patterns?: string[]): string[] {
+    if (!patterns) return [];
+    return patterns.map(p => p.trim()).filter(Boolean);
+}
+
+function buildMatchers(patterns: string[]): RegExp[] {
+    return patterns.map(pattern => {
+        const escaped = pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*/g, '.*');
+        return new RegExp(escaped, 'i');
+    });
+}
+
+function matchesAny(path: string, matchers: RegExp[]): boolean {
+    return matchers.some((matcher) => matcher.test(path));
+}
+
+function scorePathRisk(path: string): number {
+    const keywords = [
+        'auth', 'login', 'oauth', 'jwt', 'token', 'session', 'admin',
+        'middleware', 'api', 'route', 'controller', 'db', 'sql',
+        'payment', 'billing', 'webhook', 'crypto', 'secret'
+    ];
+    const lower = path.toLowerCase();
+    return keywords.reduce((score, keyword) => (lower.includes(keyword) ? score + 1 : score), 0);
+}
+
+function extractSnippet(content: string, line?: number, radius: number = 3): string {
+    const lines = content.split('\n');
+    if (lines.length === 0) return '';
+    const index = line && line > 0 ? Math.min(line - 1, lines.length - 1) : 0;
+    const start = Math.max(0, index - radius);
+    const end = Math.min(lines.length, index + radius + 1);
+    return lines.slice(start, end).map((text, i) => `${start + i + 1}| ${text}`).join('\n');
+}
+
+function attachSnippets(findings: SecurityFinding[], files: Array<{ path: string; content: string }>): SecurityFinding[] {
+    const fileMap = new Map(files.map((f) => [f.path, f.content]));
+    return findings.map((finding) => {
+        const content = fileMap.get(finding.file);
+        if (!content) return finding;
+        const snippet = extractSnippet(content, finding.line);
+        return { ...finding, snippet };
+    });
+}
+
 export async function scanRepositoryVulnerabilities(
     owner: string,
     repo: string,
-    files: Array<{ path: string; sha?: string }>
-): Promise<{ findings: SecurityFinding[]; summary: ScanSummary; grouped: Record<string, SecurityFinding[]> }> {
+    files: Array<{ path: string; sha?: string }>,
+    options: SecurityScanOptions = {}
+): Promise<{ findings: SecurityFinding[]; summary: ScanSummary; grouped: Record<string, SecurityFinding[]>; meta: { depth: 'quick' | 'deep'; aiEnabled: boolean; maxFiles: number; aiFilesSelected: number; durationMs: number } }> {
     try {
+        const startedAt = Date.now();
+        const depth = options.depth || 'quick';
+        const maxFiles = options.maxFiles || (depth === 'deep' ? 60 : 20);
+        const aiEnabled = options.enableAi !== false;
+        const aiMaxFiles = options.aiMaxFiles || (depth === 'deep' ? 25 : 10);
+
+        const includeMatchers = buildMatchers(normalizePatterns(options.includePatterns));
+        const excludeMatchers = buildMatchers(normalizePatterns(options.excludePatterns));
+
         // Select relevant files for security scanning (focus on code files)
-        const codeFiles = files.filter(f =>
-            /\.(js|jsx|ts|tsx|py|java|php|rb|go|rs)$/i.test(f.path) || f.path === 'package.json'
-        ).slice(0, 20); // Limit to 20 files for performance
+        const selectedPaths = options.filePaths ? new Set(options.filePaths) : null;
+
+        const codeFiles = files.filter(f => {
+            const isCode = /\.(js|jsx|ts|tsx|py|java|php|rb|go|rs)$/i.test(f.path) || f.path === 'package.json';
+            if (!isCode) return false;
+            if (selectedPaths && !selectedPaths.has(f.path)) return false;
+            if (includeMatchers.length > 0 && !matchesAny(f.path, includeMatchers)) return false;
+            if (excludeMatchers.length > 0 && matchesAny(f.path, excludeMatchers)) return false;
+            return true;
+        }).slice(0, maxFiles);
 
         console.log('🔍 Security Scan: Found', codeFiles.length, 'code files to scan');
         console.log('📁 Files to scan:', codeFiles.map(f => f.path));
@@ -367,12 +441,36 @@ export async function scanRepositoryVulnerabilities(
 
         // AI-powered analysis (more thorough, uses Gemini)
         let aiFindings: SecurityFinding[] = [];
-        try {
-            aiFindings = await analyzeCodeWithGemini(filesWithContent);
-            console.log('🤖 AI scan found', aiFindings.length, 'issues');
-        } catch (aiError) {
-            console.warn('AI security analysis failed, continuing with pattern-based results only:', aiError);
-            // Continue with pattern findings only if AI fails
+        let aiFilesSelected = 0;
+        if (aiEnabled) {
+            try {
+                const filesByRisk = [...filesWithContent].sort((a, b) => scorePathRisk(b.path) - scorePathRisk(a.path));
+                const patternHitFiles = new Set(patternFindings.map(f => f.file));
+                const aiCandidates: Array<{ path: string; content: string }> = [];
+
+                for (const file of filesByRisk) {
+                    if (patternHitFiles.has(file.path)) {
+                        aiCandidates.push(file);
+                    }
+                }
+
+                for (const file of filesByRisk) {
+                    if (aiCandidates.length >= aiMaxFiles) break;
+                    if (!aiCandidates.find(f => f.path === file.path)) {
+                        aiCandidates.push(file);
+                    }
+                }
+
+                const aiFiles = aiCandidates.slice(0, aiMaxFiles);
+                aiFilesSelected = aiFiles.length;
+                if (aiFiles.length > 0) {
+                    aiFindings = await analyzeCodeWithGemini(aiFiles);
+                    console.log('🤖 AI scan found', aiFindings.length, 'issues');
+                }
+            } catch (aiError) {
+                console.warn('AI security analysis failed, continuing with pattern-based results only:', aiError);
+                // Continue with pattern findings only if AI fails
+            }
         }
 
         // Combine and deduplicate findings
@@ -384,6 +482,7 @@ export async function scanRepositoryVulnerabilities(
         const filteredFindings = allFindings.filter(f =>
             !f.confidence || f.confidence !== 'low'
         );
+        const findingsWithSnippets = attachSnippets(filteredFindings, filesWithContent);
         console.log('✨ After confidence filtering:', filteredFindings.length);
         console.log('📊 Final results:', filteredFindings);
 
@@ -401,9 +500,18 @@ export async function scanRepositoryVulnerabilities(
             afterConfidenceFilter: filteredFindings.length
         };
 
-        const grouped = groupBySeverity(filteredFindings);
+        const grouped = groupBySeverity(findingsWithSnippets);
 
-        return { findings: filteredFindings, summary, grouped };
+        const durationMs = Date.now() - startedAt;
+        const meta = {
+            depth,
+            aiEnabled,
+            maxFiles,
+            aiFilesSelected,
+            durationMs
+        };
+
+        return { findings: findingsWithSnippets, summary, grouped, meta };
     } catch (error: any) {
         console.error('Vulnerability scanning error:', error);
         // Provide more detailed error message
@@ -411,6 +519,30 @@ export async function scanRepositoryVulnerabilities(
         throw new Error(`Failed to scan repository for vulnerabilities: ${errorMessage}`);
     }
 }
+
+export async function generateSecurityPatchForFinding(
+    owner: string,
+    repo: string,
+    finding: SecurityFinding
+): Promise<{ patch: string; explanation: string }> {
+    try {
+        const content = await getFileContent(owner, repo, finding.file);
+        const snippet = typeof content === 'string' ? extractSnippet(content, finding.line) : '';
+        const result = await generateSecurityPatch({
+            filePath: finding.file,
+            fileContent: typeof content === 'string' ? content : '',
+            line: finding.line,
+            description: finding.description,
+            recommendation: finding.recommendation,
+            snippet
+        });
+        return result;
+    } catch (error: any) {
+        console.error('Generate security patch failed:', error);
+        return { patch: '', explanation: 'Failed to generate patch.' };
+    }
+}
+
 
 /**
  * Deduplicate findings based on file, line, and title

@@ -10,6 +10,7 @@ export interface SecurityFinding {
     description: string;
     file: string;
     line?: number;
+    snippet?: string;
     recommendation: string;
     cwe?: string;
     cvss?: number;

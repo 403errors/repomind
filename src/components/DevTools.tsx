@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Wrench, Search, Shield, FileText, TestTube, Zap, X, Loader2, ChevronRight, HelpCircle } from "lucide-react";
+import { Wrench, Search, Shield, FileText, TestTube, Zap, X, Loader2, HelpCircle, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { searchRepositoryCode, analyzeFileQuality, generateArtifact } from "@/app/actions";
+import { searchRepositoryCode, analyzeFileQuality, generateArtifact, scanRepositoryVulnerabilities, generateSecurityPatchForFinding } from "@/app/actions";
+import type { SecurityFinding } from "@/lib/security-scanner";
+import { FileTreePicker } from "@/components/FileTreePicker";
 
 interface DevToolsProps {
     repoContext: { owner: string; repo: string; fileTree: any[] };
@@ -12,7 +14,7 @@ interface DevToolsProps {
 
 export function DevTools({ repoContext, onSendMessage }: DevToolsProps) {
     const [isOpen, setIsOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState<'search' | 'quality' | 'generate' | 'help'>('search');
+    const [activeTab, setActiveTab] = useState<'search' | 'quality' | 'security' | 'generate' | 'help'>('search');
     const [loadingOperation, setLoadingOperation] = useState<string | null>(null);
 
     // Search State
@@ -21,6 +23,19 @@ export function DevTools({ repoContext, onSendMessage }: DevToolsProps) {
 
     // Quality/Gen State
     const [selectedFile, setSelectedFile] = useState("");
+
+    // Security State
+    const [securityDepth, setSecurityDepth] = useState<'quick' | 'deep'>('quick');
+    const [securityEnableAi, setSecurityEnableAi] = useState(true);
+    const [showFilePicker, setShowFilePicker] = useState(false);
+    const [securitySelectedFiles, setSecuritySelectedFiles] = useState<string[]>([]);
+    const [securityReport, setSecurityReport] = useState<{
+        findings: SecurityFinding[];
+        summary: any;
+        meta: any;
+    } | null>(null);
+    const [patches, setPatches] = useState<Record<string, { patch: string; explanation: string }>>({});
+    const [patchLoadingId, setPatchLoadingId] = useState<string | null>(null);
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -138,6 +153,86 @@ export function DevTools({ repoContext, onSendMessage }: DevToolsProps) {
         }
     };
 
+    const handleSecurityScan = async () => {
+        setLoadingOperation('security');
+        setSecurityReport(null);
+        setPatches({});
+        try {
+            const filesToScan = repoContext.fileTree.map((f: any) => ({ path: f.path, sha: f.sha }));
+
+            const { findings, summary, meta } = await scanRepositoryVulnerabilities(
+                repoContext.owner,
+                repoContext.repo,
+                filesToScan,
+                {
+                    depth: securityDepth,
+                    enableAi: securityEnableAi,
+                    filePaths: securitySelectedFiles.length > 0 ? securitySelectedFiles : undefined
+                }
+            );
+
+            const filesScanned = summary.debug?.filesSuccessfullyFetched || 0;
+            let content = `### 🛡️ Security Report\n\n`;
+            content += `**Depth**: ${meta.depth}  \n`;
+            content += `**AI Analysis**: ${meta.aiEnabled ? `Enabled (${meta.aiFilesSelected} files)` : 'Disabled'}  \n`;
+            content += `**Files Scanned**: ${filesScanned}  \n`;
+            content += `**Duration**: ${(meta.durationMs / 1000).toFixed(1)}s\n\n`;
+
+            if (summary.total === 0) {
+                content += `✅ No security issues found in the scanned files.\n\n`;
+                content += `This scan checked for:\n- Secrets in source code\n- Common injection patterns\n- Unsafe crypto usage\n- Dependency risks\n\n`;
+            } else {
+                content += `**Findings**: ${summary.total}  \n`;
+                if (summary.critical > 0) content += `🔴 Critical: ${summary.critical}  \n`;
+                if (summary.high > 0) content += `🟠 High: ${summary.high}  \n`;
+                if (summary.medium > 0) content += `🟡 Medium: ${summary.medium}  \n`;
+                if (summary.low > 0) content += `🔵 Low: ${summary.low}  \n`;
+                if (summary.info > 0) content += `⚪ Info: ${summary.info}  \n`;
+                content += `\n`;
+
+                content += `View full findings in Dev Tools → Security.\n`;
+            }
+
+            onSendMessage("model", content);
+            setSecurityReport({ findings, summary, meta });
+            setShowFilePicker(false);
+        } catch (error: any) {
+            if (error?.message) {
+                toast.error("Security scan failed", { description: error.message });
+            } else {
+                toast.error("Security scan failed");
+            }
+        } finally {
+            setLoadingOperation(null);
+        }
+    };
+
+    const handleGeneratePatch = async (finding: SecurityFinding) => {
+        const id = `${finding.file}:${finding.line || 0}:${finding.title}`;
+        setPatchLoadingId(id);
+        try {
+            const result = await generateSecurityPatchForFinding(
+                repoContext.owner,
+                repoContext.repo,
+                finding
+            );
+            setPatches((prev) => ({ ...prev, [id]: result }));
+        } catch (error) {
+            toast.error("Patch generation failed");
+        } finally {
+            setPatchLoadingId(null);
+        }
+    };
+
+    const handleCopy = async (text: string, successMessage: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            toast.success(successMessage);
+        } catch {
+            toast.error("Copy failed");
+        }
+    };
+
     const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
@@ -199,6 +294,13 @@ export function DevTools({ repoContext, onSendMessage }: DevToolsProps) {
                                         className={`flex-1 p-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${activeTab === 'generate' ? 'text-purple-400 border-b-2 border-purple-400 bg-purple-400/5' : 'text-zinc-400 hover:text-zinc-200'} ${loadingOperation ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
                                         <Zap className="w-4 h-4" /> Generate
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('security')}
+                                        disabled={!!loadingOperation}
+                                        className={`flex-1 p-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${activeTab === 'security' ? 'text-purple-400 border-b-2 border-purple-400 bg-purple-400/5' : 'text-zinc-400 hover:text-zinc-200'} ${loadingOperation ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        <AlertTriangle className="w-4 h-4" /> Security
                                     </button>
                                     <button
                                         onClick={() => setActiveTab('help')}
@@ -339,6 +441,145 @@ export function DevTools({ repoContext, onSendMessage }: DevToolsProps) {
                                         </div>
                                     )}
 
+                                    {activeTab === 'security' && (
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-medium text-zinc-400 mb-1">Scan Depth</label>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setSecurityDepth('quick')}
+                                                        disabled={!!loadingOperation}
+                                                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${securityDepth === 'quick' ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-zinc-800 border-white/10 text-zinc-400 hover:bg-zinc-700'} ${loadingOperation ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    >
+                                                        QUICK
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setSecurityDepth('deep')}
+                                                        disabled={!!loadingOperation}
+                                                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${securityDepth === 'deep' ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-zinc-800 border-white/10 text-zinc-400 hover:bg-zinc-700'} ${loadingOperation ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    >
+                                                        DEEP
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <div className="text-sm text-zinc-400">File Scope</div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowFilePicker((prev) => !prev)}
+                                                    disabled={!!loadingOperation}
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${showFilePicker ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-zinc-800 border-white/10 text-zinc-400 hover:bg-zinc-700'} ${loadingOperation ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {showFilePicker ? 'HIDE' : 'SELECT FILES'}
+                                                </button>
+                                            </div>
+                                            {showFilePicker && (
+                                                <FileTreePicker
+                                                    files={repoContext.fileTree.filter((f: any) => /\.(js|jsx|ts|tsx|py|java|php|rb|go|rs|json)$/.test(f.path))}
+                                                    selected={securitySelectedFiles}
+                                                    onChange={setSecuritySelectedFiles}
+                                                />
+                                            )}
+                                            {!showFilePicker && (
+                                                <div className="text-xs text-zinc-500">
+                                                    {securitySelectedFiles.length > 0
+                                                        ? `${securitySelectedFiles.length} files selected`
+                                                        : 'All code files will be scanned.'}
+                                                </div>
+                                            )}
+                                            <div className="flex items-center justify-between">
+                                                <div className="text-sm text-zinc-400">AI Analysis</div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSecurityEnableAi((prev) => !prev)}
+                                                    disabled={!!loadingOperation}
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${securityEnableAi ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-zinc-800 border-white/10 text-zinc-400 hover:bg-zinc-700'} ${loadingOperation ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {securityEnableAi ? 'ENABLED' : 'DISABLED'}
+                                                </button>
+                                            </div>
+                                            <button
+                                                onClick={handleSecurityScan}
+                                                disabled={!!loadingOperation}
+                                                className="w-full py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                                            >
+                                                {loadingOperation === 'security' ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                                                Run Security Scan
+                                            </button>
+
+                                            {securityReport && (
+                                                <div className="pt-4 border-t border-white/10 space-y-4">
+                                                    <div>
+                                                        <div className="text-sm font-semibold text-white">Report Summary</div>
+                                                        <div className="text-xs text-zinc-400 mt-1">
+                                                            {securityReport.summary.total} issues • {securityReport.meta.depth} scan • {securityReport.meta.aiEnabled ? `AI on (${securityReport.meta.aiFilesSelected} files)` : 'AI off'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                                                        {securityReport.findings.length === 0 && (
+                                                            <div className="text-xs text-zinc-400">No issues found.</div>
+                                                        )}
+                                                        {securityReport.findings.map((finding) => {
+                                                            const id = `${finding.file}:${finding.line || 0}:${finding.title}`;
+                                                            const patch = patches[id];
+                                                            const isLoadingPatch = patchLoadingId === id;
+                                                            return (
+                                                                <div key={id} className="bg-zinc-950/60 border border-white/10 rounded-lg p-3 space-y-2">
+                                                                    <div className="flex items-start justify-between gap-2">
+                                                                        <div>
+                                                                            <div className="text-sm text-white font-medium">{finding.title}</div>
+                                                                            <div className="text-xs text-zinc-400">
+                                                                                {finding.severity.toUpperCase()} • {finding.file}{finding.line ? `:${finding.line}` : ''}
+                                                                            </div>
+                                                                        </div>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleGeneratePatch(finding)}
+                                                                            disabled={isLoadingPatch || !!loadingOperation}
+                                                                            className="px-2 py-1 rounded bg-zinc-800 border border-white/10 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+                                                                        >
+                                                                            {isLoadingPatch ? 'Generating...' : 'Generate Patch'}
+                                                                        </button>
+                                                                    </div>
+                                                                    <div className="text-xs text-zinc-300">{finding.description}</div>
+                                                                    {finding.snippet && (
+                                                                        <pre className="text-[11px] bg-black/40 border border-white/10 rounded p-2 overflow-x-auto text-zinc-300">
+                                                                            {finding.snippet}
+                                                                        </pre>
+                                                                    )}
+                                                                    <div className="text-xs text-zinc-400">Fix: {finding.recommendation}</div>
+                                                                    {patch && (
+                                                                        <div className="space-y-2">
+                                                                            <div className="text-xs text-zinc-400">{patch.explanation}</div>
+                                                                            {patch.patch && (
+                                                                                <div className="space-y-2">
+                                                                                    <div className="flex flex-wrap gap-2">
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => handleCopy(patch.patch, "Patch copied")}
+                                                                                            className="px-2 py-1 rounded bg-zinc-800 border border-white/10 text-[11px] text-zinc-200 hover:bg-zinc-700"
+                                                                                        >
+                                                                                            Copy Patch
+                                                                                        </button>
+                                                                                    </div>
+                                                                                    <pre className="text-[11px] bg-black/50 border border-white/10 rounded p-2 overflow-x-auto text-zinc-300">
+                                                                                        {patch.patch}
+                                                                                    </pre>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     {activeTab === 'help' && (
                                         <div className="space-y-6 text-sm text-zinc-300">
                                             <div className="space-y-2">
@@ -377,6 +618,18 @@ export function DevTools({ repoContext, onSendMessage }: DevToolsProps) {
                                                     <li>Select a file.</li>
                                                     <li>Click <strong>Generate Unit Tests</strong>.</li>
                                                     <li>Copy the generated Jest code block.</li>
+                                                </ol>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <h3 className="font-semibold text-white flex items-center gap-2">
+                                                    <AlertTriangle className="w-4 h-4 text-red-400" />
+                                                    How to Run a Security Scan
+                                                </h3>
+                                                <ol className="list-decimal list-inside space-y-1 text-zinc-400 ml-1">
+                                                    <li>Click <Wrench className="w-3 h-3 inline mx-1" /> <strong>Security</strong>.</li>
+                                                    <li>Pick depth and optional include/exclude patterns.</li>
+                                                    <li>Click <strong>Run Security Scan</strong>.</li>
+                                                    <li>Review the report in chat.</li>
                                                 </ol>
                                             </div>
                                         </div>

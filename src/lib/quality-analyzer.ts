@@ -123,10 +123,8 @@ export async function analyzeCodeQuality(
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-
-        if (jsonMatch) {
-            const aiReport = JSON.parse(jsonMatch[0]);
+        const aiReport = parseAiJson(text);
+        if (aiReport) {
             return {
                 metrics,
                 score: aiReport.score,
@@ -151,4 +149,26 @@ export async function analyzeCodeQuality(
             suggestion: 'Consider breaking down complex functions'
         }] : []
     };
+}
+
+function parseAiJson(text: string): any | null {
+    const stripped = text
+        .replace(/```json/g, '```')
+        .replace(/```/g, '')
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'");
+
+    const firstBrace = stripped.indexOf('{');
+    const lastBrace = stripped.lastIndexOf('}');
+    if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+
+    const raw = stripped.slice(firstBrace, lastBrace + 1);
+    const cleaned = raw.replace(/,\s*([}\]])/g, '$1');
+
+    try {
+        return JSON.parse(cleaned);
+    } catch (error) {
+        console.error('AI JSON parse failed:', error);
+        return null;
+    }
 }
