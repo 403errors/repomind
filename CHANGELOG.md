@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.3.5] - 2026-01-26
+### Added
+- **Security Report UX**: New DevTools Security tab with scan depth controls and AI toggle.
+- **File Scope Picker**: Tree-based file selection to scope security scans precisely.
+- **Per-Finding Patch Copy**: Generate and copy suggested patches for individual findings.
+- **Snippet Context**: Findings now include surrounding code context for faster review.
+
+### Improved
+- **AI Quality Parsing**: More resilient JSON parsing to prevent malformed AI responses from crashing analysis.
+
 ## [v1.3.4] - 2026-01-25
 ### Added
 - **Chat Export**: Export chats to Markdown with Mermaid rendering.
