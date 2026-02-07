@@ -63,11 +63,11 @@ export interface GitHubRepo {
 
 export interface FileNode {
   path: string;
-  mode: string;
+  mode?: string;
   type: "blob" | "tree";
   sha: string;
   size?: number;
-  url: string;
+  url?: string;
 }
 
 export async function getProfile(username: string): Promise<GitHubProfile> {
@@ -186,10 +186,19 @@ export async function getRepoFileTree(owner: string, repo: string, branch: strin
     return true;
   });
 
-  // Cache the filtered tree
-  await cacheFileTree(owner, repo, sha, filteredTree);
+  // Create a minimal tree for caching/usage to save space
+  // We strip 'url' (large string) and 'mode' (unused)
+  const minimalTree = filteredTree.map(node => ({
+    path: node.path,
+    type: node.type,
+    sha: node.sha,
+    size: node.size
+  }));
 
-  return { tree: filteredTree, hiddenFiles };
+  // Cache the minimal tree
+  await cacheFileTree(owner, repo, sha, minimalTree);
+
+  return { tree: minimalTree, hiddenFiles };
 }
 
 /**

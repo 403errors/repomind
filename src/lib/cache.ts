@@ -1,4 +1,5 @@
 import { kv } from "@vercel/kv";
+import { gzipSync, gunzipSync } from "node:zlib";
 
 /**
  * Vercel KV caching utilities for GitHub API responses
@@ -22,6 +23,7 @@ async function safeKvOperation<T>(operation: () => Promise<T>): Promise<T | null
 
 /**
  * Cache file content with SHA-based key for auto-invalidation
+ * Compresses content and skips files > 2MB
  */
 export async function cacheFile(
     owner: string,
@@ -30,13 +32,31 @@ export async function cacheFile(
     sha: string,
     content: string
 ): Promise<void> {
+    // Skip caching if content is too large (> 2MB)
+    // to avoid hitting Vercel KV request/value size limits
+    if (content.length > 2 * 1024 * 1024) {
+        return;
+    }
+
     const key = `file:${owner}/${repo}:${path}:${sha}`;
-    await safeKvOperation(() => kv.setex(key, TTL_FILE, content));
+
+    // Compress content
+    try {
+        const compressed = gzipSync(Buffer.from(content));
+        // Store as base64 with prefix to identify compressed content
+        const value = `gz:${compressed.toString('base64')}`;
+        await safeKvOperation(() => kv.setex(key, TTL_FILE, value));
+    } catch (e) {
+        console.warn("Failed to compress/cache file:", path);
+        // Fallback: don't cache or cache uncompressed if small enough?
+        // Let's just skip caching on error to be safe
+    }
 }
 
 /**
  * Get cached file content by SHA
  * Returns null if not found or KV unavailable
+ * Handles decompression automatically
  */
 export async function getCachedFile(
     owner: string,
@@ -45,7 +65,22 @@ export async function getCachedFile(
     sha: string
 ): Promise<string | null> {
     const key = `file:${owner}/${repo}:${path}:${sha}`;
-    return await safeKvOperation(() => kv.get<string>(key));
+    const cached = await safeKvOperation(() => kv.get<string>(key));
+
+    if (!cached) return null;
+
+    // Check for compression prefix
+    if (cached.startsWith('gz:')) {
+        try {
+            const buffer = Buffer.from(cached.slice(3), 'base64');
+            return gunzipSync(buffer).toString();
+        } catch (e) {
+            console.error("Failed to decompress cached file:", path);
+            return null;
+        }
+    }
+
+    return cached;
 }
 
 /**
