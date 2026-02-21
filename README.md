@@ -14,7 +14,7 @@
 
 **[Try RepoMind now!](https://repomind-ai.vercel.app)** 
 
-**[Ask RepoMind about RepoMind :3](https://repomind-ai.vercel.app/repo/403errors/repomind)**
+**[Preview RepoMind on RepoMind 🐥](https://repomind-ai.vercel.app/repo/403errors/repomind)**
 
 </div>
 
