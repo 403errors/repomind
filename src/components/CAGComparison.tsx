@@ -16,10 +16,10 @@ export default function CAGComparison() {
                     className="text-center mb-16"
                 >
                     <h2 className="text-3xl md:text-5xl font-bold mb-6 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
-                        CAG vs. Traditional RAG
+                        Agentic CAG vs. Traditional RAG
                     </h2>
                     <p className="text-zinc-400 text-lg max-w-2xl mx-auto">
-                        RepoMind uses <strong>Context Augmented Generation (CAG)</strong>. We don't just retrieve fragments; we understand the whole picture.
+                        RepoMind uses <strong>Agentic Context Augmented Generation (Agentic CAG)</strong>. We don't just retrieve fragments; we understand the whole picture.
                     </p>
                 </motion.div>
 
@@ -99,7 +99,7 @@ export default function CAGComparison() {
                         </div>
                     </div>
 
-                    {/* RepoMind CAG Card */}
+                    {/* RepoMind Agentic CAG Card */}
                     <div className="bg-gradient-to-b from-blue-900/20 to-purple-900/20 border border-blue-500/30 rounded-2xl p-8 backdrop-blur-sm relative overflow-hidden hover:border-blue-500/50 transition-colors cursor-default flex flex-col shadow-[0_0_30px_rgba(59,130,246,0.1)]">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-[50px] rounded-full" />
 
@@ -107,10 +107,10 @@ export default function CAGComparison() {
                             <div className="p-3 bg-blue-500/20 rounded-lg">
                                 <Brain className="w-6 h-6 text-blue-400" />
                             </div>
-                            <h3 className="text-2xl font-semibold text-white">RepoMind (CAG)</h3>
+                            <h3 className="text-2xl font-semibold text-white">RepoMind (Agentic CAG)</h3>
                         </div>
 
-                        {/* CAG Animation Canvas */}
+                        {/* Agentic CAG Animation Canvas */}
                         <div className="w-full h-48 bg-black/40 rounded-xl mb-8 relative overflow-hidden flex items-center justify-center border border-blue-500/20 shadow-inner z-10">
                             {/* Glowing central node */}
                             <motion.div

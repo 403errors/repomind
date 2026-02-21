@@ -23,7 +23,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
             title: `${data.name} by ${data.owner.login} - RepoMind Architecture & Analysis`,
             description: data.description
                 ? `Analyze the architecture, code quality, and security of ${data.full_name}. ${data.description}`
-                : `Deep AI analysis and visualization of ${data.full_name} using RepoMind CAG Engine.`,
+                : `Deep AI analysis and visualization of ${data.full_name} using RepoMind Agentic CAG Engine.`,
             openGraph: {
                 title: `${data.full_name} - RepoMind Analysis`,
                 description: data.description || `AI analysis for ${data.full_name}`,
@@ -156,8 +156,9 @@ export default async function RepoPage({ params }: Props) {
                         This repository is indexed by RepoMind. By analyzing <strong>{owner}/{repo}</strong> in our AI interface,
                         you can instantly generate complete architecture diagrams, visualize control flows, and perform automated security audits across the entire codebase.
                     </p>
-                    <p className="text-zinc-400 italic text-sm">
-                        Our Context-Aware Generation (CAG) engine loads full source files into context, avoiding the fragmentation of traditional RAG systems.
+                    <p className="text-zinc-400 mb-6">
+                        Our Agentic Context Augmented Generation (Agentic CAG) engine loads full source files into context, avoiding the fragmentation of traditional RAG systems.
+                        Ask questions about the architecture, dependencies, or specific features to see it in action.
                     </p>
                     <div className="mt-8">
                         <Link

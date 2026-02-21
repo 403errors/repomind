@@ -29,10 +29,10 @@
 - **Noise Filtering**: Automatically ignores `node_modules`, lockfiles, and build artifacts to focus on source code.
 - **Multi-File Understanding**: Traces dependencies and imports to understand how different parts of the codebase interact.
 
-### 🧠 CAG vs RAG: The Architecture
-RepoMind uses **Context Augmented Generation (CAG)**, not traditional RAG. We don't chop your code into fragmented vectors; we load full, relevant files into the model's long context window for superior understanding.
+### 🧠 Agentic CAG vs RAG: The Architecture
+RepoMind uses **Agentic Context Augmented Generation (Agentic CAG)**, not traditional RAG. We don't chop your code into fragmented vectors; we load full, relevant files into the model's long context window for superior understanding.
 
-| Feature | Traditional RAG | 🧠 RepoMind (CAG) |
+| Feature | Traditional RAG | 🧠 RepoMind (Agentic CAG) |
 | :--- | :--- | :--- |
 | **Data Unit** | Small Chunks (Vectors) | **Full Files** |
 | **Retrieval** | Similarity Search (Vector DB) | **AI Agent Selection** + **Smart Caching** |
