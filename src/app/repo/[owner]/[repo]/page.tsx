@@ -61,11 +61,11 @@ export default async function RepoPage({ params }: Props) {
     // Fallback metadata if partial failure
     if (!repoData) notFound();
 
-    // Basic markdown sanitizer for the README summary to ensure safe, clean rendering
-    // We take the first 1500 characters of the README to serve as an SEO-rich overview
-    const shortReadme = readmeContent
-        ? readmeContent.substring(0, 1500) + (readmeContent.length > 1500 ? '...\n\n*[View full documentation in repository]*' : '')
-        : '';
+    // Use the full README safely. We will truncate it visually using CSS
+    // to avoid breaking the Markdown AST (which causes broken tags like **text...).
+    // We also use a regex trick to push any badges directly inline with the H1 onto the next line.
+    const fullReadme = (readmeContent || '')
+        .replace(/^(#\s+.*?)(?:&middot;|<br>|\s)*(\[!\[|!\[)/m, '$1\n\n$2');
 
     return (
         <main className="min-h-screen bg-black text-white p-6 md:p-12 overflow-x-hidden relative">
@@ -174,13 +174,22 @@ export default async function RepoPage({ params }: Props) {
                     <CopyBadge owner={owner} repo={repo} />
                 </div>
 
-                {shortReadme && (
+                {fullReadme && (
                     <section className="bg-zinc-900/30 border border-zinc-800/50 rounded-xl p-8 mb-12">
-                        <h2 className="text-xl font-medium text-zinc-300 mb-6 uppercase tracking-wider text-sm border-b border-zinc-800 pb-2">Repository Summary (README)</h2>
-                        <div className="prose prose-invert prose-blue max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {shortReadme}
-                            </ReactMarkdown>
+                        <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-6">
+                            <h2 className="text-xl font-medium text-zinc-300 uppercase tracking-wider text-sm">Repository Summary (README)</h2>
+                            <span className="text-xs text-zinc-500 bg-zinc-800/50 px-2 py-1 rounded">Preview</span>
+                        </div>
+
+                        <div className="relative max-h-[400px] overflow-hidden">
+                            <div className="prose prose-invert prose-zinc max-w-none prose-img:inline prose-img:m-0 prose-img:mr-1 prose-img:align-middle prose-p:leading-relaxed prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-headings:font-semibold prose-h1:text-3xl prose-h2:text-2xl">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {fullReadme}
+                                </ReactMarkdown>
+                            </div>
+
+                            {/* Visual Fade Out */}
+                            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-[rgb(12,12,14)] via-[rgb(12,12,14,0.8)] to-transparent pointer-events-none" />
                         </div>
                     </section>
                 )}

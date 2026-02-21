@@ -26,7 +26,6 @@ import { generateSecurityPatch } from "@/lib/gemini-security";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import type { GitHubProfile } from "@/lib/github";
 import type { SecurityFinding, ScanSummary } from "@/lib/security-scanner";
-import type { QualityReport } from "@/lib/quality-analyzer";
 import type { SearchResult } from "@/lib/search-engine";
 import { getCachedRepoQueryAnswer, cacheRepoQueryAnswer } from "@/lib/cache";
 
@@ -43,10 +42,7 @@ import {
     type SecurityScanDeps,
 } from "@/lib/services/security-service";
 import {
-    analyzeFileQuality as _analyzeFileQuality,
     searchRepositoryCode as _searchRepositoryCode,
-    generateFileArtifact,
-    type ArtifactType,
 } from "@/lib/services/artifact-service";
 import {
     toProfileContext,
@@ -403,14 +399,6 @@ export async function generateSecurityPatchForFinding(
 
 // ─── Public Actions — Code Analysis & Artifact Generation ───────────────────
 
-export async function analyzeFileQuality(
-    owner: string,
-    repo: string,
-    path: string
-): Promise<QualityReport | null> {
-    return _analyzeFileQuality(owner, repo, path);
-}
-
 export async function searchRepositoryCode(
     owner: string,
     repo: string,
@@ -419,13 +407,4 @@ export async function searchRepositoryCode(
     type: "text" | "regex" | "ast" = "text"
 ): Promise<SearchResult[]> {
     return _searchRepositoryCode(owner, repo, files, query, type);
-}
-
-export async function generateArtifact(
-    owner: string,
-    repo: string,
-    path: string,
-    type: "doc" | "test" | "refactor"
-): Promise<string> {
-    return generateFileArtifact(owner, repo, path, type as ArtifactType);
 }

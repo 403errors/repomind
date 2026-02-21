@@ -8,16 +8,7 @@
  */
 import { getFileContent } from "@/lib/github";
 import { countTokens } from "@/lib/tokens";
-import { analyzeCodeQuality, type QualityReport } from "@/lib/quality-analyzer";
 import { searchFiles, type SearchResult, type SearchOptions } from "@/lib/search-engine";
-import {
-    generateDocumentation,
-    generateTests,
-    suggestRefactoring,
-} from "@/lib/generator";
-
-/** Max token budget for single-file analysis/generation tasks */
-const ARTIFACT_TOKEN_LIMIT = 5_000;
 
 // ─── Injectable Deps ──────────────────────────────────────────────────────────
 
@@ -26,29 +17,6 @@ export interface ArtifactServiceDeps {
 }
 
 // ─── Service Functions ────────────────────────────────────────────────────────
-
-/**
- * Analyse the code quality of a single file.
- * Returns null on failure — callers should treat null as "unavailable".
- */
-export async function analyzeFileQuality(
-    owner: string,
-    repo: string,
-    path: string,
-    deps: ArtifactServiceDeps = {}
-): Promise<QualityReport | null> {
-    const fetchContent = deps.fetchContent ?? getFileContent;
-    try {
-        const content = await fetchContent(owner, repo, path);
-        if (countTokens(content) > ARTIFACT_TOKEN_LIMIT) {
-            throw new Error(`File too large for quality analysis (exceeds ${ARTIFACT_TOKEN_LIMIT} tokens)`);
-        }
-        return await analyzeCodeQuality(content, path);
-    } catch (error) {
-        console.error("Quality analysis failed:", error);
-        return null;
-    }
-}
 
 /**
  * Search file contents across a repository.
@@ -84,39 +52,4 @@ export async function searchRepositoryCode(
     }
 }
 
-export type ArtifactType = "doc" | "test" | "refactor";
 
-/**
- * Generate a code artifact (JSDoc, unit tests, or refactor suggestions)
- * for a single file.
- */
-export async function generateFileArtifact(
-    owner: string,
-    repo: string,
-    path: string,
-    type: ArtifactType,
-    deps: ArtifactServiceDeps = {}
-): Promise<string> {
-    const fetchContent = deps.fetchContent ?? getFileContent;
-    try {
-        const content = await fetchContent(owner, repo, path);
-        if (countTokens(content) > ARTIFACT_TOKEN_LIMIT) {
-            return `Error: File too large for generation (exceeds ${ARTIFACT_TOKEN_LIMIT} tokens)`;
-        }
-
-        switch (type) {
-            case "doc":
-                return await generateDocumentation(content);
-            case "test":
-                return await generateTests(content);
-            case "refactor":
-                return await suggestRefactoring(content);
-            default: {
-                const _exhaustive: never = type;
-                return `Invalid artifact type: ${_exhaustive}`;
-            }
-        }
-    } catch {
-        return "Failed to generate artifact";
-    }
-}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Send, Loader2, FileCode, ChevronRight, ArrowLeft, Sparkles, Github, Menu, MessageCircle, Shield, AlertTriangle, Download, CheckCircle, Info, Trash2, X } from "lucide-react";
+import { Send, Loader2, FileCode, ChevronRight, ArrowLeft, Sparkles, Github, Menu, MessageCircle, Shield, AlertTriangle, Download, CheckCircle, Info, Trash2, X, GitFork } from "lucide-react";
 import { BotIcon } from "@/components/icons/BotIcon";
 import { UserIcon } from "@/components/icons/UserIcon";
 import { CopySquaresIcon } from "@/components/icons/CopySquaresIcon";
@@ -15,7 +15,7 @@ import { validateMermaidSyntax, sanitizeMermaidCode, getFallbackTemplate, genera
 import { saveConversation, loadConversation, clearConversation } from "@/lib/storage";
 import { exportChatToMarkdownFile, convertChartsToImages } from "@/lib/chat-export";
 import { renderMarkdownToHtml } from "@/lib/clipboard-utils";
-import { DevTools } from "./DevTools";
+import { SearchModal } from "./SearchModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { CodeBlock } from "./CodeBlock";
 import { ChatInput } from "./ChatInput";
@@ -170,6 +170,7 @@ interface Message {
     relevantFiles?: string[];
     tokenCount?: number;
     vulnerabilities?: Vulnerability[];
+    isQuickSecurityScan?: boolean;
 }
 
 interface ChatInterfaceProps {
@@ -204,6 +205,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
     const [ownerProfile, setOwnerProfile] = useState<any>(null);
     const [showBadgeModal, setShowBadgeModal] = useState(false);
+    const [showSecurityModal, setShowSecurityModal] = useState(false);
 
     const handleSubmitRef = useRef<any>(null);
 
@@ -315,12 +317,15 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         setLoading(true);
 
         // Handle special commands
-        if (trimmedInput.toLowerCase().includes("find security vulnerabilities") || trimmedInput.toLowerCase().includes("scan for vulnerabilities")) {
-            console.log('🎯 Security scan triggered!');
+        const isQuickScan = trimmedInput.toLowerCase().includes("find security vulnerabilities") || trimmedInput.toLowerCase().includes("scan for vulnerabilities");
+        const isDeepScan = trimmedInput.toLowerCase().includes("run deep security scan") || trimmedInput.toLowerCase().includes("deep scan");
+
+        if (isQuickScan || isDeepScan) {
+            console.log(`🎯 Security scan triggered! (Type: ${isDeepScan ? 'Deep' : 'Quick'})`);
             setScanning(true);
             try {
                 // Step 1: Start scan
-                setStreamingStatus({ message: "Preparing security scan...", progress: 10 });
+                setStreamingStatus({ message: `Preparing ${isDeepScan ? 'deep ' : ''}security scan...`, progress: 10 });
 
                 const filesToScan = repoContext.fileTree.map((f: any) => ({ path: f.path, sha: f.sha }));
                 console.log('📋 Total files in tree:', filesToScan.length);
@@ -330,16 +335,17 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                     /\.(js|jsx|ts|tsx|py|java|php|rb|go|rs)$/i.test(f.path) || f.path === 'package.json'
                 ).length;
                 console.log('💻 Code files found:', codeFileCount);
-                setStreamingStatus({ message: `Scanning ${Math.min(codeFileCount, 20)} code files...`, progress: 30 });
+                setStreamingStatus({ message: `Scanning ${Math.min(codeFileCount, isDeepScan ? 60 : 20)} code files...`, progress: 30 });
 
                 // Step 3: Run scan
-                setStreamingStatus({ message: "Running pattern-based analysis...", progress: 50 });
+                setStreamingStatus({ message: `${isDeepScan ? 'Deep' : 'Pattern-based'} analysis in progress...`, progress: 50 });
                 console.log('🚀 Calling scanRepositoryVulnerabilities...');
 
                 const { findings, summary } = await scanRepositoryVulnerabilities(
                     repoContext.owner,
                     repoContext.repo,
-                    filesToScan
+                    filesToScan,
+                    { depth: isDeepScan ? 'deep' : 'quick' }
                 );
 
                 console.log('✅ Scan complete! Findings:', findings.length, 'Summary:', summary);
@@ -386,7 +392,8 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                     id: (Date.now() + 1).toString(),
                     role: "model",
                     content: content,
-                    vulnerabilities: findings as any
+                    vulnerabilities: findings as any,
+                    isQuickSecurityScan: isQuickScan && !isDeepScan
                 };
                 setMessages((prev) => [...prev, modelMsg]);
                 setStreamingStatus(null); // Clear streaming status
@@ -626,84 +633,141 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     };
 
     return (
-        <div className="flex flex-col h-full bg-black text-white">
+        <div className="flex flex-col h-full bg-black text-white relative">
             {/* Repo Header */}
-            <div className="border-b border-white/10 p-4 bg-zinc-900/50 backdrop-blur-sm">
-                <div className="flex items-center gap-4 max-w-3xl mx-auto">
-                    {onToggleSidebar && (
-                        <button
-                            onClick={onToggleSidebar}
-                            className="md:hidden p-2 -ml-2 hover:bg-white/10 rounded-lg transition-colors"
-                        >
-                            <Menu className="w-5 h-5 text-zinc-400" />
-                        </button>
-                    )}
-                    <Link
-                        href="/"
-                        className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-                        title="Back to home"
-                    >
-                        <ArrowLeft className="w-5 h-5 text-zinc-400 hover:text-white" />
-                    </Link>
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <Github className="w-5 h-5 text-zinc-400 shrink-0" />
-                        <h1 className="text-lg font-semibold text-zinc-100 truncate">{repoContext.owner}/{repoContext.repo}</h1>
+            <div className="sticky top-0 z-20 border-b border-white/5 bg-zinc-950/80 backdrop-blur-xl shrink-0 shadow-lg">
+                <div className="flex items-center justify-between px-4 h-16 w-full gap-4">
+                    {/* Left Section: Breadcrumbs & Context */}
+                    <div className="flex items-center gap-3 min-w-0 shrink">
+                        {onToggleSidebar && (
+                            <button
+                                onClick={onToggleSidebar}
+                                className="md:hidden p-2 -ml-2 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white"
+                            >
+                                <Menu className="w-5 h-5" />
+                            </button>
+                        )}
                         <Link
-                            href={`/repo/${repoContext.owner}/${repoContext.repo}`}
-                            className="hidden md:flex items-center text-xs text-purple-400 hover:text-purple-300 ml-2 border border-purple-500/30 bg-purple-500/10 px-2 py-1 rounded-md transition-colors whitespace-nowrap"
+                            href="/"
+                            className="hidden md:flex p-2 -ml-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+                            title="Back to home"
                         >
-                            View Profile
+                            <ArrowLeft className="w-5 h-5" />
                         </Link>
+
+                        <div className="flex items-center gap-2 min-w-0">
+                            <div className="hidden sm:flex w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 items-center justify-center border border-white/10 shadow-inner shrink-0">
+                                <Github className="w-4 h-4 text-zinc-200" />
+                            </div>
+                            <div className="flex items-center min-w-0 gap-2">
+                                <h1 className="text-base font-medium text-zinc-200 truncate flex items-center gap-1">
+                                    <span className="text-zinc-500 font-normal">{repoContext.owner}</span>
+                                    <span className="text-zinc-600 font-light">/</span>
+                                    <span className="text-white font-semibold tracking-tight">{repoContext.repo}</span>
+                                </h1>
+                                <Link
+                                    href={`/repo/${repoContext.owner}/${repoContext.repo}`}
+                                    className="hidden lg:flex items-center text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white transition-all border border-white/5"
+                                >
+                                    Profile
+                                </Link>
+                            </div>
+                        </div>
                     </div>
 
-                    <button
-                        onClick={() => setShowBadgeModal(true)}
-                        className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm"
-                    >
-                        <CopySquaresIcon className="w-3.5 h-3.5" />
-                        Get Badge
-                    </button>
+                    {/* Right Section: Actions & Metrics */}
+                    <div className="flex items-center gap-3 shrink-0 overflow-x-auto no-scrollbar pr-2">
+                        {/* Quick Actions Group */}
+                        <div className="hidden xl:flex items-center p-1 bg-zinc-900 border border-white/5 rounded-xl shadow-sm">
+                            <button
+                                onClick={() => setShowBadgeModal(true)}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-indigo-100 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-all border border-transparent hover:border-indigo-500/30"
+                            >
+                                <CopySquaresIcon className="w-3.5 h-3.5 text-indigo-400" />
+                                Badge
+                            </button>
+                            <div className="w-px h-4 bg-white/10 mx-1" />
+                            <button
+                                onClick={() => handleSubmit(undefined, "Explain the architecture")}
+                                disabled={loading || scanning}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-blue-100 bg-blue-500/10 hover:bg-blue-500/20 rounded-lg transition-all border border-transparent hover:border-blue-500/30 disabled:opacity-50"
+                            >
+                                <GitFork className="w-3.5 h-3.5 text-blue-400" />
+                                Architecture
+                            </button>
+                            <div className="w-px h-4 bg-white/10 mx-1" />
+                            <button
+                                onClick={() => setShowSecurityModal(true)}
+                                disabled={loading || scanning}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-red-100 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-all border border-transparent hover:border-red-500/30 disabled:opacity-50"
+                            >
+                                <Shield className="w-3.5 h-3.5 text-red-400" />
+                                Security
+                            </button>
+                        </div>
 
-                    <div className={cn(
-                        "ml-auto hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                        tokenWarningLevel === 'danger' && "bg-red-500/10 text-red-400 border border-red-500/20",
-                        tokenWarningLevel === 'warning' && "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20",
-                        tokenWarningLevel === 'safe' && "bg-zinc-800 text-zinc-400 border border-white/10"
-                    )}>
-                        <MessageCircle className="w-3.5 h-3.5" />
-                        <span>{formatTokenCount(totalTokens)} / {formatTokenCount(MAX_TOKENS)} tokens</span>
+                        {/* Sub-actions on smaller desktop */}
+                        <div className="hidden lg:flex xl:hidden items-center p-1 bg-zinc-900 border border-white/5 rounded-xl shadow-sm gap-1">
+                            <button
+                                onClick={() => setShowBadgeModal(true)}
+                                className="p-1.5 text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-all hover:text-indigo-300"
+                                title="Get Badge"
+                            >
+                                <CopySquaresIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => handleSubmit(undefined, "Explain the architecture")}
+                                disabled={loading || scanning}
+                                className="p-1.5 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all hover:text-blue-300 disabled:opacity-50"
+                                title="Architecture Scan"
+                            >
+                                <GitFork className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => setShowSecurityModal(true)}
+                                disabled={loading || scanning}
+                                className="p-1.5 text-red-400 hover:bg-red-500/10 rounded-lg transition-all hover:text-red-300 disabled:opacity-50"
+                                title="Security Check"
+                            >
+                                <Shield className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        {/* Tokens */}
+                        <div className={cn(
+                            "hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border shadow-inner shrink-0 transition-colors",
+                            tokenWarningLevel === 'danger' ? "bg-red-500/5 text-red-400 border-red-500/20" :
+                                tokenWarningLevel === 'warning' ? "bg-yellow-500/5 text-yellow-400 border-yellow-500/20" :
+                                    "bg-zinc-900 text-zinc-400 border-white/5"
+                        )}>
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span>{formatTokenCount(totalTokens)} / <span className="opacity-50">{formatTokenCount(MAX_TOKENS)}</span></span>
+                        </div>
+
+                        {/* Utility Bar */}
+                        <div className="flex items-center gap-0.5 pl-3 border-l border-white/10 shrink-0">
+                            <SearchModal
+                                repoContext={repoContext}
+                                onSendMessage={(role, content) => {
+                                    setMessages(prev => [...prev, { id: Date.now().toString(), role, content }]);
+                                }}
+                            />
+                            <button
+                                onClick={handleExportChat}
+                                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors group relative"
+                                title="Export Chat"
+                            >
+                                <Download className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" />
+                            </button>
+                            <button
+                                onClick={() => setShowClearConfirm(true)}
+                                className="p-2 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors group relative"
+                                title="Clear Chat"
+                            >
+                                <Trash2 className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                            </button>
+                        </div>
                     </div>
-
-                    <div className="hidden md:block">
-                        <DevTools
-                            repoContext={repoContext}
-                            onSendMessage={(role, content) => {
-                                setMessages(prev => [...prev, {
-                                    id: Date.now().toString(),
-                                    role,
-                                    content
-                                }]);
-                            }}
-                        />
-                    </div>
-
-                    <button
-                        onClick={handleExportChat}
-                        className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
-                        title="Export Chat"
-                    >
-                        <Download className="w-5 h-5" />
-                    </button>
-
-                    <button
-                        onClick={() => setShowClearConfirm(true)}
-                        className="p-2 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors"
-                        title="Clear Chat"
-                    >
-                        <Trash2 className="w-5 h-5" />
-                    </button>
-
-
                 </div>
             </div>
 
@@ -773,6 +837,20 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                                     <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words overflow-hidden w-full min-w-0">
                                         <MessageContent content={msg.content} messageId={msg.id} />
                                     </div>
+                                    {msg.isQuickSecurityScan && (
+                                        <div className="mt-4 pt-4 border-t border-white/10">
+                                            <p className="text-sm text-zinc-400 mb-3">Want a more thorough analysis?</p>
+                                            <button
+                                                onClick={() => handleSubmit(undefined, "Run deep security scan")}
+                                                disabled={loading || scanning}
+                                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-zinc-800 hover:bg-zinc-700 border border-white/10 rounded-xl transition-all disabled:opacity-50 group"
+                                            >
+                                                <Shield className="w-4 h-4 text-red-400 group-hover:scale-110 transition-transform" />
+                                                Run Deep Scan
+                                            </button>
+                                        </div>
+                                    )}
+
                                 </div>
 
                                 {msg.relevantFiles && msg.relevantFiles.length > 0 && (
@@ -905,6 +983,63 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                         <div className="p-6">
                             <h2 className="text-xl font-bold text-white mb-6 pr-8">Share your Analysis</h2>
                             <CopyBadge owner={repoContext.owner} repo={repoContext.repo} />
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showSecurityModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-md overflow-hidden flex flex-col relative shadow-2xl">
+                        <button
+                            onClick={() => setShowSecurityModal(false)}
+                            className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors z-10"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                        <div className="p-6">
+                            <h2 className="text-xl font-bold text-white mb-2 pr-8 flex items-center gap-2">
+                                <Shield className="w-6 h-6 text-red-400" />
+                                Security Check
+                            </h2>
+                            <p className="text-zinc-400 text-sm mb-6">Choose the depth of your security analysis.</p>
+
+                            <div className="space-y-4">
+                                <button
+                                    onClick={() => {
+                                        setShowSecurityModal(false);
+                                        handleSubmit(undefined, "Find security vulnerabilities");
+                                    }}
+                                    className="w-full bg-zinc-800 hover:bg-zinc-700 border border-white/5 rounded-xl p-4 text-left transition-all group"
+                                >
+                                    <div className="flex items-center justify-between mb-1">
+                                        <h3 className="text-white font-medium group-hover:text-red-300 transition-colors">Quick Scan</h3>
+                                        <span className="text-xs font-mono bg-zinc-950 px-2 py-0.5 rounded text-zinc-400">~ 5 sec</span>
+                                    </div>
+                                    <p className="text-xs text-zinc-400 leading-relaxed">
+                                        Analyzes up to 20 files. Automatically flags potential secrets and common injection points. Fast and low-latency.
+                                    </p>
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        setShowSecurityModal(false);
+                                        handleSubmit(undefined, "Run deep security scan");
+                                    }}
+                                    className="w-full bg-zinc-800 hover:bg-zinc-700 border border-red-500/20 rounded-xl p-4 text-left transition-all group"
+                                >
+                                    <div className="flex items-center justify-between mb-1">
+                                        <h3 className="text-white font-medium flex items-center gap-2 group-hover:text-red-300 transition-colors">
+                                            Deep Scan
+                                            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                                        </h3>
+                                        <span className="text-xs font-mono bg-zinc-950 px-2 py-0.5 rounded text-zinc-400">~ 20 sec</span>
+                                    </div>
+                                    <p className="text-xs text-zinc-400 leading-relaxed">
+                                        Analyzes up to 60 files. Utilizes advanced AI pipeline to follow code paths and find complex vulnerabilities.
+                                    </p>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
