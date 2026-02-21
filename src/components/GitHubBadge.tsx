@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+
 import { Github, Star } from "lucide-react";
 import { fetchRepoDetails } from "@/app/actions";
 
@@ -25,13 +25,10 @@ export function GitHubBadge() {
     }, []);
 
     return (
-        <motion.a
+        <a
             href="https://github.com/403errors/repomind"
             target="_blank"
             rel="noopener noreferrer"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.6, delay: 0.3 }}
             className="fixed top-6 right-6 z-[999] hover:scale-105 transition-transform cursor-pointer block"
         >
             <div className="flex items-center gap-2 p-2 md:px-4 md:py-2 bg-gradient-to-r from-zinc-800/80 to-zinc-900/80 border border-zinc-700/50 rounded-full backdrop-blur-md hover:border-zinc-500/50 transition-colors text-white shadow-lg">
@@ -44,6 +41,6 @@ export function GitHubBadge() {
                     </div>
                 )}
             </div>
-        </motion.a>
+        </a>
     );
 }

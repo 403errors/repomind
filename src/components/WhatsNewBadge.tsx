@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
+
 import { Sparkles } from "lucide-react";
 import { WhatsNewModal } from "./WhatsNewModal";
 
@@ -10,10 +10,7 @@ export function WhatsNewBadge() {
 
     return (
         <>
-            <motion.button
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.6, delay: 0.3 }}
+            <button
                 onClick={() => setIsModalOpen(true)}
                 className="fixed top-6 left-6 z-[999] hover:scale-105 transition-transform"
             >
@@ -24,7 +21,7 @@ export function WhatsNewBadge() {
                     </span>
                     <span className="text-sm font-medium text-purple-200">What's New</span>
                 </div>
-            </motion.button>
+            </button>
 
             <WhatsNewModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
         </>

@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+
 
 export function CAGBadge() {
     const scrollToCAG = () => {
@@ -11,10 +11,7 @@ export function CAGBadge() {
     };
 
     return (
-        <motion.button
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
+        <button
             onClick={scrollToCAG}
             className="mb-12 group hover:scale-105 transition-transform"
         >
@@ -23,6 +20,6 @@ export function CAGBadge() {
                     Powered by <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">CAG Architecture</span>
                 </span>
             </div>
-        </motion.button>
+        </button>
     );
 }
