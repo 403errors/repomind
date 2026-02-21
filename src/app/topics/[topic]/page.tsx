@@ -68,7 +68,7 @@ export default async function TopicPage({ params }: Props) {
                 </Link>
 
                 <header className="mb-16 border-b border-zinc-800 pb-8 text-center md:text-left">
-                    <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 capitalize">
+                    <h1 className="text-3xl md:text-5xl font-bold tracking-tight mb-4 capitalize">
                         Best Open Source <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">{displayTopic}</span> Libraries
                     </h1>
                     <p className="text-xl text-zinc-300 max-w-3xl">
@@ -77,17 +77,17 @@ export default async function TopicPage({ params }: Props) {
                     </p>
                 </header>
 
-                <div className="grid gap-6">
+                <div className="grid grid-cols-1 gap-6">
                     {repos.map((repo: any, index: number) => (
                         <Link
                             href={`/repo/${repo.owner}/${repo.repo}`}
                             key={`${repo.owner}/${repo.repo}`}
-                            className="bg-zinc-900/50 border border-zinc-800 hover:border-purple-500/50 rounded-xl p-6 transition-all group hover:bg-zinc-900/80"
+                            className="block w-full bg-zinc-900/50 border border-zinc-800 hover:border-purple-500/50 rounded-xl p-6 transition-all group hover:bg-zinc-900/80"
                         >
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                <div>
-                                    <h2 className="text-2xl font-bold mb-2 flex items-center">
-                                        <span className="text-zinc-500 mr-3 text-lg">#{index + 1}</span>
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
+                                <div className="min-w-0 flex-1">
+                                    <h2 className="text-xl md:text-2xl font-bold mb-2 flex flex-wrap items-center break-all">
+                                        <span className="text-zinc-500 mr-3 text-lg shrink-0">#{index + 1}</span>
                                         <span className="text-zinc-300">{repo.owner}/</span>
                                         <span className="text-white group-hover:text-purple-400 transition-colors">{repo.repo}</span>
                                     </h2>

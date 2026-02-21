@@ -4,6 +4,40 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useInView } from "framer-motion";
 import { Terminal, Code2, BrainCircuit, CheckCircle2, ShieldAlert, GitMerge, ChevronLeft, ChevronRight } from "lucide-react";
 
+function TypewriterText({ text, step }: { text: string; step: number }) {
+    const [displayedText, setDisplayedText] = useState("");
+
+    useEffect(() => {
+        if (step === 0) {
+            setDisplayedText("");
+            return;
+        }
+        if (step >= 2) {
+            setDisplayedText(text);
+            return;
+        }
+
+        let i = 0;
+        const speed = 1500 / text.length;
+        const interval = setInterval(() => {
+            setDisplayedText(text.substring(0, i + 1));
+            i++;
+            if (i >= text.length) clearInterval(interval);
+        }, speed);
+
+        return () => clearInterval(interval);
+    }, [text, step]);
+
+    return (
+        <span className="whitespace-pre-wrap break-words">
+            {displayedText}
+            {(step === 0 || step === 1) && (
+                <span className="inline-block w-[2px] h-[1em] bg-blue-500 animate-pulse align-middle ml-[2px]" />
+            )}
+        </span>
+    );
+}
+
 // Define the different scenarios we want to loop through
 const scenarios = [
     {
@@ -121,7 +155,7 @@ export default function InteractiveDemo() {
                             <CheckCircle2 className="w-3 h-3" />
                             <span>Recommended Pattern</span>
                         </div>
-                        <code className="text-xs text-zinc-400">
+                        <code className="text-xs text-zinc-400 block overflow-hidden break-words whitespace-pre-wrap bg-black/50 p-2 rounded mt-2">
                             <span className="text-pink-400">const</span> AuthContext = createContext(<span className="text-orange-400">null</span>);<br />
                             <span className="text-pink-400">export function</span> <span className="text-blue-300">useAuth</span>() {'{'} <br />
                             &nbsp;&nbsp;<span className="text-pink-400">return</span> useContext(AuthContext);<br />
@@ -174,9 +208,9 @@ export default function InteractiveDemo() {
                             <span>1 High Severity Issue Found</span>
                         </div>
                         <p className="text-zinc-300 mb-2 text-xs">A potentially unparameterized raw SQL query was detected in the studio API.</p>
-                        <code className="text-xs text-zinc-400 block p-2 bg-black/50 rounded">
-                            <span className="line-through text-red-400 px-1 bg-red-500/10">{"const res = await db.query(`SELECT * FROM users WHERE id = ${id}`);"}</span><br />
-                            <span className="text-green-400 px-1 bg-green-500/10 mb-1 inline-block mt-1">{"+ const res = await db.query(\"SELECT * FROM users WHERE id = $1\", [id]);"}</span>
+                        <code className="text-xs text-zinc-400 block p-2 bg-black/50 rounded overflow-hidden break-words whitespace-pre-wrap">
+                            <span className="line-through text-red-400 px-1 bg-red-500/10 inline-block">{"const res = await db.query(`SELECT * FROM users WHERE id = ${id}`);"}</span><br />
+                            <span className="text-green-400 px-1 bg-green-500/10 inline-block mt-1">{"+ const res = await db.query(\"SELECT * FROM users WHERE id = $1\", [id]);"}</span>
                         </code>
                     </motion.div>
                 </div>
@@ -249,33 +283,15 @@ export default function InteractiveDemo() {
                 </div>
 
                 {/* Content Area */}
-                <div className="p-6 md:p-8 space-y-6 h-[400px] md:h-[450px] overflow-hidden flex flex-col">
+                <div className="p-6 md:p-8 space-y-6 min-h-[450px] overflow-hidden flex flex-col">
                     {/* User Query Bubble */}
                     <div className="flex gap-4 items-start w-full">
                         <div className="p-2 bg-blue-500/10 rounded-lg shrink-0 border border-blue-500/20 overflow-hidden">
                             <img src="/user-avatar.png" alt="User" className="w-6 h-6 rounded-sm object-cover" />
                         </div>
                         <div className="bg-zinc-900/60 border border-zinc-800 p-4 rounded-xl rounded-tl-none w-full text-zinc-300 font-mono text-sm shadow-sm relative">
-                            <div className="relative inline-flex items-center">
-                                {/* Invisible text forces the inline-flex to be exactly the width of the full sentence */}
-                                <span className="invisible whitespace-nowrap overflow-hidden">{currentScenario.query}</span>
-
-                                {/* The animated typing text */}
-                                <motion.span
-                                    key={currentScenario.id}
-                                    initial={{ width: "0%" }}
-                                    animate={{ width: step >= 1 ? "100%" : "0%" }}
-                                    transition={{ duration: 1.5, ease: "linear" }}
-                                    className="absolute left-0 top-0 overflow-hidden whitespace-nowrap border-r-2 border-transparent"
-                                    style={{
-                                        borderRightColor: step === 1 ? "#3b82f6" : "transparent"
-                                    }}
-                                >
-                                    {step >= 1 ? currentScenario.query : ""}
-                                </motion.span>
-
-                                {/* The blinking cursor when idle */}
-                                {step === 0 && <span className="absolute left-0 h-[1.2rem] animate-pulse opacity-50 border-r-2 border-blue-500 w-[2px]" />}
+                            <div className="relative w-full">
+                                <TypewriterText text={currentScenario.query} step={step} />
                             </div>
                         </div>
                     </div>
