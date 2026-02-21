@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Github, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { fetchGitHubData } from "./actions";
 import FeatureTiles from "@/components/FeatureTiles";
 import { WhatsNewBadge } from "@/components/WhatsNewBadge";
@@ -34,12 +34,9 @@ export default function Home() {
       if (result.error) {
         setError(result.error);
       } else {
-        // Store data in localStorage or pass via query params/state manager
-        // For simplicity, we'll use query params for the ID and fetch again or use a context
-        // Let's just navigate to /chat with the query
         router.push(`/chat?q=${encodeURIComponent(input)}`);
       }
-    } catch (err) {
+    } catch {
       setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);

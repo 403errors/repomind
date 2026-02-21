@@ -1,6 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+import { getGenAI, DEFAULT_MODEL } from "./ai-client";
 
 /**
  * Generate documentation for code
@@ -10,7 +8,7 @@ export async function generateDocumentation(
     type: 'jsdoc' | 'readme' | 'comments' = 'jsdoc'
 ): Promise<string> {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+        const model = getGenAI().getGenerativeModel({ model: DEFAULT_MODEL });
 
         const prompt = `
       Generate ${type.toUpperCase()} documentation for the following code.
@@ -36,7 +34,7 @@ export async function generateTests(
     framework: 'jest' | 'vitest' = 'jest'
 ): Promise<string> {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+        const model = getGenAI().getGenerativeModel({ model: DEFAULT_MODEL });
 
         const prompt = `
       Generate ${framework} unit tests for the following code.
@@ -60,7 +58,7 @@ export async function generateTests(
  */
 export async function suggestRefactoring(code: string): Promise<string> {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+        const model = getGenAI().getGenerativeModel({ model: DEFAULT_MODEL });
 
         const prompt = `
       Suggest a refactoring for this code to improve readability and performance.

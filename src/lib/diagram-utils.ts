@@ -76,12 +76,8 @@ graph TB
 };
 
 /**
- * Validate Mermaid syntax
- * Simplified to avoid false positives with quoted content
- */
-/**
  * Enhanced Mermaid validation
- * Checks for specific syntax issues beyond just diagram type
+ * Checks for specific syntax issues beyond just diagram type.
  */
 export function validateMermaidSyntax(code: string): { valid: boolean; error?: string } {
     try {

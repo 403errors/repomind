@@ -19,6 +19,10 @@ if (!githubToken) {
 const octokit = new Octokit({
   auth: githubToken,
   request: {
+    // NOTE: cache:"no-store" disables HTTP caching for all GitHub API calls.
+    // This is intentional — it prevents stale data in edge/serverless deployments
+    // where the module reloads frequently. Caching is handled at the application
+    // layer via KV (see cache.ts) using SHA-based keys for automatic invalidation.
     fetch: (url: string, options: any) => {
       return fetch(url, {
         ...options,
@@ -29,7 +33,11 @@ const octokit = new Octokit({
   },
 });
 
-// In-memory cache for the session
+// In-memory caches for the current process lifetime.
+// NOTE: In Vercel serverless functions these Maps are effectively useless as a
+// persistent cache — each cold start initializes fresh Maps. They provide a
+// minor speedup within a single warm invocation (e.g., sequential calls in one
+// request). The real caching layer is Vercel KV (see cache.ts).
 const profileCache = new Map<string, GitHubProfile>();
 const repoCache = new Map<string, GitHubRepo>();
 
@@ -39,6 +47,8 @@ export interface GitHubProfile {
   html_url: string;
   name: string | null;
   bio: string | null;
+  location: string | null;
+  blog: string | null;
   public_repos: number;
   followers: number;
   following: number;
@@ -69,6 +79,49 @@ export interface FileNode {
   size?: number;
   url?: string;
 }
+
+/**
+ * GraphQL query for enhanced repository details (languages, recent commits).
+ * Defined at module level rather than inside the calling function
+ * to keep constants and queries out of the function body.
+ */
+const REPO_DETAILS_QUERY = `
+  query RepoDetails($owner: String!, $name: String!) {
+    repository(owner: $owner, name: $name) {
+      languages(first: 10, orderBy: {field: SIZE, direction: DESC}) {
+        totalSize
+        edges {
+          size
+          node {
+            name
+            color
+          }
+        }
+      }
+      defaultBranchRef {
+        target {
+          ... on Commit {
+            history(first: 20) {
+              edges {
+                node {
+                  message
+                  committedDate
+                  author {
+                    name
+                    avatarUrl
+                    user {
+                      login
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
 
 export async function getProfile(username: string): Promise<GitHubProfile> {
   // Check memory cache first
@@ -200,47 +253,6 @@ export async function getRepoFileTree(owner: string, repo: string, branch: strin
 
   return { tree: minimalTree, hiddenFiles };
 }
-
-/**
- * GraphQL query for repository details
- */
-const REPO_DETAILS_QUERY = `
-  query RepoDetails($owner: String!, $name: String!) {
-    repository(owner: $owner, name: $name) {
-      languages(first: 10, orderBy: {field: SIZE, direction: DESC}) {
-        totalSize
-        edges {
-          size
-          node {
-            name
-            color
-          }
-        }
-      }
-      defaultBranchRef {
-        target {
-          ... on Commit {
-            history(first: 20) {
-              edges {
-                node {
-                  message
-                  committedDate
-                  author {
-                    name
-                    avatarUrl
-                    user {
-                      login
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-`;
 
 /**
  * Fetch enhanced repository details using GraphQL

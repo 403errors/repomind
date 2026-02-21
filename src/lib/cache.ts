@@ -178,12 +178,17 @@ export async function getCachedQuerySelection(
 
 /**
  * Clear all cache for a repository (useful for manual invalidation)
+ * TODO: Full implementation requires Redis SCAN support from the KV provider.
+ * Currently not implemented — do not call this expecting real cache eviction.
  */
 export async function clearRepoCache(owner: string, repo: string): Promise<void> {
-    const pattern = `*:${owner}/${repo}:*`;
-    // Note: Pattern-based deletion requires Redis SCAN, not all KV providers support it
-    // This is a future enhancement placeholder
-    console.log(`Cache clear requested for ${pattern} (not fully implemented)`);
+    // This is intentionally unimplemented.
+    // Pattern-based deletion (SCAN `*:owner/repo:*`) requires a Redis connection
+    // that supports SCAN, which @vercel/kv does not expose directly.
+    throw new Error(
+        `clearRepoCache is not implemented. Cache for ${owner}/${repo} was NOT cleared. ` +
+        "Use the Vercel KV dashboard or implement a key-tracking strategy."
+    );
 }
 
 /**

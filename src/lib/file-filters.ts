@@ -7,14 +7,10 @@ const BINARY_EXTENSIONS = ['.exe', '.dll', '.so', '.dylib', '.bin', '.pdf', '.zi
 const FONT_EXTENSIONS = ['.ttf', '.otf', '.woff', '.woff2', '.eot'];
 const LARGE_DATA_EXTENSIONS = ['.csv', '.json', '.xml', '.sql', '.db', '.sqlite'];
 
-export interface FileNode {
-    path: string;
-    mode: string;
-    type: 'blob' | 'tree';
-    sha: string;
-    size?: number;
-    url: string;
-}
+// FileNode is the canonical domain type for git tree nodes — defined once in github.ts
+import type { FileNode } from "@/lib/github";
+export type { FileNode };
+
 
 /**
  * Check if a file is an image

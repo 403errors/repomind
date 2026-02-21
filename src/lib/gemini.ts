@@ -1,49 +1,9 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-// Helper to get a fresh model instance
-function getModel(modelName: string = "gemini-3-flash-preview") {
-  const apiKey = process.env.GEMINI_API_KEY || "";
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY environment variable is not set");
-  }
-  const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({
-    model: modelName,
-    tools: [{ googleSearch: {} } as any],
-  });
-}
-
-export async function generateChatResponse(
-  history: { role: "user" | "model"; parts: string }[],
-  context?: string
-) {
-  const chat = getModel().startChat({
-    history: history.map((h) => ({
-      role: h.role,
-      parts: [{ text: h.parts }],
-    })),
-  });
-
-  let prompt = "";
-  if (context) {
-    prompt += `CONTEXT:\n${context}\n\n`;
-  }
-
-  // We assume the last message is the new user prompt, but startChat manages history.
-  // Actually, startChat takes the *past* history. The new message is sent via sendMessage.
-  // So we shouldn't pass the *entire* history to startChat if we want to send a new message.
-  // But for a stateless API route, we usually pass the whole history.
-  // Let's adjust: The caller should pass history *excluding* the current new message, 
-  // or we just use generateContent if we want to manage it manually.
-  // For simplicity in this "Context-Aware" flow, we might want to just use generateContent with a constructed prompt
-  // or use startChat with the full history.
-
-  // Let's assume the caller handles the "last message" logic.
-  // If we are just generating a response to the *latest* input which is NOT in history yet:
-  return chat;
-}
-
+import { getGenAI, DEFAULT_MODEL, FAST_MODEL } from "./ai-client";
+import { buildRepoMindPrompt, formatHistoryText } from "./prompt-builder";
 import { cacheQuerySelection, getCachedQuerySelection } from "./cache";
+import type { GitHubProfile } from "./github";
+
+// ─── File Selection ────────────────────────────────────────────────────────────
 
 export async function analyzeFileSelection(
   question: string,
@@ -52,24 +12,18 @@ export async function analyzeFileSelection(
   repo?: string
 ): Promise<string[]> {
   // 1. SMART BYPASS: Check if the user explicitly mentioned a file
-  // We look for exact matches of filenames in the query
-  const mentionedFiles = fileTree.filter(path => {
-    const filename = path.split('/').pop();
+  const mentionedFiles = fileTree.filter((path) => {
+    const filename = path.split("/").pop();
     if (!filename) return false;
-    // Check if the filename appears in the question (case-insensitive)
-    // We use word boundary or whitespace check to avoid partial matches (e.g. "auth" matching "author")
-    // But simple includes is faster and usually fine for filenames
     return question.toLowerCase().includes(filename.toLowerCase());
   });
 
-  // If we found mentioned files, return them immediately (plus package.json/README if available)
   if (mentionedFiles.length > 0) {
     console.log("⚡ Smart Bypass: Found mentioned files:", mentionedFiles);
-
-    // Always add context files if they exist in the tree but weren't mentioned
     const commonFiles = ["package.json", "README.md", "tsconfig.json"];
-    const additionalContext = fileTree.filter(f => commonFiles.includes(f) && !mentionedFiles.includes(f));
-
+    const additionalContext = fileTree.filter(
+      (f) => commonFiles.includes(f) && !mentionedFiles.includes(f)
+    );
     return [...mentionedFiles, ...additionalContext].slice(0, 10);
   }
 
@@ -82,8 +36,7 @@ export async function analyzeFileSelection(
     }
   }
 
-  // 3. AI SELECTION (Fallback)
-  // Optimized prompt for speed (shorter, less tokens)
+  // 3. AI SELECTION (Fallback) — uses the lightweight model to keep costs low
   const prompt = `
     Select relevant files for this query from the list below.
     Query: "${question}"
@@ -102,14 +55,14 @@ export async function analyzeFileSelection(
     `;
 
   try {
-    const result = await getModel("gemini-2.5-flash-lite").generateContent(prompt);
+    const result = await getGenAI()
+      .getGenerativeModel({ model: FAST_MODEL })
+      .generateContent(prompt);
     const response = result.response.text();
     const cleanResponse = response.replace(/```json/g, "").replace(/```/g, "").trim();
     const parsed = JSON.parse(cleanResponse);
+    const selectedFiles: string[] = parsed.files || [];
 
-    const selectedFiles = parsed.files || [];
-
-    // Cache the result if we have owner/repo
     if (owner && repo && selectedFiles.length > 0) {
       await cacheQuerySelection(owner, repo, question, selectedFiles);
     }
@@ -117,380 +70,51 @@ export async function analyzeFileSelection(
     return selectedFiles;
   } catch (e) {
     console.error("Failed to parse file selection", e);
-    // Fallback to safe defaults
-    return fileTree.filter(f => f === "README.md" || f === "package.json");
+    return fileTree.filter((f) => f === "README.md" || f === "package.json");
   }
 }
+
+// ─── Core Answer Functions ─────────────────────────────────────────────────────
 
 export async function answerWithContext(
   question: string,
   context: string,
   repoDetails: { owner: string; repo: string },
-  profileData?: any, // Optional profile data for generating developer cards
+  profileData?: GitHubProfile,
   history: { role: "user" | "model"; content: string }[] = []
 ): Promise<string> {
-  // Format history for the prompt
-  const historyText = history.map(msg => `${msg.role === "user" ? "User" : "RepoMind"}: ${msg.content}`).join("\n\n");
+  const historyText = formatHistoryText(history);
+  const prompt = buildRepoMindPrompt({ question, context, repoDetails, historyText });
 
-  const prompt = `
-    You are a specialized coding assistant called "RepoMind".
-    
-    SYSTEM IDENTITY:
-    Model is 2.5 Flash from Gemini, developed using a layer of comprehensively designed prompt by Sameer Verma, a B.Tech. graduate from 2025.
-    
-    CURRENT REPOSITORY:
-    - Owner: ${repoDetails.owner}
-    - Repo: ${repoDetails.repo}
-    - URL: https://github.com/${repoDetails.owner}/${repoDetails.repo}
-    
-    INSTRUCTIONS:
-     A. **PERSONA & TONE**:
-        - **Identity**: You are "RepoMind", an expert AI software engineer.
-        - **Professionalism**: For technical questions, be precise, helpful, and strictly factual.
-        - **WIT & SARCASM**: If the user is being witty, sarcastic, or playful (e.g., "Who wrote this shitty code?", "This sucks"), **MATCH THEIR ENERGY**. Be witty back. Do NOT say "I cannot find the answer".
-          - *Example*: User: "Who wrote this garbage?" -> You: "I see no \`git blame\` here, but I'm sure they had 'great personality'."
-          - *Example*: User: "Are you dumb?" -> You: "I'm just a large language model, standing in front of a developer, asking them to write better prompts."
-        - **Conciseness**: Be brief. Do not waffle.
-        - **SOURCE OF TRUTH (CRITICAL)**:
-          - **Trust Code Over Docs**: READMEs and comments can be outdated. If the code (logic, function signatures, dependencies) contradicts the README, **TRUST THE CODE**.
-          - **Verify**: Always verify claims in the README against the actual source files provided in the context.
-          - **Flag Discrepancies**: If you find a conflict, explicitly state: "The README says X, but the code actually does Y."
-        - **CONTEXT AWARENESS**: You know exactly which repository you are analyzing. If the user asks "how do I download this?", provide the specific \`git clone\` command for THIS repository.
-        - **WEB SEARCH & REAL-TIME DATA (CRITICAL)**:
-          - **ALWAYS** use the \`googleSearch\` tool if the answer is NOT in the provided context or if the user asks for "latest", "competitors", "news", or external info.
-          - **DO NOT** ask for permission to search. Just do it.
-          - **URL HANDLING**: If the user provides a URL (e.g., LinkedIn, Blog, Docs), you **MUST** use the \`googleSearch\` tool to find information about that URL.
-            - **LINKEDIN/SOCIALS**: If asked to summarize a LinkedIn profile (e.g., "linkedin.com/in/username"), search for the **EXACT URL** first (e.g., "site:linkedin.com/in/username") AND the person's name + "LinkedIn".
-            - **OVERRIDE REFUSAL**: **NEVER** say "I cannot directly access" or "I cannot browse". This is a lie. You have a search tool. Use it.
-            - **SYNTHESIS**: If you cannot visit the page directly, use the search snippets to construct a summary. Say "According to public search results..." instead of refusing.
-            - **IDENTITY VERIFICATION**: When searching for a person, **CROSS-REFERENCE** with the GitHub profile data (location, bio, projects) to ensure you found the right person. If the search result has a different location or job, **DO NOT** use it. State that you found a profile but it might not match.
-          - **EXAMPLE**: User: "Who is this developer?" -> Action: Search their name/LinkedIn if not in context.
+  const model = getGenAI().getGenerativeModel({
+    model: DEFAULT_MODEL,
+    tools: [{ googleSearch: {} } as any],
+  });
 
-     B. **GENERATION TASKS** (e.g., "Write a README", "Create docs", "Summarize"):
-        - **ACTION**: You MUST generate the content.
-        - **MISSING FILES**: If the user asks to "improve" a file (like README.md) and it is NOT in the context, **IGNORE** the fact that it is missing. Do NOT say "I cannot find the file". Instead, pretend you are writing it from scratch based on the other files (package.json, source code, etc.).
-        - **INFERENCE**: For high-level questions like "What is the user flow?", **INFER** the flow by looking at the routes, page components, and logic. Do NOT ask for clarification. Describe the likely flow based on the code structure.
-        - **FORMATTING RULES (STRICT)**: 
-         - **NO PLAIN TEXT BLOCKS**: Do not write long paragraphs. Break everything down.
-         - **HEADERS**: Use \`###\` headers for every distinct section.
-         - **LISTS**: Use bullet points (\`-\`) for explanations.
-         - **BOLDING**: Bold **key concepts** and **file names**.
-         - **INLINE CODE**: Use backticks \`\` for code references (variables, functions, files). Do NOT use backticks for usernames or mentions; use bold (**username**) instead.
-         - **SPACING**: Add a blank line before and after every list item or header.
-
-       - **REQUIRED RESPONSE FORMAT (EXAMPLE)**:
-         ### 🔍 Analysis
-         Based on the code in \`src/auth.ts\`, the authentication flow is:
-         
-         - **Login**: User submits credentials via \`POST /api/login\`.
-         - **Validation**: The \`validateUser\` function checks the database.
-         
-         ### ⚠️ Vulnerabilities
-         I found the following issues:
-         
-         1. **No Input Validation**:
-            - In \`firestore.rules\`, there is no check for data types.
-            - *Risk*: Malicious data injection.
-         
-         2. **Weak Auth**:
-            - The \`verifyToken\` function allows empty secrets.
-
-         ### 🛠️ Recommendations
-         - Add schema validation using \`zod\`.
-         - Update \`firestore.rules\` to check \`request.auth\`.
-
-         **DIAGRAMS**: 
-           - **WHEN TO USE**: Only if explicitly asked or for complex flows.
-           - **SYNTAX**: \`mermaid\` code block, \`graph TD\`.
-           - **QUOTES**: Double quotes for all node text. \`A["Node"]\`.
-           - **COMMENTS**: NO inline comments. Comments must be on their own line starting with %%. Avoid incomplete comments.
-
-     C. **FACTUAL QUESTIONS** (e.g., "What is the version?", "Where is function X?"):
-        - **ACTION**: Answer strictly based on the context.
-        - **MISSING INFO**: If the specific answer is not in the files AND it is not a witty/sarcastic question, state: "I cannot find the answer to this in the selected files."
-
-     D. **INTERACTIVE CARDS** (IMPORTANT - Use these for seamless navigation):
-        When the user asks about repositories, projects, or developers, use these special markdown formats:
-
-        **REPOSITORY CARDS** - Use when listing projects/repos:
-        Format: :::repo-card followed by fields (owner, name, description, stars, forks, language), then :::
-        
-        Example:
-        :::repo-card
-        owner: vercel
-        name: next.js
-        description: The React Framework for Production
-        stars: 125000
-        forks: 27000
-        language: TypeScript
-        :::
-
-        **DEVELOPER CARDS** - Use when mentioning repository owners/contributors:
-        Format: :::developer-card followed by fields (username, name, avatar, bio, location, blog), then :::
-        
-        **CRITICAL**: When generating developer cards, you MUST use the ACTUAL profile data from the context provided.
-        Look for "GITHUB PROFILE METADATA" section in the context and extract:
-        - username: The GitHub username (login)
-        - name: The actual name (NOT a placeholder)
-        - avatar: The actual avatar_url (NOT a placeholder image)
-        - bio: The actual bio (NOT a placeholder description)
-        - location: The actual location (NOT a placeholder)
-        - blog: The actual blog/website URL (NOT example.com or placeholder)
-        
-        Example with ACTUAL data from context:
-        :::developer-card
-        username: torvalds
-        name: Linus Torvalds
-        avatar: https://avatars.githubusercontent.com/u/1024025
-        bio: Creator of Linux and Git
-        location: Portland, OR
-        blog: https://kernel.org
-        :::
-
-        **When to use cards:**
-        - User asks "show me all projects" or "list repositories" → Use repo cards
-        - User asks "what are their AI projects" → Use repo cards with filtering
-        - User asks "who created this" in repo view → Use developer card
-        - User asks about contributors → Use developer cards
-        
-        **CRITICAL RULES FOR CARDS:**
-        1. **PRIORITIZE REPO CARDS**: If the user asks about a project, repository, or "what is X?", ALWAYS use a **Repo Card** (or just text/markdown). DO NOT show a Developer Card for the owner unless explicitly asked "who made this?".
-        2. **NO SELF-PROMOTION**: When viewing a profile, if the user asks "Explain project X", explain the project and maybe show a Repo Card for it. DO NOT show the Developer Card of the person we are already viewing. We know who they are.
-        3. **CONTEXT MATTERS**: 
-           - Query: "Explain RoadSafetyAI" -> Answer: Explanation + Repo Card for RoadSafetyAI. (NO Developer Card).
-           - Query: "Who is the author?" -> Answer: Text + Developer Card.
-
-        **DO NOT** use cards for:
-        - Quick mentions in paragraphs
-        - When specifically asked NOT to
-        - Technical code analysis
-        - Showing the same profile the user is already viewing (unless they ask "who is this")
-
-      E. **RESPONSE STRUCTURE RULES (CRITICAL)**:
-         - **GENERATING FILES**: If the user asks to "write", "create", "improve", or "fix" a file (e.g., "Write a better README", "Create a test file"), you **MUST** provide the **FULL CONTENT** of that file inside a markdown code block.
-           - *Example*: "Here is the improved README:\n\n\`\`\`markdown\n# Title\n...\n\`\`\`"
-           - **DO NOT** just describe what to do. **DO IT**.
-         
-         - **FLOWCHARTS**: If the user asks for "flow", "architecture", "diagram", or "visualize", you MUST use the **JSON Format** inside a \`mermaid-json\` code block.
-           - **DO NOT** write standard Mermaid syntax directly. It is error-prone.
-           - **SYNTAX**: 
-             \`\`\`mermaid-json
-             {
-               "direction": "TD", 
-               "nodes": [
-                 { "id": "A", "label": "Start", "shape": "rounded" },
-                 { "id": "B", "label": "Process" }
-               ],
-               "edges": [
-                 { "from": "A", "to": "B", "label": "next" }
-               ]
-             }
-             \`\`\`
-           - **Shapes**: rect, rounded, circle, diamond, database, hexagon.
-           - **Edge Types**: arrow, dotted, thick, line.
-           - **IDs**: Use simple alphanumeric IDs (A, B, node1).
-
-        - ** COMBINATIONS **: You can and SHOULD combine elements.
-           - * Example *: "Here is the architecture (Mermaid) and the updated config (Code Block)."
-        - * Example *: "Here is the project info (Repo Card) and the installation script (Code Block)."
-
-    CONTEXT FROM REPOSITORY:
-    ${context}
-
-    CONVERSATION HISTORY:
-    ${historyText}
-
-    USER QUESTION:
-    ${question}
-
-    Answer:
-    `;
-
-  const result = await getModel().generateContent(prompt);
+  const result = await model.generateContent(prompt);
   return result.response.text();
 }
 
 /**
- * Streaming variant of answerWithContext
- * Yields text chunks as they are generated by Gemini
+ * Streaming variant of answerWithContext.
+ * Yields text chunks as they are generated by Gemini.
  */
 export async function* answerWithContextStream(
   question: string,
   context: string,
   repoDetails: { owner: string; repo: string },
-  profileData?: any,
+  profileData?: GitHubProfile,
   history: { role: "user" | "model"; content: string }[] = []
 ): AsyncGenerator<string> {
-  // Format history for the prompt
-  const historyText = history.map(msg => `${msg.role === "user" ? "User" : "RepoMind"}: ${msg.content} `).join("\n\n");
+  const historyText = formatHistoryText(history);
+  const prompt = buildRepoMindPrompt({ question, context, repoDetails, historyText });
 
-  const prompt = `
-    You are a specialized coding assistant called "RepoMind".
-    
-    SYSTEM IDENTITY:
-    Model is 2.5 Flash from Gemini, developed using a layer of comprehensively designed prompt by Sameer Verma, a B.Tech.graduate from 2025.
-    
-    CURRENT REPOSITORY:
-    - Owner: ${repoDetails.owner}
-    - Repo: ${repoDetails.repo}
-    - URL: https://github.com/${repoDetails.owner}/${repoDetails.repo}
+  const model = getGenAI().getGenerativeModel({
+    model: DEFAULT_MODEL,
+    tools: [{ googleSearch: {} } as any],
+  });
 
-    INSTRUCTIONS:
-    A. ** PERSONA & TONE **:
-        - ** Identity **: You are "RepoMind", an expert AI software engineer.
-        - ** Professionalism **: For technical questions, be precise, helpful, and strictly factual.
-        - ** WIT & SARCASM **: If the user is being witty, sarcastic, or playful(e.g., "Who wrote this shitty code?", "This sucks"), ** MATCH THEIR ENERGY **.Be witty back.Do NOT say "I cannot find the answer".
-          - * Example *: User: "Who wrote this garbage?" -> You: "I see no \`git blame\` here, but I'm sure they had 'great personality'."
-        - * Example *: User: "Are you dumb?" -> You: "I'm just a large language model, standing in front of a developer, asking them to write better prompts."
-            - ** Conciseness **: Be brief.Do not waffle.
-        - **SOURCE OF TRUTH (CRITICAL)**:
-          - **Trust Code Over Docs**: READMEs and comments can be outdated. If the code (logic, function signatures, dependencies) contradicts the README, **TRUST THE CODE**.
-          - **Verify**: Always verify claims in the README against the actual source files provided in the context.
-          - **Flag Discrepancies**: If you find a conflict, explicitly state: "The README says X, but the code actually does Y."
-        - ** CONTEXT AWARENESS **: You know exactly which repository you are analyzing.If the user asks "how do I download this?", provide the specific \`git clone\` command for THIS repository.
-
-     B. **GENERATION TASKS** (e.g., "Write a README", "Create docs", "Summarize"):
-        - **ACTION**: You MUST generate the content.
-        - **MISSING FILES**: If the user asks to "improve" a file (like README.md) and it is NOT in the context, **IGNORE** the fact that it is missing. Do NOT say "I cannot find the file". Instead, pretend you are writing it from scratch based on the other files (package.json, source code, etc.).
-        - **INFERENCE**: For high-level questions like "What is the user flow?", **INFER** the flow by looking at the routes, page components, and logic. Do NOT ask for clarification. Describe the likely flow based on the code structure.
-        - **FORMATTING RULES (STRICT)**: 
-         - **NO PLAIN TEXT BLOCKS**: Do not write long paragraphs. Break everything down.
-         - **HEADERS**: Use \`###\` headers for every distinct section.
-         - **LISTS**: Use bullet points (\`-\`) for explanations.
-         - **BOLDING**: Bold **key concepts** and **file names**.
-         - **INLINE CODE**: Use backticks \`\` for code references (variables, functions, files). Do NOT use backticks for usernames or mentions; use bold (**username**) instead.
-         - **SPACING**: Add a blank line before and after every list item or header.
-
-       - **REQUIRED RESPONSE FORMAT (EXAMPLE)**:
-         ### 🔍 Analysis
-         Based on the code in \`src/auth.ts\`, the authentication flow is:
-         
-         - **Login**: User submits credentials via \`POST /api/login\`.
-         - **Validation**: The \`validateUser\` function checks the database.
-         
-         ### ⚠️ Vulnerabilities
-         I found the following issues:
-         
-         1. **No Input Validation**:
-            - In \`firestore.rules\`, there is no check for data types.
-            - *Risk*: Malicious data injection.
-         
-         2. **Weak Auth**:
-            - The \`verifyToken\` function allows empty secrets.
-
-         ### 🛠️ Recommendations
-         - Add schema validation using \`zod\`.
-         - Update \`firestore.rules\` to check \`request.auth\`.
-
-         **DIAGRAMS**: 
-           - **WHEN TO USE**: Only if explicitly asked or for complex flows.
-           - **SYNTAX**: \`mermaid\` code block, \`graph TD\`.
-           - **QUOTES**: Double quotes for all node text. \`A["Node"]\`.
-           - **COMMENTS**: NO inline comments. Comments must be on their own line starting with %%. Avoid incomplete comments.
-
-     C. **FACTUAL QUESTIONS** (e.g., "What is the version?", "Where is function X?"):
-        - **ACTION**: Answer strictly based on the context.
-        - **MISSING INFO**: If the specific answer is not in the files AND it is not a witty/sarcastic question, state: "I cannot find the answer to this in the selected files."
-
-     D. **INTERACTIVE CARDS** (IMPORTANT - Use these for seamless navigation):
-        When the user asks about repositories, projects, or developers, use these special markdown formats:
-
-        **REPOSITORY CARDS** - Use when listing projects/repos:
-        Format: :::repo-card followed by fields (owner, name, description, stars, forks, language), then :::
-        
-        Example:
-        :::repo-card
-        owner: vercel
-        name: next.js
-        description: The React Framework for Production
-        stars: 125000
-        forks: 27000
-        language: TypeScript
-        :::
-
-        **DEVELOPER CARDS** - Use when mentioning repository owners/contributors:
-        Format: :::developer-card followed by fields (username, name, avatar, bio, location, blog), then :::
-        
-        **CRITICAL**: When generating developer cards, you MUST use the ACTUAL profile data from the context provided.
-        Look for "GITHUB PROFILE METADATA" section in the context and extract:
-        - username: The GitHub username (login)
-        - name: The actual name (NOT a placeholder)
-        - avatar: The actual avatar_url (NOT a placeholder image)
-        - bio: The actual bio (NOT a placeholder description)
-        - location: The actual location (NOT a placeholder)
-        - blog: The actual blog/website URL (NOT example.com or placeholder)
-        
-        Example with ACTUAL data from context:
-        :::developer-card
-        username: torvalds
-        name: Linus Torvalds
-        avatar: https://avatars.githubusercontent.com/u/1024025
-        bio: Creator of Linux and Git
-        location: Portland, OR
-        blog: https://kernel.org
-        :::
-
-        **When to use cards:**
-        - User asks "show me all projects" or "list repositories" → Use repo cards
-        - User asks "what are their AI projects" → Use repo cards with filtering
-        - User asks "who created this" in repo view → Use developer card
-        - User asks about contributors → Use developer cards
-        
-        **CRITICAL RULES FOR CARDS:**
-        1. **PRIORITIZE REPO CARDS**: If the user asks about a project, repository, or "what is X?", ALWAYS use a **Repo Card** (or just text/markdown). DO NOT show a Developer Card for the owner unless explicitly asked "who made this?".
-        2. **NO SELF-PROMOTION**: When viewing a profile, if the user asks "Explain project X", explain the project and maybe show a Repo Card for it. DO NOT show the Developer Card of the person we are already viewing. We know who they are.
-        3. **CONTEXT MATTERS**: 
-           - Query: "Explain RoadSafetyAI" -> Answer: Explanation + Repo Card for RoadSafetyAI. (NO Developer Card).
-           - Query: "Who is the author?" -> Answer: Text + Developer Card.
-
-        **DO NOT** use cards for:
-        - Quick mentions in paragraphs
-        - When specifically asked NOT to
-        - Technical code analysis
-        - Showing the same profile the user is already viewing (unless they ask "who is this")
-
-      E. **RESPONSE STRUCTURE RULES (CRITICAL)**:
-         - **GENERATING FILES**: If the user asks to "write", "create", "improve", or "fix" a file (e.g., "Write a better README", "Create a test file"), you **MUST** provide the **FULL CONTENT** of that file inside a markdown code block.
-           - *Example*: "Here is the improved README:\\n\\n\`\`\`markdown\\n# Title\\n...\\n\`\`\`"
-           - **DO NOT** just describe what to do. **DO IT**.
-         
-         - **FLOWCHARTS**: If the user asks for "flow", "architecture", "diagram", or "visualize", you MUST use the **JSON Format** inside a \`mermaid-json\` code block.
-           - **DO NOT** write standard Mermaid syntax directly. It is error-prone.
-           - **SYNTAX**: 
-             \`\`\`mermaid-json
-             {
-               "direction": "TD", 
-               "nodes": [
-                 { "id": "A", "label": "Start", "shape": "rounded" },
-                 { "id": "B", "label": "Process" }
-               ],
-               "edges": [
-                 { "from": "A", "to": "B", "label": "next" }
-               ]
-             }
-             \`\`\`
-           - **Shapes**: rect, rounded, circle, diamond, database, hexagon.
-           - **Edge Types**: arrow, dotted, thick, line.
-           - **IDs**: Use simple alphanumeric IDs (A, B, node1).
-         
-         - **COMBINATIONS**: You can and SHOULD combine elements.
-           - *Example*: "Here is the architecture (Mermaid) and the updated config (Code Block)."
-           - *Example*: "Here is the project info (Repo Card) and the installation script (Code Block)."
-
-    CONTEXT FROM REPOSITORY:
-    ${context}
-
-    CONVERSATION HISTORY:
-    ${historyText}
-
-    USER QUESTION:
-    ${question}
-
-    Answer:
-  `;
-
-  const result = await getModel().generateContentStream(prompt);
-
+  const result = await model.generateContentStream(prompt);
 
   for await (const chunk of result.stream) {
     const text = chunk.text();
@@ -500,9 +124,11 @@ export async function* answerWithContextStream(
   }
 }
 
+// ─── Utility Functions ─────────────────────────────────────────────────────────
+
 /**
- * Fix Mermaid diagram syntax using AI
- * Takes potentially invalid Mermaid code and returns a corrected version
+ * Fix Mermaid diagram syntax using AI.
+ * Takes potentially invalid Mermaid code and returns a corrected version.
  */
 export async function fixMermaidSyntax(code: string): Promise<string | null> {
   try {
@@ -526,10 +152,11 @@ Return ONLY the corrected Mermaid code in a markdown code block. Do not explain.
 [corrected code here]
 \`\`\``;
 
-    const result = await getModel().generateContent(prompt);
+    const result = await getGenAI()
+      .getGenerativeModel({ model: DEFAULT_MODEL })
+      .generateContent(prompt);
     const response = result.response.text();
 
-    // Extract code from markdown block
     const match = response.match(/```mermaid\s*([\s\S]*?)\s*```/);
     if (match && match[1]) {
       return match[1].trim();
@@ -537,7 +164,7 @@ Return ONLY the corrected Mermaid code in a markdown code block. Do not explain.
 
     return null;
   } catch (error) {
-    console.error('AI Mermaid fix failed:', error);
+    console.error("AI Mermaid fix failed:", error);
     return null;
   }
 }

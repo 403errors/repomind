@@ -1,7 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getGenAI, DEFAULT_MODEL } from "./ai-client";
 import type { SecurityFinding } from "./security-scanner";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 /**
  * Gemini function declarations for security analysis
@@ -93,8 +91,8 @@ export async function analyzeCodeWithGemini(
     files: Array<{ path: string; content: string }>
 ): Promise<SecurityFinding[]> {
     try {
-        const model = genAI.getGenerativeModel({
-            model: 'gemini-3-flash-preview',
+        const model = getGenAI().getGenerativeModel({
+            model: DEFAULT_MODEL,
             tools: [{ functionDeclarations: securityAnalysisFunctions as any }]
         });
 
@@ -197,12 +195,6 @@ Be extremely conservative. False alarms erode trust.
     }
 }
 
-function extractJsonPayload(text: string): string | null {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start === -1 || end === -1 || end <= start) return null;
-    return text.slice(start, end + 1);
-}
 
 export async function generateSecurityPatch(params: {
     filePath: string;
@@ -213,8 +205,8 @@ export async function generateSecurityPatch(params: {
     snippet?: string;
 }): Promise<{ patch: string; explanation: string }> {
     try {
-        const model = genAI.getGenerativeModel({
-            model: 'gemini-3-flash-preview'
+        const model = getGenAI().getGenerativeModel({
+            model: DEFAULT_MODEL
         });
 
         const contextSnippet = params.snippet || '';
@@ -251,7 +243,9 @@ Do not include markdown fences.`;
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        const jsonPayload = extractJsonPayload(text);
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        const jsonPayload = (start !== -1 && end > start) ? text.slice(start, end + 1) : null;
         if (!jsonPayload) {
             return { patch: text.trim(), explanation: 'Model response did not include JSON.' };
         }

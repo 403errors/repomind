@@ -32,17 +32,19 @@ export async function trackEvent(
 ) {
     try {
         const timestamp = Date.now();
+        const visitorKey = `visitor:${visitorId}`;
+
+        // Check if visitor exists and run all updates in a single pipeline.
+        // Using hgetall to detect a new visitor avoids a separate kv.exists
+        // round-trip before the pipeline (which previously added ~1 sequential RTT).
+        const existing = await kv.hgetall(visitorKey);
         const pipeline = kv.pipeline();
 
         // 1. Add to global visitors set
         pipeline.sadd("visitors", visitorId);
 
-        // 2. Update visitor metadata
-        const visitorKey = `visitor:${visitorId}`;
-
-        // Only set static data if not already present (to avoid overwriting firstSeen)
-        const exists = await kv.exists(visitorKey);
-        if (!exists) {
+        // 2. Set static first-seen data only for new visitors
+        if (!existing) {
             pipeline.hset(visitorKey, {
                 firstSeen: timestamp,
                 country: metadata.country || 'Unknown',
@@ -51,21 +53,20 @@ export async function trackEvent(
             });
         }
 
-        // Always update dynamic data
+        // 3. Always update dynamic fields
         pipeline.hset(visitorKey, {
             lastSeen: timestamp,
-            // Update country/device if they changed (optional, but good for accuracy)
             ...(metadata.country && { country: metadata.country }),
             ...(metadata.device && { device: metadata.device })
         });
 
-        // 3. Increment counters
+        // 4. Increment query counter
         if (eventType === 'query') {
             pipeline.incr("queries:total");
             pipeline.hincrby(visitorKey, "queryCount", 1);
         }
 
-        // 4. Update global stats
+        // 5. Update global device/country stats
         if (metadata.country) {
             pipeline.incr(`stats:country:${metadata.country}`);
         }

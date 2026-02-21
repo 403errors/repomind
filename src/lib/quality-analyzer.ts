@@ -1,8 +1,6 @@
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+import { getGenAI, DEFAULT_MODEL } from "./ai-client";
 
 export interface QualityMetrics {
     complexity: number;
@@ -76,7 +74,10 @@ export async function analyzeCodeQuality(
     // 1. Calculate Static Metrics
     const complexity = calculateComplexity(code);
     const loc = code.split('\n').length;
-    const functionCount = (code.match(/function\s+\w+|=>|\w+\s*\([^)]*\)\s*\{/g) || []).length;
+    // Matches: `function foo(`, `const foo = (`, `const foo = async (`, method shorthand `foo(`
+    // Excludes control-flow keywords: if, for, while, switch, catch
+    const FUNCTION_REGEX = /(?:^|[^a-zA-Z_$])(?:async\s+)?function\s+\w+\s*\(|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|\w+)\s*=>|^\s+(?!if|for|while|switch|catch\b)\w+\s*\([^)]*\)\s*\{/gm;
+    const functionCount = (code.match(FUNCTION_REGEX) || []).length;
 
     // Simple maintainability index approximation
     // MI = 171 - 5.2 * ln(V) - 0.23 * G - 16.2 * ln(LOC)
@@ -92,7 +93,7 @@ export async function analyzeCodeQuality(
 
     // 2. AI Qualitative Analysis (Zero-Cost Linter)
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+        const model = getGenAI().getGenerativeModel({ model: DEFAULT_MODEL });
 
         const prompt = `
       You are a senior code reviewer. Analyze this code file (${filename}) for quality issues.

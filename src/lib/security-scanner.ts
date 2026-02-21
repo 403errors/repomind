@@ -276,16 +276,20 @@ export function groupBySeverity(findings: SecurityFinding[]): Record<string, Sec
 }
 
 /**
- * Get summary statistics
+ * Get summary statistics in a single O(n) pass.
  */
 export function getScanSummary(findings: SecurityFinding[]): ScanSummary {
+    const counts = findings.reduce(
+        (acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc; },
+        {} as Record<string, number>
+    );
     return {
         total: findings.length,
-        critical: findings.filter(f => f.severity === 'critical').length,
-        high: findings.filter(f => f.severity === 'high').length,
-        medium: findings.filter(f => f.severity === 'medium').length,
-        low: findings.filter(f => f.severity === 'low').length,
-        info: findings.filter(f => f.severity === 'info').length,
+        critical: counts.critical ?? 0,
+        high: counts.high ?? 0,
+        medium: counts.medium ?? 0,
+        low: counts.low ?? 0,
+        info: counts.info ?? 0,
     };
 }
 
