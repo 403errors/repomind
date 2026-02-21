@@ -159,13 +159,13 @@ RepoMind is designed for **instant, zero-setup analysis**. While other tools req
 
 | Feature |  RepoMind |  GitHub Copilot (Web) |  Greptile |  Onboard AI |
 | :--- | :---: | :---: | :---: | :---: |
-| **Platform** | ** Web (Any Browser)** |  Web (GitHub.com) |  Web Dashboard |  Web Dashboard |
-| **Access** | ** Instant (Public URL)** | Requires Repo Access | Requires App Install | Requires App Install |
-| **Pricing** | ** 100% Free** | Enterprise / Paid | Paid (Free Tier) | Paid (Free Tier) |
-| **Visual Maps** | ** Auto-Flowcharts** |  No |  No |  No |
-| **Profile Insights** | ** Developer Analysis** |  No |  No |  No |
-| **Mobile UX** | ** Mobile-First** |  Desktop Focused |  Desktop Only |  Desktop Only |
-| **Security Scan** | ** Free AI Audit** |  (Advanced Security) |  No |  No |
+| **Platform** | **Web (Any Browser)** |  Web (GitHub.com) |  Web Dashboard |  Web Dashboard |
+| **Access** | **Instant (Public URL)** | Requires Repo Access | Requires App Install | Requires App Install |
+| **Pricing** | **100% Free** | Enterprise / Paid | Paid (Free Tier) | Paid (Free Tier) |
+| **Visual Maps** | **Auto-Flowcharts** |  No |  No |  No |
+| **Profile Insights** | **Developer Analysis** |  No |  No |  No |
+| **Mobile UX** | **Mobile-First** |  Desktop Focused |  Desktop Only |  Desktop Only |
+| **Security Scan** | **Free AI Audit** |  (Advanced Security) |  No |  No |
 | **Tech Stack** | **Context-Aware** | Indexed Search | Proprietary Index | Vector Search |
 
 ###  Why RepoMind?
