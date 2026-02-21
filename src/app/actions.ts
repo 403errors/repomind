@@ -44,6 +44,12 @@ export async function fetchProfile(username: string) {
     return await getProfile(username);
 }
 
+import { getPublicStats } from "@/lib/analytics";
+
+export async function fetchPublicStats() {
+    return await getPublicStats();
+}
+
 export async function fetchProfileReadme(username: string) {
     return await getProfileReadme(username);
 }

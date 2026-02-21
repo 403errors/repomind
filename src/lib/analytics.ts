@@ -171,3 +171,36 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
         };
     }
 }
+
+/**
+ * Fetch lightweight, aggregated stats for public viewing (e.g. landing page)
+ * Uses Next.js unstable_cache to cache the results globally
+ */
+import { unstable_cache } from 'next/cache';
+
+export const getPublicStats = unstable_cache(
+    async () => {
+        try {
+            const [totalVisitors, totalQueries] = await Promise.all([
+                kv.scard("visitors"),
+                kv.get<number>("queries:total")
+            ]);
+
+            return {
+                totalVisitors: totalVisitors || 0,
+                totalQueries: totalQueries || 0
+            };
+        } catch (error) {
+            console.error("Failed to fetch public stats:", error);
+            return {
+                totalVisitors: 0,
+                totalQueries: 0
+            };
+        }
+    },
+    ['public-stats'],
+    {
+        revalidate: 600, // Revalidate every 10 minutes
+        tags: ['stats']
+    }
+);

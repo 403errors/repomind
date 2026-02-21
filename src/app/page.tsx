@@ -13,6 +13,7 @@ import CAGComparison from "@/components/CAGComparison";
 import Footer from "@/components/Footer";
 import Image from "next/image";
 import { InstallPWA } from "@/components/InstallPWA";
+import PublicStats from "@/components/PublicStats";
 
 export default function Home() {
   const [input, setInput] = useState("");
@@ -125,6 +126,8 @@ export default function Home() {
             <span className="hidden sm:inline">•</span>
             <button onClick={() => setInput("vercel/next.js")} className="hover:text-white transition-colors">vercel/next.js</button>
           </div>
+
+          <PublicStats />
         </motion.div>
       </section>
 
