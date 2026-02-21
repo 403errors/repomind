@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { fetchGitHubData } from "./actions";
-import FeatureTiles from "@/components/FeatureTiles";
+import TrustedByMarquee from "@/components/TrustedByMarquee";
+import InteractiveDemo from "@/components/InteractiveDemo";
+import BentoFeatures from "@/components/BentoFeatures";
+import SecurityBanner from "@/components/SecurityBanner";
+import WallOfLove from "@/components/WallOfLove";
 import { WhatsNewBadge } from "@/components/WhatsNewBadge";
 import { GitHubBadge } from "@/components/GitHubBadge";
 import { CAGBadge } from "@/components/CAGBadge";
@@ -128,17 +132,22 @@ export default function Home() {
         </motion.div>
       </section>
 
+      <TrustedByMarquee />
+      <InteractiveDemo />
+
       {/* CAG Comparison Section */}
-      <div className="relative z-10">
+      <div className="relative z-10 w-full bg-zinc-950">
         <CAGComparison />
       </div>
 
-      {/* Feature Tiles Section */}
-      <section className="relative py-20 z-10">
-        <div className="relative z-10">
-          <FeatureTiles />
-        </div>
-      </section>
+      <div className="relative z-10 w-full bg-black">
+        <BentoFeatures />
+        <SecurityBanner />
+      </div>
+
+      <div className="relative z-10 w-full bg-zinc-950 border-t border-zinc-900">
+        <WallOfLove />
+      </div>
 
       <Footer />
 
