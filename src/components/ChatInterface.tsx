@@ -22,6 +22,7 @@ import { ChatInput } from "./ChatInput";
 import Link from "next/link";
 import { StreamingProgress } from "./StreamingProgress";
 import type { StreamUpdate } from "@/lib/streaming-types";
+import { CopyBadge } from "./CopyBadge";
 
 // Initialize mermaid
 mermaid.initialize({
@@ -174,9 +175,10 @@ interface Message {
 interface ChatInterfaceProps {
     repoContext: { owner: string; repo: string; fileTree: any[] };
     onToggleSidebar?: () => void;
+    initialPrompt?: string;
 }
 
-export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfaceProps) {
+export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<Message[]>([
         {
             id: "welcome",
@@ -201,6 +203,9 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
     const [streamingStatus, setStreamingStatus] = useState<{ message: string; progress: number } | null>(null);
     const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
     const [ownerProfile, setOwnerProfile] = useState<any>(null);
+    const [showBadgeModal, setShowBadgeModal] = useState(false);
+
+    const handleSubmitRef = useRef<any>(null);
 
     // Fetch owner profile on mount
     useEffect(() => {
@@ -217,6 +222,8 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
 
     // Load conversation on mount
     const toastShownRef = useRef(false);
+    const initialPromptHandled = useRef(false);
+
     useEffect(() => {
         const saved = loadConversation(repoContext.owner, repoContext.repo);
         if (saved && saved.length > 1) {
@@ -228,7 +235,26 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
             }
         }
         setInitialized(true);
-    }, [repoContext.owner, repoContext.repo]);
+
+        if (initialPrompt && !initialPromptHandled.current) {
+            initialPromptHandled.current = true;
+            let promptText = "";
+            if (initialPrompt === "architecture") promptText = "Explain the architecture";
+            else if (initialPrompt === "security") promptText = "Find security vulnerabilities";
+            else if (initialPrompt === "explain") promptText = "Explain the codebase";
+            else promptText = initialPrompt;
+
+            const url = new URL(window.location.href);
+            url.searchParams.delete('prompt');
+            window.history.replaceState({}, '', url.toString());
+
+            setTimeout(() => {
+                if (handleSubmitRef.current) {
+                    handleSubmitRef.current(undefined, promptText);
+                }
+            }, 300);
+        }
+    }, [repoContext.owner, repoContext.repo, initialPrompt]);
 
     // Save on every message change
     useEffect(() => {
@@ -253,13 +279,13 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
     }, [messages]);
 
     const handleSuggestionClick = (suggestion: string) => {
-        setInput(suggestion);
         setShowSuggestions(false);
+        handleSubmitRef.current?.(undefined, suggestion);
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const trimmedInput = input.trim();
+    const handleSubmit = async (e?: React.FormEvent, overrideText?: string) => {
+        if (e) e.preventDefault();
+        const trimmedInput = overrideText || input.trim();
         if ((!trimmedInput && !referenceText) || loading) return;
 
         // Check token limit
@@ -289,7 +315,7 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
         setLoading(true);
 
         // Handle special commands
-        if (input.toLowerCase().includes("find security vulnerabilities") || input.toLowerCase().includes("scan for vulnerabilities")) {
+        if (trimmedInput.toLowerCase().includes("find security vulnerabilities") || trimmedInput.toLowerCase().includes("scan for vulnerabilities")) {
             console.log('🎯 Security scan triggered!');
             setScanning(true);
             try {
@@ -459,6 +485,10 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
         }
     };
 
+    useEffect(() => {
+        handleSubmitRef.current = handleSubmit;
+    });
+
     const handleSelection = () => {
         const selection = window.getSelection();
         if (!selection || selection.isCollapsed) {
@@ -618,7 +648,21 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                         <Github className="w-5 h-5 text-zinc-400 shrink-0" />
                         <h1 className="text-lg font-semibold text-zinc-100 truncate">{repoContext.owner}/{repoContext.repo}</h1>
+                        <Link
+                            href={`/repo/${repoContext.owner}/${repoContext.repo}`}
+                            className="hidden md:flex items-center text-xs text-purple-400 hover:text-purple-300 ml-2 border border-purple-500/30 bg-purple-500/10 px-2 py-1 rounded-md transition-colors whitespace-nowrap"
+                        >
+                            View Profile
+                        </Link>
                     </div>
+
+                    <button
+                        onClick={() => setShowBadgeModal(true)}
+                        className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm"
+                    >
+                        <CopySquaresIcon className="w-3.5 h-3.5" />
+                        Get Badge
+                    </button>
 
                     <div className={cn(
                         "ml-auto hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
@@ -710,7 +754,7 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
                                         ? "bg-blue-600 text-white rounded-tr-none"
                                         : "bg-zinc-900 border border-white/10 rounded-tl-none"
                                 )}
-                                data-message-role={msg.role}
+                                    data-message-role={msg.role}
                                 >
                                     {msg.role === "model" && (
                                         <button
@@ -825,7 +869,7 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
                     </motion.div>
                 )}
 
-                <form onSubmit={handleSubmit} className="max-w-3xl mx-auto relative">
+                <form id="chat-form" onSubmit={handleSubmit} className="max-w-3xl mx-auto relative">
                     <ChatInput
                         value={input}
                         onChange={setInput}
@@ -848,6 +892,23 @@ export function ChatInterface({ repoContext, onToggleSidebar }: ChatInterfacePro
                 onConfirm={handleClearChat}
                 onCancel={() => setShowClearConfirm(false)}
             />
+
+            {showBadgeModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-lg overflow-hidden flex flex-col relative shadow-2xl">
+                        <button
+                            onClick={() => setShowBadgeModal(false)}
+                            className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors z-10"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                        <div className="p-6">
+                            <h2 className="text-xl font-bold text-white mb-6 pr-8">Share your Analysis</h2>
+                            <CopyBadge owner={repoContext.owner} repo={repoContext.repo} />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

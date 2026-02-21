@@ -10,9 +10,9 @@ import Link from "next/link";
 export default async function ChatPage({
     searchParams,
 }: {
-    searchParams: Promise<{ q?: string }>;
+    searchParams: Promise<{ q?: string; prompt?: string }>;
 }) {
-    const { q: query } = await searchParams;
+    const { q: query, prompt } = await searchParams;
 
     if (!query) {
         return (
@@ -34,5 +34,5 @@ export default async function ChatPage({
     }
 
     // For repos, use RepoLoader for client-side loading
-    return <RepoLoader query={query} />;
+    return <RepoLoader query={query} initialPrompt={prompt} />;
 }

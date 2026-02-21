@@ -13,6 +13,7 @@
 import { analyzeFileSelection, answerWithContextStream } from "@/lib/gemini";
 import { getFileContentBatch } from "@/lib/github";
 import { countTokens, MAX_TOKENS } from "@/lib/tokens";
+import { getCachedRepoQueryAnswer, cacheRepoQueryAnswer } from "@/lib/cache";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import type { GitHubProfile } from "@/lib/github";
 
@@ -161,6 +162,17 @@ export async function executeRepoQuery(
     let answer = "";
     let relevantFiles: string[] = [];
 
+    // Attempt cache hit first
+    const { analyzeFiles = analyzeFileSelection } = deps;
+    const prunedPaths = pruneFilePaths(params.filePaths);
+    const selectedFiles = await analyzeFiles(params.query, prunedPaths, params.owner, params.repo);
+    const cached = await getCachedRepoQueryAnswer(params.owner, params.repo, params.query, selectedFiles);
+
+    if (cached) {
+        console.log(`🧠 AI Response Cache Hit for ${params.owner}/${params.repo}: ${params.query}`);
+        return { answer: cached, relevantFiles: selectedFiles };
+    }
+
     for await (const update of executeRepoQueryStream(params, deps)) {
         if (update.type === "content") {
             answer += update.text;
@@ -169,6 +181,11 @@ export async function executeRepoQuery(
         } else if (update.type === "error") {
             throw new Error(update.message);
         }
+    }
+
+    // Save to cache after complete response
+    if (answer) {
+        await cacheRepoQueryAnswer(params.owner, params.repo, params.query, relevantFiles, answer);
     }
 
     return { answer, relevantFiles };

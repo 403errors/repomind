@@ -16,9 +16,10 @@ interface LoadingStep {
 
 interface RepoLoaderProps {
     query: string;
+    initialPrompt?: string;
 }
 
-export function RepoLoader({ query }: RepoLoaderProps) {
+export function RepoLoader({ query, initialPrompt }: RepoLoaderProps) {
     const [steps, setSteps] = useState<LoadingStep[]>([]);
     const [repoData, setRepoData] = useState<any>(null);
     const [error, setError] = useState<string | null>(null);
@@ -151,6 +152,7 @@ export function RepoLoader({ query }: RepoLoaderProps) {
             repo={repoData.repo.name}
             hiddenFiles={repoData.hiddenFiles}
             repoData={repoData.repo}
+            initialPrompt={initialPrompt}
         />
     );
 }

@@ -12,9 +12,10 @@ interface RepoLayoutProps {
     repo: string;
     hiddenFiles?: { path: string; reason: string }[];
     repoData: any; // Full GitHubRepo object
+    initialPrompt?: string;
 }
 
-export function RepoLayout({ fileTree, repoName, owner, repo, hiddenFiles = [], repoData }: RepoLayoutProps) {
+export function RepoLayout({ fileTree, repoName, owner, repo, hiddenFiles = [], repoData, initialPrompt }: RepoLayoutProps) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [previewFile, setPreviewFile] = useState<string | null>(null);
 
@@ -59,6 +60,7 @@ export function RepoLayout({ fileTree, repoName, owner, repo, hiddenFiles = [], 
                             fileTree
                         }}
                         onToggleSidebar={() => setSidebarOpen(true)}
+                        initialPrompt={initialPrompt}
                     />
                 </div>
             </div>

@@ -28,6 +28,7 @@ import type { GitHubProfile } from "@/lib/github";
 import type { SecurityFinding, ScanSummary } from "@/lib/security-scanner";
 import type { QualityReport } from "@/lib/quality-analyzer";
 import type { SearchResult } from "@/lib/search-engine";
+import { getCachedRepoQueryAnswer, cacheRepoQueryAnswer } from "@/lib/cache";
 
 // ─── Services & Domain ────────────────────────────────────────────────────────
 import {
@@ -359,7 +360,23 @@ export async function scanRepositoryVulnerabilities(
     meta: { depth: "quick" | "deep"; aiEnabled: boolean; maxFiles: number; aiFilesSelected: number; durationMs: number };
 }> {
     const config = buildScanConfig(options);
-    return runSecurityScan(owner, repo, files, config);
+    const filePaths = files.map(f => f.path);
+
+    // Check cache first using a unique query string identifier
+    const cacheKey = `security_scan_${config.depth}_${config.aiEnabled}`;
+    const cachedResult = await getCachedRepoQueryAnswer(owner, repo, cacheKey, filePaths) as any;
+
+    if (cachedResult) {
+        console.log(`🧠 AI Response Cache Hit for Security Scan: ${owner}/${repo}`);
+        return cachedResult;
+    }
+
+    const result = await runSecurityScan(owner, repo, files, config);
+
+    // Cache the full result object for 24 hours
+    await cacheRepoQueryAnswer(owner, repo, cacheKey, filePaths, result);
+
+    return result;
 }
 
 export async function generateSecurityPatchForFinding(

@@ -5,6 +5,7 @@ import { ArrowLeft, Star, GitFork, AlertCircle, Clock, FileCode, Search } from '
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { CopyBadge } from '@/components/CopyBadge';
 
 interface Props {
     params: Promise<{
@@ -79,7 +80,7 @@ export default async function RepoPage({ params }: Props) {
 
                 <header className="mb-12 border-b border-zinc-800 pb-8">
                     <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-                        <div>
+                        <div className="w-full">
                             <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4">
                                 <span className="text-zinc-400">{owner} / </span>
                                 <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">{repoData.name}</span>
@@ -87,16 +88,6 @@ export default async function RepoPage({ params }: Props) {
                             {repoData.description && (
                                 <p className="text-xl text-zinc-300 max-w-2xl">{repoData.description}</p>
                             )}
-                        </div>
-
-                        <div className="flex gap-4">
-                            <Link
-                                href={`/chat?q=${owner}/${repo}`}
-                                className="inline-flex items-center justify-center px-6 py-3 border border-transparent text-sm font-medium rounded-md text-black bg-white hover:bg-zinc-200 transition-colors shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:shadow-[0_0_30px_rgba(255,255,255,0.5)]"
-                            >
-                                <Search className="w-4 h-4 mr-2" />
-                                Analyze with AI
-                            </Link>
                         </div>
                     </div>
 
@@ -123,6 +114,37 @@ export default async function RepoPage({ params }: Props) {
                             ))}
                         </div>
                     </div>
+
+                    <div className="flex flex-col sm:flex-row flex-wrap gap-4 mt-10">
+                        <Link
+                            href={`/chat?q=${owner}/${repo}`}
+                            className="inline-flex items-center justify-center px-6 py-3.5 border border-transparent text-sm font-medium rounded-xl text-black bg-white hover:bg-zinc-200 transition-colors shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:shadow-[0_0_30px_rgba(255,255,255,0.4)]"
+                        >
+                            <FileCode className="w-4 h-4 mr-2" />
+                            Chat with Codebase
+                        </Link>
+                        <Link
+                            href={`/chat?q=${owner}/${repo}&prompt=architecture`}
+                            className="inline-flex items-center justify-center px-6 py-3.5 border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-700 text-sm font-medium rounded-xl text-white transition-colors"
+                        >
+                            <GitFork className="w-4 h-4 mr-2" />
+                            Architecture Scan
+                        </Link>
+                        <Link
+                            href={`/chat?q=${owner}/${repo}&prompt=security`}
+                            className="inline-flex items-center justify-center px-6 py-3.5 border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-700 text-sm font-medium rounded-xl text-white transition-colors"
+                        >
+                            <AlertCircle className="w-4 h-4 mr-2" />
+                            Security Audit
+                        </Link>
+                        <Link
+                            href={`/chat?q=${owner}/${repo}&prompt=explain`}
+                            className="inline-flex items-center justify-center px-6 py-3.5 border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-700 text-sm font-medium rounded-xl text-white transition-colors"
+                        >
+                            <Search className="w-4 h-4 mr-2 text-zinc-400" />
+                            Explain Codebase
+                        </Link>
+                    </div>
                 </header>
 
                 <section className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-8 mb-12 backdrop-blur-sm">
@@ -147,6 +169,10 @@ export default async function RepoPage({ params }: Props) {
                         </Link>
                     </div>
                 </section>
+
+                <div className="mb-12">
+                    <CopyBadge owner={owner} repo={repo} />
+                </div>
 
                 {shortReadme && (
                     <section className="bg-zinc-900/30 border border-zinc-800/50 rounded-xl p-8 mb-12">

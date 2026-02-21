@@ -177,6 +177,68 @@ export async function getCachedQuerySelection(
 }
 
 /**
+ * Cache Full AI Query Answer
+ * Maps a query (plus the files used) to the final generated Markdown answer
+ */
+export async function cacheRepoQueryAnswer(
+    owner: string,
+    repo: string,
+    query: string,
+    files: string[],
+    answer: any
+): Promise<void> {
+    // We hash the file list to ensure if files change, cache invalidates.
+    // A simple join is sufficient for our keys since they are relative paths.
+    const fileHash = files.sort().join('|').substring(0, 100);
+    const normalizedQuery = query.toLowerCase().trim();
+    const key = `answer:${owner}/${repo}:${normalizedQuery}:${fileHash}`;
+
+    // Cache for 24 hours
+    // We compress the answer if it's large as AI responses can be long
+    try {
+        const stringified = typeof answer === 'string' ? answer : JSON.stringify(answer);
+        const compressed = gzipSync(Buffer.from(stringified));
+        const value = `gz:${compressed.toString('base64')}`;
+        await safeKvOperation(() => kv.setex(key, 86400, value));
+    } catch (e) {
+        console.warn("Failed to compress answer, caching plain text...");
+        const stringified = typeof answer === 'string' ? answer : JSON.stringify(answer);
+        await safeKvOperation(() => kv.setex(key, 86400, stringified));
+    }
+}
+
+export async function getCachedRepoQueryAnswer(
+    owner: string,
+    repo: string,
+    query: string,
+    files: string[]
+): Promise<any | null> {
+    const fileHash = files.sort().join('|').substring(0, 100);
+    const normalizedQuery = query.toLowerCase().trim();
+    const key = `answer:${owner}/${repo}:${normalizedQuery}:${fileHash}`;
+
+    const cached = await safeKvOperation(() => kv.get<string>(key));
+    if (!cached) return null;
+
+    let resultString = cached;
+    if (cached.startsWith('gz:')) {
+        try {
+            const buffer = Buffer.from(cached.slice(3), 'base64');
+            resultString = gunzipSync(buffer).toString();
+        } catch (e) {
+            console.error("Failed to decompress cached answer");
+            return null;
+        }
+    }
+
+    try {
+        return JSON.parse(resultString);
+    } catch (e) {
+        return resultString;
+    }
+}
+
+/**
  * Clear all cache for a repository (useful for manual invalidation)
  * TODO: Full implementation requires Redis SCAN support from the KV provider.
  * Currently not implemented — do not call this expecting real cache eviction.
