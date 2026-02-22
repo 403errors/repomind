@@ -130,7 +130,11 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
 
             const visitor = {
                 ...details,
-                id: visitorIds[index]
+                id: visitorIds[index],
+                // Ensure numbers are actually numbers after coming back from KV
+                lastSeen: Number(details.lastSeen),
+                firstSeen: Number(details.firstSeen || details.lastSeen),
+                queryCount: Number(details.queryCount || 0)
             };
 
             recentVisitors.push(visitor);
