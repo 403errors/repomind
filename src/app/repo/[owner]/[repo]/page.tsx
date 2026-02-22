@@ -6,6 +6,7 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import { CopyBadge } from '@/components/CopyBadge';
 
 interface Props {
@@ -187,7 +188,7 @@ export default async function RepoPage({ params }: Props) {
                             <div className="prose prose-invert prose-zinc max-w-none prose-img:inline prose-img:m-0 prose-img:mr-1 prose-img:align-middle prose-p:leading-relaxed prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-headings:font-semibold prose-h1:text-3xl prose-h2:text-2xl">
                                 <ReactMarkdown
                                     remarkPlugins={[remarkGfm]}
-                                    rehypePlugins={[rehypeRaw]}
+                                    rehypePlugins={[rehypeRaw, rehypeSanitize]}
                                 >
                                     {fullReadme}
                                 </ReactMarkdown>
