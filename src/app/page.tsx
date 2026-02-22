@@ -85,7 +85,7 @@ export default function Home() {
           {/* CAG Badge (Below Title) */}
           <CAGBadge />
 
-          <p className="text-base sm:text-lg md:text-xl text-zinc-400 mb-12 max-w-lg mx-auto">
+          <p className="text-base sm:text-lg md:text-xl text-zinc-400 mb-8 max-w-lg mx-auto">
             Deep dive into any repository or profile.
             Analyze code, ask questions, and understand projects in seconds.
           </p>
@@ -119,7 +119,7 @@ export default function Home() {
             </motion.p>
           )}
 
-          <div className="mt-12 md:mt-16 flex flex-wrap justify-center gap-3 md:gap-4 text-xs md:text-sm text-zinc-500">
+          <div className="mt-8 md:mt-10 flex flex-wrap justify-center gap-3 md:gap-4 text-xs md:text-sm text-zinc-500">
             <span>Try:</span>
             <button onClick={() => setInput("torvalds")} className="hover:text-white transition-colors">torvalds</button>
             <span className="hidden sm:inline">•</span>

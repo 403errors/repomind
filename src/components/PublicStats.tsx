@@ -16,7 +16,20 @@ export default function PublicStats() {
     }, []);
 
     if (!stats || (stats.totalVisitors === 0 && stats.totalQueries === 0)) {
-        return null; // Return null while loading or if empty
+        return (
+            <div className="flex flex-wrap justify-center gap-4 mt-8 md:mt-12 text-sm text-zinc-400">
+                <div className="flex items-center gap-2 bg-zinc-900/50 border border-white/10 px-4 py-2 rounded-full backdrop-blur-sm shadow-xl animate-pulse">
+                    <div className="w-4 h-4 rounded-full bg-purple-400/20" />
+                    <div className="w-8 h-4 bg-zinc-800 rounded" />
+                    <div className="w-16 h-4 bg-zinc-800 rounded" />
+                </div>
+                <div className="flex items-center gap-2 bg-zinc-900/50 border border-white/10 px-4 py-2 rounded-full backdrop-blur-sm shadow-xl animate-pulse">
+                    <div className="w-4 h-4 rounded-full bg-blue-400/20" />
+                    <div className="w-8 h-4 bg-zinc-800 rounded" />
+                    <div className="w-24 h-4 bg-zinc-800 rounded" />
+                </div>
+            </div>
+        );
     }
 
     const formatStat = (num: number) => {

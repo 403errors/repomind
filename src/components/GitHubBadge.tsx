@@ -34,10 +34,15 @@ export function GitHubBadge() {
             <div className="flex items-center gap-2 p-2 md:px-4 md:py-2 bg-gradient-to-r from-zinc-800/80 to-zinc-900/80 border border-zinc-700/50 rounded-full backdrop-blur-md hover:border-zinc-500/50 transition-colors text-white shadow-lg">
                 <Github className="w-5 h-5 md:w-4 md:h-4 text-white" />
                 <span className="hidden md:inline text-sm font-medium text-zinc-200">Star on GitHub</span>
-                {stars !== null && (
+                {stars !== null ? (
                     <div className="hidden md:flex items-center gap-1.5 pl-2 border-l border-zinc-700/60 ml-1 text-zinc-400">
                         <span className="text-xs font-mono text-zinc-300">{stars.toLocaleString()}</span>
                         <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                    </div>
+                ) : (
+                    <div className="hidden md:flex items-center gap-1.5 pl-2 border-l border-zinc-700/60 ml-1 animate-pulse">
+                        <div className="w-8 h-3 bg-zinc-800 rounded mx-1" />
+                        <Star className="w-3 h-3 text-zinc-700 fill-zinc-700" />
                     </div>
                 )}
             </div>
