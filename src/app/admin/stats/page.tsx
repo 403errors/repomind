@@ -1,11 +1,19 @@
 import { getAnalyticsData } from "@/lib/analytics";
-import { Users, Activity, Smartphone, Monitor, Globe } from "lucide-react";
+import { Users, Activity, Smartphone, Monitor, Globe, Lock, Loader2, ArrowRight } from "lucide-react";
 
 export const dynamic = 'force-dynamic'; // Ensure real-time data
 
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
+import AdminLoginPage from "./AdminLoginPage";
 
 export default async function AdminStatsPage() {
+    const cookieStore = await cookies();
+    const isAdmin = cookieStore.get("admin_session")?.value === "authenticated";
+
+    if (!isAdmin) {
+        return <AdminLoginPage />;
+    }
+
     const data = await getAnalyticsData();
 
     // Get current user debug info

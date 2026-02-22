@@ -10,7 +10,7 @@
  * No orchestration, no raw GitHub shapes, no inline context building.
  */
 
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import {
     getProfile,
     getRepo,
@@ -138,6 +138,32 @@ export async function fetchProfile(username: string) {
 
 export async function fetchPublicStats() {
     return getPublicStats();
+}
+
+/**
+ * Verify admin password and set a session cookie (10 min)
+ */
+export async function verifyAdminPassword(password: string) {
+    const adminPassword = process.env.ADMIN_PASSWORD;
+
+    if (!adminPassword) {
+        console.error("ADMIN_PASSWORD environment variable is not set");
+        return { success: false, error: "Authentication system is misconfigured. Please contact administrator." };
+    }
+
+    if (password === adminPassword) {
+        const cookieStore = await cookies();
+        cookieStore.set("admin_session", "authenticated", {
+            maxAge: 10 * 60, // 10 minutes
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            path: "/"
+        });
+        return { success: true };
+    }
+
+    return { success: false, error: "Invalid password" };
 }
 
 /**
