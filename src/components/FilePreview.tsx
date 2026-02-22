@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { X, Loader2, FileCode, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { toast } from "sonner";
 
 interface FilePreviewProps {
@@ -200,7 +202,12 @@ export function FilePreview({ isOpen, filePath, repoOwner, repoName, onClose }: 
                             <>
                                 {isMarkdown ? (
                                     <div className="prose prose-invert prose-sm max-w-none">
-                                        <ReactMarkdown>{content}</ReactMarkdown>
+                                        <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
+                                            rehypePlugins={[rehypeRaw]}
+                                        >
+                                            {content}
+                                        </ReactMarkdown>
                                     </div>
                                 ) : (
                                     <pre className="text-sm text-zinc-300 font-mono overflow-x-auto">
