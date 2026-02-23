@@ -90,7 +90,7 @@ export function ChatInput({
                 disabled={disabled}
                 rows={1}
                 className={cn(
-                    "w-full bg-zinc-900 border border-white/10 rounded-2xl px-4 pt-3 pb-3 pr-28 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-600/50 transition-all resize-none min-h-[52px] max-h-[200px]",
+                    "block w-full bg-zinc-900 border border-white/10 rounded-2xl px-4 pt-3 pb-3 pr-28 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-600/50 transition-all resize-none min-h-[52px] max-h-[200px]",
                     disabled && "opacity-50 cursor-not-allowed"
                 )}
                 style={{
@@ -100,7 +100,7 @@ export function ChatInput({
                 }}
             />
 
-            <div className="absolute right-2 bottom-2 flex items-center gap-1.5" ref={dropdownRef}>
+            <div className="absolute right-2 inset-y-0 flex items-center gap-1.5" ref={dropdownRef}>
                 <div className="relative">
                     <button
                         type="button"
