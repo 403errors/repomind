@@ -1,4 +1,4 @@
-import { getGenAI, DEFAULT_MODEL, FAST_MODEL } from "./ai-client";
+import { getGenAI, DEFAULT_MODEL, type ModelPreference } from "./ai-client";
 import { buildRepoMindPrompt, formatHistoryText } from "./prompt-builder";
 import { cacheQuerySelection, getCachedQuerySelection } from "./cache";
 import type { GitHubProfile } from "./github";
@@ -36,13 +36,21 @@ export async function analyzeFileSelection(
     }
   }
 
-  // 3. AI SELECTION (Fallback) — uses the lightweight model to keep costs low
+  // 3. AI SELECTION (Fallback)
+
+  // HIERARCHICAL PRUNING for large repos (> 1,000 files)
+  let candidates = fileTree;
+  if (fileTree.length > 1000) {
+    console.log(`🌳 Repo too large (${fileTree.length} files), performing hierarchical pruning...`);
+    candidates = await pruneFileTreeHierarchically(question, fileTree);
+  }
+
   const prompt = `
     Select relevant files for this query from the list below.
     Query: "${question}"
     
     Files:
-    ${fileTree.slice(0, 1000).join("\n")}
+    ${candidates.slice(0, 500).join("\n")}
     
     Rules:
     - Return JSON: { "files": ["path/to/file"] }
@@ -55,9 +63,17 @@ export async function analyzeFileSelection(
     `;
 
   try {
-    const result = await getGenAI()
-      .getGenerativeModel({ model: FAST_MODEL })
-      .generateContent(prompt);
+    // For large/complex selections, we use the reasoning model with low thinking to keep it fast
+    const model = getGenAI().getGenerativeModel({
+      model: DEFAULT_MODEL,
+      generationConfig: {
+        thinkingConfig: {
+          thinking_level: "LOW"
+        }
+      } as any
+    });
+
+    const result = await model.generateContent(prompt);
     const response = result.response.text();
     const cleanResponse = response.replace(/```json/g, "").replace(/```/g, "").trim();
     const parsed = JSON.parse(cleanResponse);
@@ -70,7 +86,69 @@ export async function analyzeFileSelection(
     return selectedFiles;
   } catch (e) {
     console.error("Failed to parse file selection", e);
-    return fileTree.filter((f) => f === "README.md" || f === "package.json");
+    // Fallback to basic files if the pruning/selection fails
+    return fileTree.filter((f) =>
+      f.toLowerCase() === "readme.md" ||
+      f.toLowerCase() === "package.json" ||
+      f.toLowerCase() === "go.mod" ||
+      f.toLowerCase() === "cargo.toml"
+    );
+  }
+}
+
+/**
+ * Prunes a large file tree by identifying relevant directories first.
+ * Uses Gemini 3 Flash in low-thinking mode for rapid classification.
+ */
+async function pruneFileTreeHierarchically(question: string, fileTree: string[]): Promise<string[]> {
+  const topLevelPaths = new Set<string>();
+  fileTree.forEach(path => {
+    const parts = path.split('/');
+    if (parts.length > 1) {
+      // Add first two levels for better context
+      topLevelPaths.add(parts.slice(0, 2).join('/'));
+    } else {
+      topLevelPaths.add(parts[0]);
+    }
+  });
+
+  const prompt = `
+    Identify the 5-10 most relevant directories or modules for this query.
+    Query: "${question}"
+    
+    Directories:
+    ${Array.from(topLevelPaths).slice(0, 500).join("\n")}
+    
+    Return JSON: { "directories": ["path/to/dir"] }
+    NO EXPLANATION.
+  `;
+
+  try {
+    const model = getGenAI().getGenerativeModel({
+      model: DEFAULT_MODEL,
+      generationConfig: {
+        thinkingConfig: { thinking_level: "MINIMAL" }
+      } as any
+    });
+
+    const result = await model.generateContent(prompt);
+    const response = result.response.text();
+    const cleanResponse = response.replace(/```json/g, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleanResponse);
+    const targetDirs: string[] = parsed.directories || [];
+
+    // Filter file tree to only include files in these directories (plus root files)
+    const pruned = fileTree.filter(path => {
+      // Always include root-level files (configs, READMEs)
+      if (!path.includes('/')) return true;
+      return targetDirs.some(dir => path.startsWith(dir));
+    });
+
+    console.log(`✅ Pruned tree from ${fileTree.length} to ${pruned.length} files`);
+    return pruned;
+  } catch (e) {
+    console.warn("Hierarchical pruning failed, using flat list", e);
+    return fileTree.slice(0, 1000);
   }
 }
 
@@ -81,7 +159,8 @@ export async function answerWithContext(
   context: string,
   repoDetails: { owner: string; repo: string },
   profileData?: GitHubProfile,
-  history: { role: "user" | "model"; content: string }[] = []
+  history: { role: "user" | "model"; content: string }[] = [],
+  modelPreference: ModelPreference = "flash"
 ): Promise<string> {
   const historyText = formatHistoryText(history);
   const prompt = buildRepoMindPrompt({ question, context, repoDetails, historyText });
@@ -89,6 +168,11 @@ export async function answerWithContext(
   const model = getGenAI().getGenerativeModel({
     model: DEFAULT_MODEL,
     tools: [{ googleSearch: {} } as any],
+    generationConfig: {
+      thinkingConfig: {
+        thinking_level: modelPreference === "thinking" ? "HIGH" : "LOW"
+      }
+    } as any
   });
 
   const result = await model.generateContent(prompt);
@@ -104,7 +188,8 @@ export async function* answerWithContextStream(
   context: string,
   repoDetails: { owner: string; repo: string },
   profileData?: GitHubProfile,
-  history: { role: "user" | "model"; content: string }[] = []
+  history: { role: "user" | "model"; content: string }[] = [],
+  modelPreference: ModelPreference = "flash"
 ): AsyncGenerator<string> {
   const historyText = formatHistoryText(history);
   const prompt = buildRepoMindPrompt({ question, context, repoDetails, historyText });
@@ -112,6 +197,11 @@ export async function* answerWithContextStream(
   const model = getGenAI().getGenerativeModel({
     model: DEFAULT_MODEL,
     tools: [{ googleSearch: {} } as any],
+    generationConfig: {
+      thinkingConfig: {
+        thinking_level: modelPreference === "thinking" ? "HIGH" : "LOW"
+      }
+    } as any
   });
 
   const result = await model.generateContentStream(prompt);

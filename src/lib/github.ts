@@ -455,6 +455,7 @@ export async function getReposReadmes(username: string) {
           description: repo.description,
           stars: repo.stargazers_count,
           forks: repo.forks_count,
+          language: repo.language,
         };
       } catch (e) {
         return null;
@@ -469,6 +470,7 @@ export async function getReposReadmes(username: string) {
       description: string | null;
       stars: number;
       forks: number;
+      language: string | null;
     }[];
   } catch (error) {
     console.error("Error fetching repos:", error);

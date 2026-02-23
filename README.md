@@ -8,7 +8,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![Gemini AI](https://img.shields.io/badge/Gemini-3_Flash_Preview-blue)](https://ai.google.dev/)
-[![Gemini AI](https://img.shields.io/badge/Gemini-2.5_Flash_Lite-red)](https://ai.google.dev/)
 <br>
 [![Analyzed by RepoMind](https://img.shields.io/badge/Analyzed%20by-RepoMind-4F46E5?style=for-the-badge)](https://repomind-ai.vercel.app/repo/facebook/react)
 
@@ -31,7 +30,9 @@
 ![All Features Overview](/public/features.png)
 
 ###  Context-Aware Engine
-- **Smart Context Loading**: Instead of dumping entire files, RepoMind intelligently selects relevant code snippets based on your query.
+- **Hierarchical Pruning**: For large repositories (1,000+ files), RepoMind uses a multi-stage drill-down with **Gemini 3 Flash Preview** to narrow down thousands of files into relevant modules.
+- **Smart Context Loading**: Intelligently selects relevant code files based on your query, bypassing AI selection if a filename is explicitly mentioned.
+- **Model Selection (Flash vs Thinking)**: Toggle between **Flash** mode for instant answers and **Thinking** mode for deep reasoning and complex logic analysis using Gemini 3's reasoning capabilities.
 - **Noise Filtering**: Automatically ignores `node_modules`, lockfiles, and build artifacts to focus on source code.
 - **Multi-File Understanding**: Traces dependencies and imports to understand how different parts of the codebase interact.
 
@@ -79,8 +80,10 @@ graph TD
     
     subgraph " Blazing Fast Optimization"
         Engine -->|Lazy Load| Profile[Profile Metadata]
-        Engine -->|Flash-Lite| Select[Smart File Selection]
-        Select -->|Minimizes Tokens| Context[Relevant Context]
+        Profile -->|Explicit API| Lang[Language & Topics]
+        Engine -->|Flash Selection| Select[Smart File Selection]
+        Select -->|Hierarchical Pruning| Prune[Target Modules]
+        Prune -->|Minimizes Tokens| Context[Relevant Context]
     end
     
     subgraph " Native Web Search"
@@ -105,6 +108,7 @@ We are constantly improving RepoMind. Check out our **[CHANGELOG.md](CHANGELOG.m
 - **Export Options**: Save diagrams as images for documentation or presentations.
 
 ###  Deep Profile Intelligence (USP)
+- **Metadata Enrichment**: Uses explicit GitHub API data for languages and topics, making profile analysis faster and more accurate.
 - **Developer Fingerprinting**: Analyze coding style, commit patterns, and language preferences of any GitHub user.
 - **Cross-Repo Context**: Aggregate knowledge from multiple repositories to understand a developer's full skillset.
 - **Resume Generation**: Create instant technical summaries for any developer profile.

@@ -16,6 +16,7 @@ import { countTokens, MAX_TOKENS } from "@/lib/tokens";
 import { getCachedRepoQueryAnswer, cacheRepoQueryAnswer } from "@/lib/cache";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import type { GitHubProfile } from "@/lib/github";
+import type { ModelPreference } from "@/lib/ai-client";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ export interface RepoQueryParams {
     filePaths: string[];
     history?: { role: "user" | "model"; content: string }[];
     profileData?: GitHubProfile;
+    modelPreference?: ModelPreference;
 }
 
 /**
@@ -55,7 +57,8 @@ export interface QueryPipelineDeps {
         context: string,
         repoDetails: { owner: string; repo: string },
         profileData?: GitHubProfile,
-        history?: { role: "user" | "model"; content: string }[]
+        history?: { role: "user" | "model"; content: string }[],
+        modelPreference?: ModelPreference
     ) => AsyncGenerator<string>;
 }
 
@@ -91,7 +94,7 @@ export async function* executeRepoQueryStream(
         streamAnswer = answerWithContextStream,
     } = deps;
 
-    const { query, owner, repo, filePaths, history = [], profileData } = params;
+    const { query, owner, repo, filePaths, history = [], profileData, modelPreference } = params;
 
     try {
         // Step 1: Select relevant files
@@ -136,7 +139,8 @@ export async function* executeRepoQueryStream(
             context,
             { owner, repo },
             profileData,
-            history
+            history,
+            modelPreference
         );
 
         for await (const chunk of stream) {

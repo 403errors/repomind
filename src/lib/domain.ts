@@ -38,6 +38,7 @@ export interface RepoReadmeSummary {
     description: string | null;
     stars: number;
     forks: number;
+    language: string | null;
 }
 
 // ─── Transformers ──────────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ export function buildProfileContextString(
 export function buildRepoReadmeEntry(readme: RepoReadmeSummary): string {
     const header =
         `\n--- REPO: ${readme.repo} ---\n` +
+        `Language: ${readme.language ?? "Unknown"}\n` +
         `Last Updated: ${readme.updated_at}\n` +
         `Description: ${readme.description ?? "N/A"}\n` +
         `Stars: ${readme.stars}\n` +

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.3.6] - 2026-02-23
+### Added
+- **Hierarchical Pruning**: Multi-stage file selection engine for repositories with 1,000+ files using Gemini 3 Flash.
+- **Explicit Metadata Enrichment**: Integrated primary language and topic metadata from GitHub API for faster profile analysis.
+- **User-Selectable Reasoning Models**: Introduced "Flash" and "Thinking" modes to allow users to choose between speed and deep reasoning.
+
+### Improved
+- **AI Pruning Efficiency**: Switched selection logic to use Gemini 3 Flash Preview with "Minimal/Low Thinking" mode for rapid classification and lower latency.
+- **Profile Context Accuracy**: Language detection now relies on authoritative GitHub metadata rather than README inference for core project tags.
+- **AI Core Cleanup**: Removed unused Gemini 2.5 Flash Lite integration in favor of a unified Gemini 3 Flash architecture.
+
 ## [v1.3.5] - 2026-01-26
 ### Added
 - **Security Report UX**: New DevTools Security tab with scan depth controls and AI toggle.

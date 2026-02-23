@@ -23,6 +23,8 @@ import Link from "next/link";
 import { StreamingProgress } from "./StreamingProgress";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import { CopyBadge } from "./CopyBadge";
+import type { ModelPreference } from "@/lib/ai-client";
+import { Brain, Zap } from "lucide-react";
 
 // Initialize mermaid
 mermaid.initialize({
@@ -199,6 +201,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     const [selectionText, setSelectionText] = useState("");
     const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number } | null>(null);
     const [referenceText, setReferenceText] = useState("");
+    const [modelPreference, setModelPreference] = useState<ModelPreference>("flash");
 
     // Streaming state
     const [streamingStatus, setStreamingStatus] = useState<{ message: string; progress: number } | null>(null);
@@ -452,7 +455,9 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 { owner: repoContext.owner, repo: repoContext.repo },
                 messages.map(m => ({ role: m.role, content: m.content })),
                 ownerProfile, // Pass profile data for developer cards
-                visitorId
+                visitorId,
+                undefined, // filePaths is passed as undefined if executeRepoQuery fallback is used
+                modelPreference
             );
 
             const modelMsg: Message = {
@@ -952,10 +957,12 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                         value={input}
                         onChange={setInput}
                         onSubmit={handleSubmit}
-                        placeholder={totalTokens >= MAX_TOKENS ? "Conversation limit reached. Please clear chat." : "Ask a question about the code..."}
+                        placeholder={totalTokens >= MAX_TOKENS ? "Conversation limit reached. Please clear chat." : "Ask about the code, architecture, or features..."}
                         disabled={totalTokens >= MAX_TOKENS}
                         loading={loading}
                         allowEmptySubmit={Boolean(referenceText)}
+                        modelPreference={modelPreference}
+                        setModelPreference={setModelPreference}
                     />
                 </form>
             </div>

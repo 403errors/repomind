@@ -32,5 +32,5 @@ export function getGenAI(): GoogleGenerativeAI {
 /** Default model for all general-purpose AI tasks (chat, analysis, generation) */
 export const DEFAULT_MODEL = "gemini-3-flash-preview";
 
-/** Lightweight model — cheaper & faster, used for quick classification tasks */
-export const FAST_MODEL = "gemini-2.5-flash-lite";
+/** Supported model preferences for the user interface */
+export type ModelPreference = "flash" | "thinking";

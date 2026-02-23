@@ -14,6 +14,8 @@ import { validateMermaidSyntax, sanitizeMermaidCode, getFallbackTemplate, genera
 import { saveProfileConversation, loadProfileConversation, clearProfileConversation } from "@/lib/storage";
 import { exportChatToMarkdownFile, convertChartsToImages } from "@/lib/chat-export";
 import { renderMarkdownToHtml } from "@/lib/clipboard-utils";
+import type { ModelPreference } from "@/lib/ai-client";
+import { Brain, Zap } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import Link from "next/link";
 import mermaid from "mermaid";
@@ -29,7 +31,7 @@ interface Message {
 interface ProfileChatInterfaceProps {
     profile: GitHubProfile;
     profileReadme: string | null;
-    repoReadmes: { repo: string; content: string; updated_at: string; description: string | null; stars: number; forks: number }[];
+    repoReadmes: { repo: string; content: string; updated_at: string; description: string | null; stars: number; forks: number; language: string | null }[];
 }
 
 // Initialize mermaid
@@ -172,6 +174,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
     const [selectionText, setSelectionText] = useState("");
     const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number } | null>(null);
     const [referenceText, setReferenceText] = useState("");
+    const [modelPreference, setModelPreference] = useState<ModelPreference>("flash");
 
     // Load conversation on mount
     const toastShownRef = useRef(false);
@@ -264,7 +267,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                 profile: profile, // Pass full profile object
                 profileReadme,
                 repoReadmes,
-            }, visitorId, history);
+            }, visitorId, history, modelPreference);
 
             const modelMsg: Message = {
                 id: (Date.now() + 1).toString(),
@@ -566,7 +569,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                         ? "bg-blue-600 text-white rounded-tr-none"
                                         : "bg-zinc-900 border border-white/10 rounded-tl-none"
                                 )}
-                                data-message-role={msg.role}
+                                    data-message-role={msg.role}
                                 >
                                     {msg.role === "model" && (
                                         <button
@@ -660,6 +663,8 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                         disabled={totalTokens >= MAX_TOKENS}
                         loading={loading}
                         allowEmptySubmit={Boolean(referenceText)}
+                        modelPreference={modelPreference}
+                        setModelPreference={setModelPreference}
                     />
                 </form>
             </div>

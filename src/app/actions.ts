@@ -28,6 +28,7 @@ import type { GitHubProfile } from "@/lib/github";
 import type { SecurityFinding, ScanSummary } from "@/lib/security-scanner";
 import type { SearchResult } from "@/lib/search-engine";
 import { getCachedRepoQueryAnswer, cacheRepoQueryAnswer } from "@/lib/cache";
+import type { ModelPreference } from "@/lib/ai-client";
 
 // ─── Services & Domain ────────────────────────────────────────────────────────
 import {
@@ -213,6 +214,7 @@ export async function fetchUserRepos(username: string) {
         description: r.description,
         stars: r.stargazers_count,
         forks: r.forks_count,
+        language: r.language,
     }));
 }
 
@@ -257,18 +259,19 @@ export async function analyzeRepoFiles(
  */
 export async function generateAnswer(
     query: string,
-    context: string,   // kept for backwards-compat; pipeline re-fetches internally
+    context: string,
     repoDetails: { owner: string; repo: string },
     history: { role: "user" | "model"; content: string }[] = [],
     profileData?: GitHubProfile,
     visitorId?: string,
-    filePaths?: string[]
+    filePaths?: string[],
+    modelPreference: ModelPreference = "flash"
 ): Promise<string> {
     await trackQueryEvent(visitorId);
 
     if (!filePaths?.length) {
         // Fallback: if no file paths, answer with the pre-built context
-        return answerWithContext(query, context, repoDetails, profileData, history);
+        return answerWithContext(query, context, repoDetails, profileData, history, modelPreference);
     }
 
     const { answer } = await executeRepoQuery({
@@ -278,6 +281,7 @@ export async function generateAnswer(
         filePaths,
         history,
         profileData,
+        modelPreference,
     });
     return answer;
 }
@@ -291,7 +295,8 @@ export async function* generateAnswerStream(
     repoDetails: { owner: string; repo: string },
     filePaths: string[],
     history: { role: "user" | "model"; content: string }[] = [],
-    profileData?: GitHubProfile
+    profileData?: GitHubProfile,
+    modelPreference: ModelPreference = "flash"
 ): AsyncGenerator<StreamUpdate> {
     yield* executeRepoQueryStream({
         query,
@@ -300,6 +305,7 @@ export async function* generateAnswerStream(
         filePaths,
         history,
         profileData,
+        modelPreference,
     });
 }
 
@@ -309,7 +315,8 @@ export async function processProfileQuery(
     query: string,
     profileContext: ProfileQueryInput,
     visitorId?: string,
-    history: { role: "user" | "model"; content: string }[] = []
+    history: { role: "user" | "model"; content: string }[] = [],
+    modelPreference: ModelPreference = "flash"
 ) {
     await trackQueryEvent(visitorId);
     const context = await buildFullProfileContext(profileContext, query);
@@ -319,14 +326,16 @@ export async function processProfileQuery(
         context,
         { owner: profileContext.username, repo: "profile" },
         profileContext.profile,
-        history
+        history,
+        modelPreference
     );
     return { answer };
 }
 
 export async function* processProfileQueryStream(
     query: string,
-    profileContext: ProfileQueryInput
+    profileContext: ProfileQueryInput,
+    modelPreference: ModelPreference = "flash"
 ): AsyncGenerator<StreamUpdate> {
     try {
         yield { type: "status", message: "Loading profile data...", progress: 20 };
@@ -344,7 +353,9 @@ export async function* processProfileQueryStream(
             query,
             context,
             { owner: profileContext.username, repo: "profile" },
-            profileContext.profile
+            profileContext.profile,
+            [],
+            modelPreference
         );
 
         for await (const chunk of stream) {
