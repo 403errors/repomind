@@ -41,6 +41,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         openGraph: {
             title: `Top ${capitalizedTopic} Repositories`,
             description: `Explore the best open-source projects using ${decodedTopic}.`
+        },
+        alternates: {
+            canonical: `/topics/${topic}`,
         }
     };
 }

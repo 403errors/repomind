@@ -34,6 +34,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
                 card: 'summary_large_image',
                 title: `${data.full_name} Architecture Analysis`,
                 description: data.description || '',
+            },
+            alternates: {
+                canonical: `/repo/${owner}/${repo}`,
             }
         };
     } catch (error) {

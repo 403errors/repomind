@@ -55,9 +55,6 @@ export const metadata: Metadata = {
     title: "RepoMind",
     statusBarStyle: "black-translucent",
   },
-  alternates: {
-    canonical: "/",
-  },
   openGraph: {
     title: "RepoMind - Stop reading it! Start talking to it!",
     description: "Agentic CAG-powered analysis for GitHub repositories. Chat with your codebase, generate visual flowcharts, uncover deep insights, and accelerate development with AI-driven repository intelligence.",

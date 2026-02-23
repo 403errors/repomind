@@ -7,6 +7,14 @@ import { Loader2, AlertCircle, ArrowLeft, Github, Search } from "lucide-react";
 import { GitHubRepo } from "@/lib/github";
 import Link from "next/link";
 
+import { Metadata } from 'next';
+
+export const metadata: Metadata = {
+    alternates: {
+        canonical: '/chat',
+    }
+};
+
 export default async function ChatPage({
     searchParams,
 }: {
