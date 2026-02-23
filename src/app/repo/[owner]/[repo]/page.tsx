@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const { owner, repo } = await params;
 
     try {
-        const data = await getRepo(owner, repo);
+        const { metadata: data } = await import('@/lib/github').then(m => m.getRepoFullContext(owner, repo));
         return {
             title: `${data.name} by ${data.owner.login} - RepoMind Architecture & Analysis`,
             description: data.description
@@ -54,10 +54,15 @@ export default async function RepoPage({ params }: Props) {
     let readmeContent;
 
     try {
-        // Fetch critical data
-        repoData = await getRepo(owner, repo);
-        detailsData = await getRepoDetailsGraphQL(owner, repo);
-        readmeContent = await getRepoReadme(owner, repo);
+        // MEGA-OPTIMIZATION: Fetch all repository data in a single consolidated call
+        // This uses the "Mega-Key" strategy to reduce KV commands and utilize bandwidth
+        const context = await import('@/lib/github').then(m => m.getRepoFullContext(owner, repo));
+        repoData = context.metadata;
+        detailsData = {
+            languages: context.languages,
+            commits: context.commits
+        };
+        readmeContent = context.readme;
     } catch (error) {
         console.error("Failed to load repo data:", error);
         notFound();
@@ -162,9 +167,13 @@ export default async function RepoPage({ params }: Props) {
                         you can instantly generate complete architecture diagrams, visualize control flows, and perform automated security audits across the entire codebase.
                     </p>
                     <p className="text-zinc-400 mb-6">
-                        Our Agentic Context Augmented Generation (Agentic CAG) engine loads full source files into context, avoiding the fragmentation of traditional RAG systems.
+                        Our Agentic Context Augmented Generation (Agentic CAG) engine loads full source files into context on-demand, avoiding the fragmentation of traditional RAG systems.
                         Ask questions about the architecture, dependencies, or specific features to see it in action.
                     </p>
+                    <div className="flex items-center gap-2 text-xs text-zinc-500 mb-6 bg-zinc-800/30 w-fit px-3 py-1.5 rounded-lg border border-zinc-700/30">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Source files are only loaded when you start an analysis to optimize performance.</span>
+                    </div>
                     <div className="mt-8">
                         <Link
                             href={`/chat?q=${owner}/${repo}`}

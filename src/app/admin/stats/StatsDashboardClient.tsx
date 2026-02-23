@@ -4,11 +4,14 @@ import { useState, useMemo } from "react";
 import {
     Users, Activity, Smartphone, Monitor, Globe,
     RefreshCw, ArrowUpDown, ChevronUp, ChevronDown,
-    Clock, Calendar, UserCheck, TrendingUp
+    Clock, Calendar, UserCheck, TrendingUp,
+    Database, Zap, Server
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import type { AnalyticsData, VisitorData } from "@/lib/analytics";
+import type { AnalyticsData, VisitorData, KVUsagePoint } from "@/lib/analytics";
+
+type HistoryRange = "24h" | "1w" | "1m" | "3m";
 
 interface StatsDashboardClientProps {
     data: AnalyticsData;
@@ -25,6 +28,7 @@ type SortConfig = {
 export default function StatsDashboardClient({ data, userAgent, country, isMobile }: StatsDashboardClientProps) {
     const router = useRouter();
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [selectedRange, setSelectedRange] = useState<HistoryRange>("24h");
     const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'lastSeen', direction: 'desc' });
     const [visibleCount, setVisibleCount] = useState(15);
 
@@ -55,6 +59,14 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
 
     const isOnline = (lastSeen: number) => {
         return (Date.now() - lastSeen) < 5 * 60 * 1000; // 5 minutes
+    };
+
+    const formatSize = (bytes: number) => {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
     // Calculate advanced metrics
@@ -196,6 +208,12 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
                         subValue="Last 5 minutes"
                         icon={<div className="relative"><Globe className="w-5 h-5 text-green-400" />{activeNow > 0 && <div className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-ping" />}</div>}
                     />
+                    <StatsCard
+                        title="KV Storage"
+                        value={formatSize(data.kvStats?.currentSize || 0)}
+                        subValue={`${((data.kvStats?.currentSize || 0) / (data.kvStats?.maxSize || 1) * 100).toFixed(2)}% of ${formatSize(data.kvStats?.maxSize || 0)}`}
+                        icon={<Database className="w-5 h-5 text-amber-400" />}
+                    />
                 </div>
 
                 {/* Secondary Metrics & Simple Trends */}
@@ -326,6 +344,164 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
                                 </button>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                {/* storage usage chart */}
+                <div className="bg-zinc-900/50 border border-white/10 rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-8">
+                        <div>
+                            <h2 className="text-xl font-semibold flex items-center gap-2">
+                                <Database className="w-5 h-5 text-amber-400" />
+                                KV Cache Storage History
+                            </h2>
+                            <p className="text-zinc-500 text-xs mt-1">Storage usage trend over the selected period (MB)</p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <select
+                                value={selectedRange}
+                                onChange={(e) => setSelectedRange(e.target.value as HistoryRange)}
+                                className="bg-white/5 border border-white/10 rounded-lg text-xs py-1 px-3 text-zinc-300 focus:outline-none focus:border-amber-500/50"
+                            >
+                                <option value="24h">Last 24 Hours</option>
+                                <option value="1w">Last Week</option>
+                                <option value="1m">Last Month</option>
+                                <option value="3m">Last 3 Months</option>
+                            </select>
+                            <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+                                <Zap className="w-3 h-3 text-amber-500" />
+                                <span>LIMIT: {formatSize(data.kvStats?.maxSize || 0)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="h-64 w-full relative group">
+                        {(() => {
+                            const history = data.kvStats?.history || [];
+                            if (history.length < 2) return (
+                                <div className="flex flex-col items-center justify-center h-full text-zinc-600">
+                                    <Database className="w-10 h-10 opacity-10 mb-2" />
+                                    <p className="text-sm">Collecting storage history data...</p>
+                                </div>
+                            );
+
+                            const now = Date.now();
+                            const ranges = {
+                                "24h": now - 24 * 60 * 60 * 1000,
+                                "1w": now - 7 * 24 * 60 * 60 * 1000,
+                                "1m": now - 30 * 24 * 60 * 60 * 1000,
+                                "3m": now - 90 * 24 * 60 * 60 * 1000
+                            };
+
+                            let filteredHistory = history.filter(h => h.timestamp >= ranges[selectedRange]);
+
+                            // If too many points, aggregate to keep SVG manageable
+                            const maxPoints = 60;
+                            if (filteredHistory.length > maxPoints) {
+                                const step = Math.ceil(filteredHistory.length / maxPoints);
+                                filteredHistory = filteredHistory.filter((_, i) => i % step === 0);
+                            }
+
+                            if (filteredHistory.length < 2) return (
+                                <div className="flex flex-col items-center justify-center h-full text-zinc-600">
+                                    <Database className="w-10 h-10 opacity-10 mb-2" />
+                                    <p className="text-sm">No data points for this range yet...</p>
+                                </div>
+                            );
+
+                            return (
+                                <div className="w-full h-full pt-4">
+                                    <svg className="w-full h-full overflow-hidden" preserveAspectRatio="none" viewBox={`0 0 ${filteredHistory.length - 1} 100`}>
+                                        <defs>
+                                            <linearGradient id="line-gradient" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.4" />
+                                                <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
+                                            </linearGradient>
+                                        </defs>
+
+                                        {/* Grid Lines */}
+                                        {[0, 25, 50, 75, 100].map((y) => (
+                                            <line
+                                                key={y}
+                                                x1="0"
+                                                y1={y}
+                                                x2={filteredHistory.length - 1}
+                                                y2={y}
+                                                stroke="rgba(255,255,255,0.05)"
+                                                strokeWidth="1"
+                                                vectorEffect="non-scaling-stroke"
+                                            />
+                                        ))}
+
+                                        {(() => {
+                                            const points = filteredHistory;
+                                            const minSize = Math.min(...points.map(p => p.size));
+                                            const maxSize = Math.max(...points.map(p => p.size));
+                                            const range = Math.max(maxSize - minSize, 1024);
+                                            const padding = range * 0.1;
+
+                                            const getRelativeY = (size: number) => {
+                                                const rawY = 100 - ((size - (minSize - padding)) / (range + 2 * padding) * 100);
+                                                return Math.max(0, Math.min(100, rawY)); // Clamp to 0-100
+                                            };
+
+                                            const normalizedPoints = points.map((p, i) => `${i},${getRelativeY(p.size)}`).join(' ');
+                                            const areaPoints = `0,100 ${normalizedPoints} ${points.length - 1},100`;
+
+                                            return (
+                                                <>
+                                                    <polyline
+                                                        points={areaPoints}
+                                                        fill="url(#line-gradient)"
+                                                        className="transition-all duration-700"
+                                                    />
+                                                    <polyline
+                                                        points={normalizedPoints}
+                                                        fill="none"
+                                                        stroke="#f59e0b"
+                                                        strokeWidth="2"
+                                                        strokeLinejoin="round"
+                                                        strokeLinecap="round"
+                                                        vectorEffect="non-scaling-stroke"
+                                                        className="transition-all duration-700"
+                                                    />
+
+                                                    {points.map((p, i) => {
+                                                        const y = getRelativeY(p.size);
+                                                        return (
+                                                            <g key={i} className="cursor-pointer group/point">
+                                                                <rect
+                                                                    x={i - 0.5}
+                                                                    y={0}
+                                                                    width={1}
+                                                                    height={100}
+                                                                    fill="transparent"
+                                                                />
+                                                                <circle
+                                                                    cx={i}
+                                                                    cy={y}
+                                                                    r="3"
+                                                                    fill="#f59e0b"
+                                                                    className="opacity-0 group-hover/point:opacity-100 transition-opacity"
+                                                                    vectorEffect="non-scaling-size"
+                                                                />
+                                                                <title>{`${new Date(p.timestamp).toLocaleString()} - ${formatSize(p.size)}`}</title>
+                                                            </g>
+                                                        );
+                                                    })}
+                                                </>
+                                            );
+                                        })()}
+                                    </svg>
+
+                                    {/* X-Axis Labels */}
+                                    <div className="absolute bottom-0 left-0 w-full flex justify-between px-1 text-[8px] font-mono text-zinc-600 mt-2">
+                                        <span>{new Date(filteredHistory[0].timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                        <span>{new Date(filteredHistory[filteredHistory.length - 1].timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
                 </div>
 

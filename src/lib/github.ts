@@ -8,7 +8,10 @@ import {
   getCachedProfileData,
   cacheFileTree,
   getCachedFileTree,
+  cacheRepoFullContext,
+  getCachedRepoFullContext,
 } from "./cache";
+import { unstable_cache } from 'next/cache';
 
 // Validate GitHub token
 const githubToken = process.env.GITHUB_TOKEN;
@@ -123,7 +126,10 @@ const REPO_DETAILS_QUERY = `
   }
 `;
 
-export async function getProfile(username: string): Promise<GitHubProfile> {
+/**
+ * Core Profile Fetcher (hit by unstable_cache)
+ */
+async function getProfileRaw(username: string): Promise<GitHubProfile> {
   // Check memory cache first
   if (profileCache.has(username)) {
     return profileCache.get(username)!;
@@ -147,6 +153,18 @@ export async function getProfile(username: string): Promise<GitHubProfile> {
 
   return data;
 }
+
+/**
+ * EDGE-CACHE: Get Profile with Edge Performance
+ */
+export const getProfile = unstable_cache(
+  async (username: string) => getProfileRaw(username),
+  ['github-profile'],
+  {
+    revalidate: 1800, // 30 minutes
+    tags: ['profile']
+  }
+);
 
 export async function getRepo(owner: string, repo: string): Promise<GitHubRepo> {
   const cacheKey = `${owner}/${repo}`;
@@ -296,6 +314,50 @@ export async function getRepoDetailsGraphQL(owner: string, repo: string) {
     return null;
   }
 }
+
+/**
+ * Core Repo Context Fetcher (hit by unstable_cache)
+ */
+async function getRepoFullContextRaw(owner: string, repo: string) {
+  // Check Mega-Key cache first
+  const cached = await getCachedRepoFullContext(owner, repo);
+  if (cached) {
+    // Put into memory caches for efficiency if needed
+    repoCache.set(`${owner}/${repo}`, cached.metadata);
+    return cached;
+  }
+
+  // Fetch all in parallel
+  const [metadata, details, readme] = await Promise.all([
+    getRepo(owner, repo),
+    getRepoDetailsGraphQL(owner, repo),
+    getRepoReadme(owner, repo)
+  ]);
+
+  const context = {
+    metadata,
+    languages: details?.languages || [],
+    commits: details?.commits || [],
+    readme
+  };
+
+  // Cache as Mega-Key
+  await cacheRepoFullContext(owner, repo, context);
+
+  return context;
+}
+
+/**
+ * EDGE-CACHE: Get Full Repo Context with Edge Performance
+ */
+export const getRepoFullContext = unstable_cache(
+  async (owner: string, repo: string) => getRepoFullContextRaw(owner, repo),
+  ['github-repo-full'],
+  {
+    revalidate: 900, // 15 minutes
+    tags: ['repo-full']
+  }
+);
 
 export async function getFileContent(
   owner: string,

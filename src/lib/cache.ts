@@ -108,6 +108,53 @@ export async function getCachedRepoMetadata(
 }
 
 /**
+ * MEGA-KEY: Cache full repository context (metadata, languages, readme)
+ * Utilizes bandwidth to reduce command count
+ */
+export async function cacheRepoFullContext(
+    owner: string,
+    repo: string,
+    context: {
+        metadata: any;
+        languages: any;
+        readme: string | null;
+    }
+): Promise<void> {
+    const key = `repo:full:${owner}/${repo}`;
+    // Compress readme if it exists to keep payload reasonable
+    let readmeValue = context.readme;
+    if (context.readme && context.readme.length > 5000) {
+        const compressed = gzipSync(Buffer.from(context.readme));
+        readmeValue = `gz:${compressed.toString('base64')}`;
+    }
+
+    await safeKvOperation(() => kv.setex(key, TTL_REPO, {
+        ...context,
+        readme: readmeValue
+    }));
+}
+
+export async function getCachedRepoFullContext(
+    owner: string,
+    repo: string
+): Promise<any | null> {
+    const key = `repo:full:${owner}/${repo}`;
+    const cached = await safeKvOperation(() => kv.get<any>(key));
+
+    if (cached && cached.readme && typeof cached.readme === 'string' && cached.readme.startsWith('gz:')) {
+        try {
+            const buffer = Buffer.from(cached.readme.slice(3), 'base64');
+            cached.readme = gunzipSync(buffer).toString();
+        } catch (e) {
+            console.error("Failed to decompress Mega-Key readme for", repo);
+            cached.readme = null;
+        }
+    }
+
+    return cached;
+}
+
+/**
  * Cache profile data
  */
 export async function cacheProfileData(
