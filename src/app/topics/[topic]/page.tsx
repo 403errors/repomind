@@ -11,18 +11,37 @@ interface Props {
     }>;
 }
 
+interface TopicRepository {
+    owner: string;
+    repo: string;
+    stars: number;
+    description: string | null;
+    topics: string[];
+    language: string | null;
+}
+
+function isTopicRepository(value: unknown): value is TopicRepository {
+    if (!value || typeof value !== "object") return false;
+    const item = value as Partial<TopicRepository>;
+    return typeof item.owner === "string" &&
+        typeof item.repo === "string" &&
+        typeof item.stars === "number" &&
+        Array.isArray(item.topics);
+}
+
 // Helper to get matching repositories for a topic
-async function getReposForTopic(topic: string) {
+async function getReposForTopic(topic: string): Promise<TopicRepository[]> {
     try {
         const dataPath = path.join(process.cwd(), 'public', 'data', 'top-repos.json');
         if (!fs.existsSync(dataPath)) return [];
 
         const fileContent = fs.readFileSync(dataPath, 'utf8');
-        const repos = JSON.parse(fileContent);
+        const parsed = JSON.parse(fileContent) as unknown;
+        const repos = Array.isArray(parsed) ? parsed.filter(isTopicRepository) : [];
 
         // Exact match or includes
         return repos
-            .filter((r: any) => r.topics && r.topics.includes(topic.toLowerCase()))
+            .filter((r) => r.topics.includes(topic.toLowerCase()))
             .slice(0, 50); // Top 50 max per topic
     } catch (e) {
         console.error("Error reading repos for topic:", e);
@@ -76,12 +95,12 @@ export default async function TopicPage({ params }: Props) {
                     </h1>
                     <p className="text-xl text-zinc-300 max-w-3xl">
                         A curated list of the most popular GitHub repositories tagged with <strong>{displayTopic}</strong>.
-                        Select any project to visualize its architecture and dive into the codebase using RepoMind's AI engine.
+                        Select any project to visualize its architecture and dive into the codebase using RepoMind&apos;s AI engine.
                     </p>
                 </header>
 
                 <div className="grid grid-cols-1 gap-6">
-                    {repos.map((repo: any, index: number) => (
+                    {repos.map((repo, index) => (
                         <Link
                             href={`/repo/${repo.owner}/${repo.repo}`}
                             key={`${repo.owner}/${repo.repo}`}

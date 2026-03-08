@@ -64,7 +64,7 @@ export function ReasoningBlock({ steps, isStreaming }: ReasoningBlockProps) {
     const getCurrentStepTitle = (step: string) => {
         const match = step.match(/^\*\*([^*]+)\*\*/);
         if (match) return match[1];
-        let cleanStep = step.replace(/^(Reasoning|Process|STATUS):\s*/, '');
+        const cleanStep = step.replace(/^(Reasoning|Process|STATUS):\s*/, '');
         return cleanStep.length > 60 ? cleanStep.substring(0, 60) + "..." : cleanStep;
     };
 

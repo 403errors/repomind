@@ -121,7 +121,7 @@ export function WhatsNewModal({ isOpen, onClose }: WhatsNewModalProps) {
                                 <Sparkles className="w-5 h-5 md:w-6 md:h-6 text-white" />
                             </div>
                             <div>
-                                <h2 className="text-xl md:text-2xl font-bold text-white">What's New</h2>
+                                <h2 className="text-xl md:text-2xl font-bold text-white">What&apos;s New</h2>
                                 <p className="text-xs md:text-sm text-zinc-400">Latest updates and improvements</p>
                             </div>
                         </div>

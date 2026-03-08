@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ExternalLink, MapPin, Link as LinkIcon, Github, Loader2 } from "lucide-react";
+import { MapPin, Link as LinkIcon, Github, Loader2 } from "lucide-react";
 import { UserIcon } from "@/components/icons/UserIcon";
 import { fetchProfile } from "@/app/actions";
 
@@ -27,28 +27,39 @@ export function DeveloperCard({ username, name: initialName, avatar: initialAvat
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        // If we have some data but maybe not everything, or if we want to ensure accuracy
-        // we fetch the latest from GitHub.
-        const shouldFetch = !profile.avatar || !profile.bio || username === "403errors"; // Priority for creator check
+        const shouldFetch = !initialAvatar || !initialBio || !initialName || username === "403errors";
+        if (!username || !shouldFetch) return;
 
-        if (username && (shouldFetch || !profile.name)) {
+        let cancelled = false;
+
+        const run = async () => {
             setLoading(true);
-            fetchProfile(username)
-                .then((data) => {
-                    if (data) {
-                        setProfile({
-                            name: data.name || profile.name,
-                            avatar: data.avatar_url || profile.avatar,
-                            bio: data.bio || profile.bio,
-                            location: data.location || profile.location,
-                            blog: data.blog || profile.blog
-                        });
-                    }
-                })
-                .catch(console.error)
-                .finally(() => setLoading(false));
-        }
-    }, [username]);
+            try {
+                const data = await fetchProfile(username);
+                if (!cancelled && data) {
+                    setProfile((prev) => ({
+                        name: data.name || prev.name,
+                        avatar: data.avatar_url || prev.avatar,
+                        bio: data.bio || prev.bio,
+                        location: data.location || prev.location,
+                        blog: data.blog || prev.blog
+                    }));
+                }
+            } catch (error) {
+                console.error(error);
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        void run();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [username, initialAvatar, initialBio, initialName]);
 
     // Use a stable avatar source: provided -> fetched -> github direct fallback
     const avatarSrc = profile.avatar || `https://github.com/${username}.png`;

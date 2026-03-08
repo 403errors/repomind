@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { GitBranch, Loader2, CheckCircle2, FileCode, AlertCircle } from "lucide-react";
 import { RepoLayout } from "./RepoLayout";
 import { fetchGitHubData } from "@/app/actions";
-import { GitHubRepo } from "@/lib/github";
+import type { FileNode, GitHubRepo } from "@/lib/github";
 import Link from "next/link";
 
 interface LoadingStep {
@@ -19,14 +19,23 @@ interface RepoLoaderProps {
     initialPrompt?: string;
 }
 
+interface RepoLoaderData {
+    repo: GitHubRepo;
+    fileTree: FileNode[];
+    hiddenFiles: { path: string; reason: string }[];
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+        return (error as { message: string }).message;
+    }
+    return "Unknown error";
+}
+
 export function RepoLoader({ query, initialPrompt }: RepoLoaderProps) {
     const [steps, setSteps] = useState<LoadingStep[]>([]);
-    const [repoData, setRepoData] = useState<any>(null);
+    const [repoData, setRepoData] = useState<RepoLoaderData | null>(null);
     const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        loadRepo();
-    }, [query]);
 
     const updateStep = (id: string, status: "loading" | "complete" | "error", message?: string) => {
         setSteps((prev) => {
@@ -40,7 +49,7 @@ export function RepoLoader({ query, initialPrompt }: RepoLoaderProps) {
         });
     };
 
-    const loadRepo = async () => {
+    const loadRepo = useCallback(async () => {
         try {
             // Step 1: Fetch repo data
             updateStep("fetch", "loading", `Fetching repository ${query}...`);
@@ -55,7 +64,7 @@ export function RepoLoader({ query, initialPrompt }: RepoLoaderProps) {
             }
 
             const repo = data.data as GitHubRepo;
-            const fileTree = data.fileTree as any[];
+            const fileTree = data.fileTree as FileNode[];
             const hiddenFiles = data.hiddenFiles || [];
 
             updateStep("fetch", "complete", "Repository data fetched");
@@ -75,18 +84,23 @@ export function RepoLoader({ query, initialPrompt }: RepoLoaderProps) {
 
             setRepoData({ repo, fileTree, hiddenFiles });
 
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            const errorMessage = err.message === "User not found"
+            const rawErrorMessage = getErrorMessage(err);
+            const errorMessage = rawErrorMessage === "User not found"
                 ? `GitHub user/org for "${query}" not found`
-                : err.message === "Repository not found"
+                : rawErrorMessage === "Repository not found"
                     ? `Repository "${query}" not found`
-                    : err.message;
+                    : rawErrorMessage;
 
             setError(errorMessage);
             updateStep("error", "error", errorMessage);
         }
-    };
+    }, [query]);
+
+    useEffect(() => {
+        void loadRepo();
+    }, [loadRepo]);
 
     if (error) {
         return (

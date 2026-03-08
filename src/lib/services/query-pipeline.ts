@@ -185,9 +185,10 @@ export async function* executeRepoQueryStream(
         }
 
         yield { type: "complete", relevantFiles };
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Query pipeline error:", error);
-        yield { type: "error", message: error?.message ?? "An unexpected error occurred" };
+        const message = error instanceof Error ? error.message : "An unexpected error occurred";
+        yield { type: "error", message };
     }
 }
 

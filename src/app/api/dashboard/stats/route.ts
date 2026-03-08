@@ -12,7 +12,7 @@ export async function GET() {
     try {
         const scans = await getUserScans(session.user.id);
 
-        let reposScanned = new Set<string>();
+        const reposScanned = new Set<string>();
         let issuesFound = 0;
         let deepScans = 0;
 
@@ -31,7 +31,7 @@ export async function GET() {
                 deepScans
             }
         });
-    } catch (error) {
+    } catch {
         return NextResponse.json({ error: "Failed to fetch stats" }, { status: 500 });
     }
 }

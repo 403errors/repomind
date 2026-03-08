@@ -1,4 +1,5 @@
 import { getGenAI, DEFAULT_MODEL } from "./ai-client";
+import type { FunctionDeclaration } from "@google/generative-ai";
 import type { SecurityFinding } from "./security-scanner";
 
 /**
@@ -84,6 +85,36 @@ const securityAnalysisFunctions = [
     }
 ];
 
+type GeminiSecurityCall = {
+    name?: string;
+    args?: Record<string, unknown>;
+};
+
+function getString(value: unknown): string {
+    return typeof value === "string" ? value : "";
+}
+
+function getNumber(value: unknown): number | undefined {
+    return typeof value === "number" ? value : undefined;
+}
+
+function toSeverity(value: unknown): SecurityFinding["severity"] {
+    if (value === "critical" || value === "high" || value === "medium" || value === "low" || value === "info") {
+        return value;
+    }
+    return "medium";
+}
+
+function getErrorInfo(error: unknown): { message?: string; status?: unknown; statusText?: unknown } {
+    if (!error || typeof error !== "object") return {};
+    const err = error as { message?: unknown; status?: unknown; statusText?: unknown };
+    return {
+        message: typeof err.message === "string" ? err.message : undefined,
+        status: err.status,
+        statusText: err.statusText,
+    };
+}
+
 /**
  * Analyze code files with Gemini AI for security vulnerabilities
  */
@@ -93,7 +124,7 @@ export async function analyzeCodeWithGemini(
     try {
         const model = getGenAI().getGenerativeModel({
             model: DEFAULT_MODEL,
-            tools: [{ functionDeclarations: securityAnalysisFunctions as any }]
+            tools: [{ functionDeclarations: securityAnalysisFunctions as unknown as FunctionDeclaration[] }]
         });
 
         // Build analysis prompt
@@ -131,11 +162,11 @@ Be extremely conservative. False alarms erode trust.
         const response = result.response;
 
         // Extract function calls
-        const functionCalls = response.functionCalls?.() || [];
+        const functionCalls = (response.functionCalls?.() || []) as GeminiSecurityCall[];
 
         const findings: SecurityFinding[] = functionCalls
-            .map((call: any) => {
-                const args = call.args as any;
+            .map((call): SecurityFinding | null => {
+                const args = call.args ?? {};
                 let title = '';
                 let cwe = '';
                 let recommendation = '';
@@ -157,38 +188,42 @@ Be extremely conservative. False alarms erode trust.
                         recommendation = 'Implement proper authentication checks and use established auth libraries.';
                         break;
                     case 'report_injection':
-                        title = `${args.injection_type} Injection`;
-                        cwe = args.injection_type === 'command' ? 'CWE-78' : 'CWE-22';
+                        title = `${getString(args.injection_type)} Injection`;
+                        cwe = getString(args.injection_type) === 'command' ? 'CWE-78' : 'CWE-22';
                         recommendation = 'Validate and sanitize all user input. Use safe APIs that don\'t accept shell commands.';
                         break;
                     case 'report_crypto_issue':
-                        title = `Cryptography Issue: ${args.issue_type}`;
+                        title = `Cryptography Issue: ${getString(args.issue_type)}`;
                         cwe = 'CWE-327';
                         recommendation = 'Use modern cryptographic algorithms (AES-256, SHA-256+). Never hardcode keys.';
                         break;
+                    default:
+                        return null;
                 }
 
                 return {
                     type: 'code' as const,
-                    severity: args.severity,
+                    severity: toSeverity(args.severity),
                     title,
-                    description: args.explanation,
-                    file: args.file,
-                    line: args.line,
+                    description: getString(args.explanation),
+                    file: getString(args.file),
+                    line: getNumber(args.line),
                     recommendation,
                     cwe,
                     confidence: 'high' as const, // AI findings start with high confidence
                 };
             })
+            .filter((finding): finding is SecurityFinding => finding !== null)
             .filter(finding => validateFinding(finding, files)); // Post-process validation
 
         return findings;
-    } catch (error: any) {
+    } catch (error: unknown) {
+        const errorInfo = getErrorInfo(error);
         console.error('Gemini security analysis error:', error);
         console.error('Error details:', {
-            message: error?.message,
-            status: error?.status,
-            statusText: error?.statusText
+            message: errorInfo.message,
+            status: errorInfo.status,
+            statusText: errorInfo.statusText
         });
         // Return empty array instead of throwing to allow graceful degradation
         return [];
@@ -255,7 +290,7 @@ Do not include markdown fences.`;
             patch: String(parsed.patch || '').trim(),
             explanation: String(parsed.explanation || '').trim()
         };
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Gemini patch generation error:', error);
         return {
             patch: '',

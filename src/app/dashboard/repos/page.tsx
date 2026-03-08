@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
-import { Search, Lock, Globe, BookOpen, ShieldAlert, GitFork, Loader2, ArrowRight } from "lucide-react";
+import { Search, Lock, Globe, BookOpen, ShieldAlert, GitFork, Loader2 } from "lucide-react";
 
 interface Repo {
     name: string;
@@ -54,6 +54,7 @@ export default function MyReposPage() {
         repo.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (repo.description && repo.description.toLowerCase().includes(searchQuery.toLowerCase()))
     );
+    const username = (session?.user as { username?: string } | undefined)?.username ?? "github_user";
 
     if (!session?.user) return null;
 
@@ -75,7 +76,7 @@ export default function MyReposPage() {
                             My Repositories
                         </h1>
                         <p className="text-zinc-400 mt-1">
-                            {session.user.name} (@{(session.user as any).username || "github_user"})
+                            {session.user.name} (@{username})
                         </p>
                     </div>
                 </div>
@@ -94,7 +95,7 @@ export default function MyReposPage() {
             <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-start gap-3">
                 <ShieldAlert className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
                 <p className="text-blue-200/90 leading-relaxed text-sm">
-                    <strong className="text-blue-300 font-semibold">Your code is yours.</strong> We don't train on or share your repository data. Your scan findings are stored securely to provide your history, and processing is handled on our secure server infrastructure.
+                    <strong className="text-blue-300 font-semibold">Your code is yours.</strong> We don&apos;t train on or share your repository data. Your scan findings are stored securely to provide your history, and processing is handled on our secure server infrastructure.
                 </p>
             </div>
 

@@ -7,7 +7,7 @@ import { encode } from 'gpt-tokenizer';
 export function countTokens(text: string): number {
     try {
         return encode(text).length;
-    } catch (error) {
+    } catch {
         // Fallback: rough estimate (4 chars ≈ 1 token)
         return Math.ceil(text.length / 4);
     }
@@ -54,11 +54,17 @@ export function getTokenWarningLevel(tokenCount: number): 'safe' | 'warning' | '
 /**
  * Check if a rate limit error occurred
  */
-export function isRateLimitError(error: any): boolean {
+export function isRateLimitError(error: unknown): boolean {
     if (!error) return false;
 
-    const errorMessage = error.message?.toLowerCase() || '';
-    const errorStatus = error.status || error.response?.status;
+    const errorWithMessage = error as { message?: unknown; status?: unknown; response?: { status?: unknown } };
+    const errorMessage = typeof errorWithMessage.message === "string" ? errorWithMessage.message.toLowerCase() : '';
+    const errorStatus =
+        typeof errorWithMessage.status === "number"
+            ? errorWithMessage.status
+            : typeof errorWithMessage.response?.status === "number"
+                ? errorWithMessage.response.status
+                : undefined;
 
     return (
         errorStatus === 429 ||
@@ -71,11 +77,16 @@ export function isRateLimitError(error: any): boolean {
 /**
  * Get user-friendly error message
  */
-export function getRateLimitErrorMessage(error: any): string {
-    if (error.message?.includes('GitHub')) {
+export function getRateLimitErrorMessage(error: unknown): string {
+    const message =
+        error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
+            ? (error as { message: string }).message
+            : "";
+
+    if (message.includes('GitHub')) {
         return 'GitHub API rate limit exceeded. Please try again in a few minutes.';
     }
-    if (error.message?.includes('Gemini') || error.message?.includes('generative')) {
+    if (message.includes('Gemini') || message.includes('generative')) {
         return 'AI service rate limit exceeded. Please try again in a moment.';
     }
     return 'Rate limit exceeded. Please try again shortly.';

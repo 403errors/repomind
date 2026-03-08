@@ -1,6 +1,10 @@
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
+type SessionWithAccessToken = {
+    accessToken?: string;
+};
+
 export async function GET() {
     const session = await auth();
 
@@ -8,7 +12,7 @@ export async function GET() {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const accessToken = (session as any).accessToken;
+    const accessToken = (session as SessionWithAccessToken).accessToken;
     // Fall back to the global token if the user hasn't explicitly authorized their own account token
     // Note: The global token won't have access to the user's private repos, only public ones.
     const tokenToUse = accessToken || process.env.GITHUB_TOKEN;
@@ -31,14 +35,15 @@ export async function GET() {
             return NextResponse.json({ error: "Failed to fetch repositories" }, { status: res.status });
         }
 
-        const data = await res.json();
+        const data: unknown = await res.json();
+        const repos = Array.isArray(data) ? data : [];
 
         // Check if the token we used was the user's specific access token (which implies we requested scopes)
         // If they have private repos returned, or if they successfully used an access_token, we assume they have private access.
-        const hasPrivateAccess = !!accessToken && data.length > 0;
+        const hasPrivateAccess = !!accessToken && repos.length > 0;
 
         return NextResponse.json({
-            repos: data,
+            repos,
             hasPrivateAccess,
         });
 

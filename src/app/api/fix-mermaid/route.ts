@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fixMermaidSyntax } from '@/lib/gemini';
 
+function getErrorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error ? error.message : fallback;
+}
+
 export async function POST(req: NextRequest) {
     try {
         const { code } = await req.json();
@@ -22,10 +26,10 @@ export async function POST(req: NextRequest) {
         }
 
         return NextResponse.json({ fixed });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error fixing Mermaid syntax:', error);
         return NextResponse.json(
-            { error: error.message || 'Internal server error' },
+            { error: getErrorMessage(error, 'Internal server error') },
             { status: 500 }
         );
     }

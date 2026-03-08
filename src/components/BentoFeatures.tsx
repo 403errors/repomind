@@ -127,7 +127,7 @@ export default function BentoFeatures() {
                     <div className="relative z-10">
                         <h3 className="text-xl font-bold text-white mb-2">Developer Intel</h3>
                         <p className="text-zinc-400 text-sm leading-relaxed max-w-sm">
-                            Analyze any developer's coding profile, expertise, and their highest impact open-source contributions.
+                            Analyze any developer&apos;s coding profile, expertise, and their highest impact open-source contributions.
                         </p>
                     </div>
                     <Activity className="absolute bottom-[-10%] right-[5%] w-48 h-48 text-pink-500/5 group-hover:text-pink-500/10 transition-colors duration-500 pointer-events-none" />

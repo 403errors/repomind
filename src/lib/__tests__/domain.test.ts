@@ -41,12 +41,12 @@ describe("toProfileContext", () => {
     });
 
     it("converts undefined bio to null", () => {
-        const ctx = toProfileContext({ ...mockProfile, bio: undefined as any });
+        const ctx = toProfileContext({ ...mockProfile, bio: undefined as unknown as string | null });
         expect(ctx.bio).toBeNull();
     });
 
     it("converts undefined blog to null", () => {
-        const ctx = toProfileContext({ ...mockProfile, blog: undefined as any });
+        const ctx = toProfileContext({ ...mockProfile, blog: undefined as unknown as string | null });
         expect(ctx.website).toBeNull();
     });
 });

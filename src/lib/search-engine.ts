@@ -62,7 +62,7 @@ function searchAST(
         const queryLower = options.query.toLowerCase();
 
         traverse(ast, {
-            FunctionDeclaration(path: any) {
+            FunctionDeclaration(path) {
                 if (options.astType === 'function' || !options.astType) {
                     if (path.node.id?.name.toLowerCase().includes(queryLower)) {
                         results.push({
@@ -75,7 +75,7 @@ function searchAST(
                     }
                 }
             },
-            ClassDeclaration(path: any) {
+            ClassDeclaration(path) {
                 if (options.astType === 'class' || !options.astType) {
                     if (path.node.id?.name.toLowerCase().includes(queryLower)) {
                         results.push({
@@ -88,9 +88,13 @@ function searchAST(
                     }
                 }
             },
-            VariableDeclarator(path: any) {
+            VariableDeclarator(path) {
                 if (options.astType === 'variable' || !options.astType) {
-                    if (path.node.id?.name?.toLowerCase().includes(queryLower)) {
+                    if (
+                        'name' in path.node.id &&
+                        typeof path.node.id.name === "string" &&
+                        path.node.id.name.toLowerCase().includes(queryLower)
+                    ) {
                         results.push({
                             file: file.path,
                             line: path.node.loc?.start.line || 0,
@@ -101,7 +105,7 @@ function searchAST(
                     }
                 }
             },
-            ImportDeclaration(path: any) {
+            ImportDeclaration(path) {
                 if (options.astType === 'import' || !options.astType) {
                     if (path.node.source.value.toLowerCase().includes(queryLower)) {
                         results.push({
@@ -115,7 +119,7 @@ function searchAST(
                 }
             }
         });
-    } catch (e) {
+    } catch {
         // Parser error, skip file
     }
 
@@ -146,7 +150,7 @@ function searchRegex(
                 });
             }
         });
-    } catch (e) {
+    } catch {
         // Invalid regex
     }
 

@@ -2,19 +2,16 @@
 
 import { useState } from "react";
 import { Check, Copy, Eye, FileCode } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import type { Components } from "react-markdown";
 
 import { EnhancedMarkdown } from "./EnhancedMarkdown";
 
 interface CodeBlockProps {
     language: string;
     value: string;
-    components?: any;
+    components?: Components;
     owner?: string;
     repo?: string;
 }
@@ -22,7 +19,6 @@ interface CodeBlockProps {
 export function CodeBlock({ language, value, components, owner, repo }: CodeBlockProps) {
     const [copied, setCopied] = useState(false);
     const [isPreview, setIsPreview] = useState(false);
-    const router = useRouter();
 
     const handleCopy = async () => {
         await navigator.clipboard.writeText(value);
@@ -76,7 +72,12 @@ export function CodeBlock({ language, value, components, owner, repo }: CodeBloc
             {isPreview ? (
                 <div className="p-4 bg-zinc-900/50 overflow-x-auto w-full min-w-0">
                     <div className="prose prose-invert prose-sm max-w-none">
-                        <EnhancedMarkdown content={value} components={components} />
+                        <EnhancedMarkdown
+                            content={value}
+                            components={components}
+                            currentOwner={owner}
+                            currentRepo={repo}
+                        />
                     </div>
                 </div>
             ) : (

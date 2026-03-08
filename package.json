@@ -12,7 +12,8 @@
     "lint:baseline:check": "node scripts/eslint-baseline.mjs check",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "hygiene:freeze-baseline": "node scripts/freeze-hygiene-baseline.mjs"
   },
   "dependencies": {
     "@babel/parser": "^7.28.5",

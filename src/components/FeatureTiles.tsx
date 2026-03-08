@@ -1,5 +1,6 @@
 "use client";
 
+import type { ComponentType } from "react";
 import { motion } from "framer-motion";
 import {
     Shield,
@@ -8,13 +9,12 @@ import {
     CheckCircle2,
     Search,
     Sparkles,
-    LucideIcon,
     Code2
 } from "lucide-react";
 import { UserIcon } from "@/components/icons/UserIcon";
 
 interface FeatureProps {
-    icon: any;
+    icon: ComponentType<{ className?: string }>;
     title: string;
     description: string;
     gradient: string;

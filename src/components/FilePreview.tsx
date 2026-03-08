@@ -9,6 +9,10 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import { toast } from "sonner";
 
+function getErrorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error ? error.message : fallback;
+}
+
 interface FilePreviewProps {
     isOpen: boolean;
     filePath: string | null;
@@ -96,8 +100,8 @@ export function FilePreview({ isOpen, filePath, repoOwner, repoName, onClose }: 
                     // But if it does, it might be a submodule or something else
                     setError('No content available');
                 }
-            } catch (err: any) {
-                const errorMessage = err.message || 'Failed to load file content';
+            } catch (err: unknown) {
+                const errorMessage = getErrorMessage(err, 'Failed to load file content');
                 setError(errorMessage);
                 toast.error(errorMessage);
                 console.error("FilePreview Error:", err);

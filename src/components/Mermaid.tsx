@@ -15,6 +15,13 @@ interface MermaidProps {
     isStreaming?: boolean;
 }
 
+function extractErrorMessage(error: unknown): string {
+    if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+        return (error as { message: string }).message;
+    }
+    return "Failed to process diagram";
+}
+
 export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
     const [svg, setSvg] = useState<string>("");
     const [error, setError] = useState<string | null>(null);
@@ -78,7 +85,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                         setIsInternalStreaming(false);
                     }
                     return; // Success!
-                } catch (renderError: any) {
+                } catch (renderError: unknown) {
                     // If we are streaming, don't show error yet
                     if (isStreaming || isInternalStreaming) {
                         return;
@@ -119,7 +126,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
 
                     if (mounted) {
                         setIsFixing(false);
-                        const errorMessage = renderError.message || 'Syntax error in diagram';
+                        const errorMessage = extractErrorMessage(renderError) || 'Syntax error in diagram';
                         const isInternalError = errorMessage.includes('dmermaid') ||
                             errorMessage.includes('#') ||
                             errorMessage.startsWith('Parse error');
@@ -128,7 +135,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                         setError(sanitizedError);
                     }
                 }
-            } catch (error: any) {
+            } catch (error: unknown) {
                 if (!isStreaming && !isInternalStreaming) {
                     console.error('Complete render failure:', error);
                     if (mounted) {
@@ -175,8 +182,8 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                 }
             }
             setError("Could not automatically fix the diagram. Please try asking again.");
-        } catch (e: any) {
-            setError(e.message || "Failed to fix diagram");
+        } catch (e: unknown) {
+            setError(extractErrorMessage(e) || "Failed to fix diagram");
         } finally {
             setIsFixing(false);
         }

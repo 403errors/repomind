@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Loader2, CheckCircle2, FileCode } from "lucide-react";
 import { UserIcon } from "@/components/icons/UserIcon";
 import { ProfileChatInterface } from "./ProfileChatInterface";
 import { fetchProfile, fetchProfileReadme, fetchUserRepos } from "@/app/actions";
+import type { GitHubProfile } from "@/lib/github";
 
 interface LoadingStep {
     id: string;
@@ -17,14 +18,31 @@ interface ProfileLoaderProps {
     username: string;
 }
 
+interface ProfileLoaderData {
+    profile: GitHubProfile;
+    profileReadme: string | null;
+    repoReadmes: {
+        repo: string;
+        content: string;
+        updated_at: string;
+        description: string | null;
+        stars: number;
+        forks: number;
+        language: string | null;
+    }[];
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+        return (error as { message: string }).message;
+    }
+    return "Failed to load profile";
+}
+
 export function ProfileLoader({ username }: ProfileLoaderProps) {
     const [steps, setSteps] = useState<LoadingStep[]>([]);
-    const [profileData, setProfileData] = useState<any>(null);
+    const [profileData, setProfileData] = useState<ProfileLoaderData | null>(null);
     const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        loadProfile();
-    }, [username]);
 
     const updateStep = (id: string, status: "loading" | "complete" | "error", message?: string) => {
         setSteps((prev) => {
@@ -38,7 +56,7 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
         });
     };
 
-    const loadProfile = async () => {
+    const loadProfile = useCallback(async () => {
         try {
             // Step 1: Fetch profile
             updateStep("profile", "loading", `Fetching @${username}'s profile...`);
@@ -51,7 +69,7 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
             try {
                 profileReadme = await fetchProfileReadme(username);
                 updateStep("readme", "complete", "Profile README found");
-            } catch (e) {
+            } catch {
                 updateStep("readme", "complete", "No profile README");
             }
 
@@ -61,7 +79,7 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
             updateStep("repos", "complete", `Analyzed ${repoReadmes.length} repositories`);
 
             // Individual repo updates
-            repoReadmes.slice(0, 5).forEach((repo: any, index: number) => {
+            repoReadmes.slice(0, 5).forEach((repo, index: number) => {
                 updateStep(`repo-${index}`, "complete", `✓ ${repo.repo}`);
             });
 
@@ -71,12 +89,20 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
 
             // All done
             setProfileData({ profile, profileReadme, repoReadmes });
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            setError(err.message || "Failed to load profile");
+            setError(getErrorMessage(err));
             updateStep("error", "error", "Failed to load profile");
         }
-    };
+    }, [username]);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            void loadProfile();
+        }, 0);
+
+        return () => clearTimeout(timer);
+    }, [loadProfile]);
 
     if (error) {
         return (

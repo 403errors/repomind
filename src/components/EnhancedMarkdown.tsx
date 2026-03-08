@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -55,7 +56,7 @@ export function parseCardContent(text: string): ParsedContent[] {
 
 interface EnhancedMarkdownProps {
     content: string;
-    components?: any;
+    components?: Components;
     currentOwner?: string;
     currentRepo?: string;
 }
@@ -70,7 +71,7 @@ export function EnhancedMarkdown({ content, components, currentOwner, currentRep
                         <ReactMarkdown
                             key={index}
                             components={{
-                                a: (props: any) => (
+                                a: (props) => (
                                     <SmartLink
                                         {...props}
                                         currentOwner={currentOwner}

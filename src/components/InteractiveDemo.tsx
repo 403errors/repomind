@@ -105,10 +105,7 @@ export default function InteractiveDemo() {
             { step: 0, delay: 1000 }, // Reset and next scenario
         ];
 
-        if (!isInView) {
-            setStep(0);
-            return;
-        }
+        if (!isInView) return;
 
         let timer: NodeJS.Timeout;
         const runSequence = (index: number) => {
@@ -130,13 +127,14 @@ export default function InteractiveDemo() {
     }, [isInView, playbackKey]);
 
     const currentScenario = scenarios[scenarioIndex];
+    const visibleStep = isInView ? step : 0;
 
     const renderResponse = () => {
         if (currentScenario.type === "chat") {
             return (
                 <div className="space-y-3 font-sans text-sm leading-relaxed">
                     <p>
-                        In <span className="text-white font-medium">React</span>, there isn't traditional "authentication logic" built into the core library, as React is simply a UI library.
+                        In <span className="text-white font-medium">React</span>, there isn&apos;t traditional &quot;authentication logic&quot; built into the core library, as React is simply a UI library.
                     </p>
                     <motion.p
                         initial={{ opacity: 0 }}
@@ -291,14 +289,14 @@ export default function InteractiveDemo() {
                         </div>
                         <div className="bg-zinc-900/60 border border-zinc-800 p-4 rounded-xl rounded-tl-none w-full text-zinc-300 font-mono text-sm shadow-sm relative">
                             <div className="relative w-full">
-                                <TypewriterText text={currentScenario.query} step={step} />
+                                <TypewriterText text={currentScenario.query} step={visibleStep} />
                             </div>
                         </div>
                     </div>
 
                     <AnimatePresence mode="wait">
                         {/* AI Status / Thinking state */}
-                        {step >= 2 && step <= 3 && (
+                        {visibleStep >= 2 && visibleStep <= 3 && (
                             <motion.div
                                 key={`status-${currentScenario.id}`}
                                 initial={{ opacity: 0, y: 10 }}
@@ -309,12 +307,12 @@ export default function InteractiveDemo() {
                                 <motion.div>
                                     <BrainCircuit className="w-4 h-4 text-purple-400" />
                                 </motion.div>
-                                <span>{step === 2 ? currentScenario.loadingText : currentScenario.analyzingText}</span>
+                                <span>{visibleStep === 2 ? currentScenario.loadingText : currentScenario.analyzingText}</span>
                             </motion.div>
                         )}
 
                         {/* AI Response Box */}
-                        {step >= 4 && (
+                        {visibleStep >= 4 && (
                             <motion.div
                                 key={`response-${currentScenario.id}`}
                                 initial={{ opacity: 0, y: 10 }}

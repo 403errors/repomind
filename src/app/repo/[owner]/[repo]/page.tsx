@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { CopyBadge } from '@/components/CopyBadge';
+import { normalizeReadmeForPreview } from './repo-page-utils';
 
 interface Props {
     params: Promise<{
@@ -20,7 +21,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const { owner, repo } = await params;
 
     try {
-        const { metadata: data } = await import('@/lib/github').then(m => m.getRepoFullContext(owner, repo)) as any;
+        const context = await import('@/lib/github').then((m) => m.getRepoFullContext(owner, repo));
+        const data = context.metadata;
         return {
             title: `${data.name} by ${data.owner.login} - RepoMind Architecture & Analysis`,
             description: data.description
@@ -39,7 +41,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
                 canonical: `/repo/${owner}/${repo}`,
             }
         };
-    } catch (error) {
+    } catch {
         return {
             title: `${owner}/${repo} - RepoMind`,
         };
@@ -71,8 +73,7 @@ export default async function RepoPage({ params }: Props) {
     // Use the full README safely. We will truncate it visually using CSS
     // to avoid breaking the Markdown AST (which causes broken tags like **text...).
     // We also use a regex trick to push any badges directly inline with the H1 onto the next line.
-    const fullReadme = (readmeContent || '')
-        .replace(/^(#\s+.*?)(?:&middot;|<br>|\s)*(\[!\[|!\[)/m, '$1\n\n$2');
+    const fullReadme = normalizeReadmeForPreview(readmeContent);
 
     return (
         <main className="min-h-screen bg-black text-white p-6 md:p-12 overflow-x-hidden relative">

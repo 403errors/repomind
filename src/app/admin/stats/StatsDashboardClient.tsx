@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
     Users, Activity, Smartphone, Monitor, Globe,
     RefreshCw, ArrowUpDown, ChevronUp, ChevronDown,
-    Clock, Calendar, UserCheck, TrendingUp,
-    Database, Zap, Server
+    UserCheck, TrendingUp, Database, Zap
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import type { AnalyticsData, VisitorData, KVUsagePoint } from "@/lib/analytics";
+import type { AnalyticsData, VisitorData } from "@/lib/analytics";
 
 type HistoryRange = "24h" | "1w" | "1m" | "3m";
 
@@ -31,6 +30,15 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
     const [selectedRange, setSelectedRange] = useState<HistoryRange>("24h");
     const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'lastSeen', direction: 'desc' });
     const [visibleCount, setVisibleCount] = useState(15);
+    const [currentTime, setCurrentTime] = useState(0);
+
+    useEffect(() => {
+        const tick = () => setCurrentTime(Date.now());
+        tick();
+
+        const intervalId = setInterval(tick, 30_000);
+        return () => clearInterval(intervalId);
+    }, []);
 
     const handleRefresh = () => {
         setIsRefreshing(true);
@@ -48,8 +56,7 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
     };
 
     const getRelativeTime = (timestamp: number) => {
-        const now = Date.now();
-        const diff = now - timestamp;
+        const diff = currentTime - timestamp;
 
         if (diff < 60000) return 'Just now';
         if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
@@ -58,7 +65,7 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
     };
 
     const isOnline = (lastSeen: number) => {
-        return (Date.now() - lastSeen) < 5 * 60 * 1000; // 5 minutes
+        return (currentTime - lastSeen) < 5 * 60 * 1000; // 5 minutes
     };
 
     const formatSize = (bytes: number) => {
@@ -70,19 +77,16 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
     };
 
     // Calculate advanced metrics
-    const { returningUsers, retentionRate, avgQueriesPerUser, activeNow } = useMemo(() => {
-        const returning = data.recentVisitors.filter(v => v.queryCount > 1 && (v.lastSeen - v.firstSeen > 1000 * 60 * 60)).length;
-        const rate = data.totalVisitors > 0 ? (returning / data.totalVisitors) * 100 : 0;
-        const avgQueries = data.totalVisitors > 0 ? (data.totalQueries / data.totalVisitors).toFixed(1) : "0";
-        const nowCount = data.recentVisitors.filter(v => isOnline(v.lastSeen)).length;
-
-        return {
-            returningUsers: returning,
-            retentionRate: rate.toFixed(1),
-            avgQueriesPerUser: avgQueries,
-            activeNow: nowCount
-        };
-    }, [data]);
+    const returningUsers = data.recentVisitors.filter(
+        (v) => v.queryCount > 1 && (v.lastSeen - v.firstSeen > 1000 * 60 * 60)
+    ).length;
+    const retentionRate = data.totalVisitors > 0
+        ? ((returningUsers / data.totalVisitors) * 100).toFixed(1)
+        : "0";
+    const avgQueriesPerUser = data.totalVisitors > 0
+        ? (data.totalQueries / data.totalVisitors).toFixed(1)
+        : "0";
+    const activeNow = data.recentVisitors.filter((v) => isOnline(v.lastSeen)).length;
 
     const sortedVisitors = useMemo(() => {
         const items = [...data.recentVisitors];
@@ -109,7 +113,7 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
         setSortConfig({ key, direction });
     };
 
-    const SortIcon = ({ column }: { column: keyof VisitorData | 'id' }) => {
+    const renderSortIcon = (column: keyof VisitorData | 'id') => {
         if (sortConfig.key !== column) return <ArrowUpDown className="w-4 h-4 text-zinc-600" />;
         return sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4 text-purple-400" /> : <ChevronDown className="w-4 h-4 text-purple-400" />;
     };
@@ -137,7 +141,9 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
                     <div className="flex items-center gap-4">
                         <div className="text-right hidden sm:block">
                             <div className="text-sm text-zinc-400">Current Time (IST)</div>
-                            <div className="text-xs font-mono text-zinc-500">{formatIST(Date.now())}</div>
+                            <div className="text-xs font-mono text-zinc-500">
+                                {currentTime > 0 ? formatIST(currentTime) : "Syncing..."}
+                            </div>
                         </div>
                         <button
                             onClick={handleRefresh}
@@ -238,7 +244,7 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
                                     <span className="text-xs text-zinc-500">BY PERCENTAGE</span>
                                 </div>
                                 <div className="h-12 w-full flex rounded-xl overflow-hidden bg-zinc-800">
-                                    {Object.entries(data.deviceStats).map(([device, count], idx) => {
+                                    {Object.entries(data.deviceStats).map(([device, count]) => {
                                         const percentage = (count / data.totalVisitors) * 100;
                                         if (percentage === 0) return null;
                                         const colors = {
@@ -385,7 +391,9 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
                                 </div>
                             );
 
-                            const now = Date.now();
+                            const now = currentTime > 0
+                                ? currentTime
+                                : (history[history.length - 1]?.timestamp ?? 0);
                             const ranges = {
                                 "24h": now - 24 * 60 * 60 * 1000,
                                 "1w": now - 7 * 24 * 60 * 60 * 1000,
@@ -517,27 +525,27 @@ export default function StatsDashboardClient({ data, userAgent, country, isMobil
                                 <tr>
                                     <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => requestSort('id')}>
                                         <div className="flex items-center gap-2">
-                                            Visitor ID <SortIcon column="id" />
+                                            Visitor ID {renderSortIcon("id")}
                                         </div>
                                     </th>
                                     <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => requestSort('country')}>
                                         <div className="flex items-center gap-2">
-                                            Country <SortIcon column="country" />
+                                            Country {renderSortIcon("country")}
                                         </div>
                                     </th>
                                     <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => requestSort('device')}>
                                         <div className="flex items-center gap-2">
-                                            Device <SortIcon column="device" />
+                                            Device {renderSortIcon("device")}
                                         </div>
                                     </th>
                                     <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => requestSort('queryCount')}>
                                         <div className="flex items-center gap-2">
-                                            Queries <SortIcon column="queryCount" />
+                                            Queries {renderSortIcon("queryCount")}
                                         </div>
                                     </th>
                                     <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => requestSort('lastSeen')}>
                                         <div className="flex items-center gap-2">
-                                            Last Seen (IST) <SortIcon column="lastSeen" />
+                                            Last Seen (IST) {renderSortIcon("lastSeen")}
                                         </div>
                                     </th>
                                     <th className="px-6 py-4 text-center">Status</th>

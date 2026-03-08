@@ -3,7 +3,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, X } from "lucide-react";
 import { createPortal } from "react-dom";
-import { useEffect, useState } from "react";
 
 interface ConfirmDialogProps {
     isOpen: boolean;
@@ -26,13 +25,7 @@ export function ConfirmDialog({
     onConfirm,
     onCancel,
 }: ConfirmDialogProps) {
-    const [mounted, setMounted] = useState(false);
-
-    useEffect(() => {
-        setMounted(true);
-    }, []);
-
-    if (!mounted) return null;
+    if (typeof window === "undefined") return null;
 
     const confirmButtonStyles =
         confirmVariant === "danger"

@@ -4,7 +4,12 @@ import { motion } from "framer-motion";
 import { User, Github, Calendar } from "lucide-react";
 import Image from "next/image";
 
-export default function WelcomeBanner({ user }: { user: any }) {
+interface WelcomeBannerUser {
+    image?: string | null;
+    name?: string | null;
+}
+
+export default function WelcomeBanner({ user }: { user: WelcomeBannerUser }) {
     const date = new Date().toLocaleDateString('en-US', {
         weekday: 'long',
         year: 'numeric',

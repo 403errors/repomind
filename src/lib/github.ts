@@ -57,7 +57,7 @@ interface RepoDetailsGraphQLResponse {
   };
 }
 
-function getErrorStatus(error: unknown): number | undefined {
+export function getErrorStatus(error: unknown): number | undefined {
   if (error && typeof error === "object" && "status" in error) {
     const status = (error as ErrorWithStatus).status;
     return typeof status === "number" ? status : undefined;
@@ -65,7 +65,7 @@ function getErrorStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-function isErrorWithMessage(error: unknown): error is { message: string } {
+export function isErrorWithMessage(error: unknown): error is { message: string } {
   return Boolean(
     error &&
     typeof error === "object" &&
@@ -74,7 +74,7 @@ function isErrorWithMessage(error: unknown): error is { message: string } {
   );
 }
 
-function isGitHubProfile(value: unknown): value is GitHubProfile {
+export function isGitHubProfile(value: unknown): value is GitHubProfile {
   return Boolean(
     value &&
     typeof value === "object" &&
@@ -84,7 +84,7 @@ function isGitHubProfile(value: unknown): value is GitHubProfile {
   );
 }
 
-function isGitHubRepo(value: unknown): value is GitHubRepo {
+export function isGitHubRepo(value: unknown): value is GitHubRepo {
   return Boolean(
     value &&
     typeof value === "object" &&

@@ -63,7 +63,7 @@ export default function Footer() {
                                 </div>
 
                                 <p className="text-zinc-400 mb-6">
-                                    Found a bug or have a feature request? We'd love to hear from you! Drop us an email at:
+                                    Found a bug or have a feature request? We&apos;d love to hear from you! Drop us an email at:
                                 </p>
 
                                 <div className="flex items-center gap-2 p-3 bg-black/50 rounded-xl border border-white/5 group">

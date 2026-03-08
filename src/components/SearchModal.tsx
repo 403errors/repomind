@@ -5,8 +5,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { searchRepositoryCode } from "@/app/actions";
 
+interface SearchFileNode {
+    path: string;
+    sha?: string;
+}
+
 interface SearchModalProps {
-    repoContext: { owner: string; repo: string; fileTree: any[] };
+    repoContext: { owner: string; repo: string; fileTree: SearchFileNode[] };
     onSendMessage: (role: "user" | "model", content: string) => void;
 }
 
@@ -27,11 +32,10 @@ export function SearchModal({ repoContext, onSendMessage }: SearchModalProps) {
 
         setLoading(true);
         try {
-            const filePaths = repoContext.fileTree.map((f: any) => f.path);
             const results = await searchRepositoryCode(
                 repoContext.owner,
                 repoContext.repo,
-                filePaths,
+                repoContext.fileTree,
                 searchQuery,
                 searchType
             );

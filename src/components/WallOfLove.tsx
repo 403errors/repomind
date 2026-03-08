@@ -75,7 +75,7 @@ export default function WallOfLove() {
                                 <Star key={i} className="w-4 h-4 fill-current" />
                             ))}
                         </div>
-                        <p className="text-zinc-300 text-sm leading-relaxed mb-6">"{t.content}"</p>
+                        <p className="text-zinc-300 text-sm leading-relaxed mb-6">&quot;{t.content}&quot;</p>
                         <div className="flex items-center gap-3 mt-auto">
                             <img
                                 src={t.avatar}

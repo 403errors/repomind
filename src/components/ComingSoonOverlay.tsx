@@ -26,7 +26,7 @@ export function ComingSoonOverlay() {
                         Settings Locked
                     </h2>
                     <p className="text-zinc-400 text-sm leading-relaxed mb-6">
-                        We're currently fine-tuning your experience. This feature will be available in the next major update.
+                        We&apos;re currently fine-tuning your experience. This feature will be available in the next major update.
                     </p>
 
                     <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full text-xs font-medium text-zinc-300">

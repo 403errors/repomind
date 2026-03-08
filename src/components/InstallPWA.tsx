@@ -9,21 +9,23 @@ interface BeforeInstallPromptEvent extends Event {
     userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
+interface IOSNavigator extends Navigator {
+    MSStream?: unknown;
+}
+
 export function InstallPWA() {
     const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-    const [isIOS, setIsIOS] = useState(false);
-    const [isStandalone, setIsStandalone] = useState(false);
+    const [isIOS] = useState(() => {
+        if (typeof window === "undefined") return false;
+        const nav = window.navigator as IOSNavigator;
+        return /iPad|iPhone|iPod/.test(nav.userAgent) && !nav.MSStream;
+    });
+    const [isStandalone] = useState(() => {
+        if (typeof window === "undefined") return false;
+        return window.matchMedia("(display-mode: standalone)").matches;
+    });
 
     useEffect(() => {
-        // Check if already installed
-        if (window.matchMedia("(display-mode: standalone)").matches) {
-            setIsStandalone(true);
-        }
-
-        // Check for iOS
-        const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-        setIsIOS(isIOSDevice);
-
         const handleBeforeInstallPrompt = (e: Event) => {
             // Prevent the mini-infobar from appearing on mobile
             e.preventDefault();

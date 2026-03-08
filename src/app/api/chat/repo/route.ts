@@ -2,6 +2,10 @@ import { NextRequest } from "next/server";
 import { generateAnswerStream } from "@/app/actions";
 import type { StreamUpdate } from "@/lib/streaming-types";
 
+function getErrorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error ? error.message : fallback;
+}
+
 export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     try {
@@ -26,9 +30,12 @@ export async function POST(req: NextRequest) {
                         controller.enqueue(encoder.encode(data));
                     }
                     controller.close();
-                } catch (error: any) {
+                } catch (error: unknown) {
                     console.error("Stream generation error:", error);
-                    const errorObj: StreamUpdate = { type: "error", message: error.message || "An error occurred during streaming." };
+                    const errorObj: StreamUpdate = {
+                        type: "error",
+                        message: getErrorMessage(error, "An error occurred during streaming."),
+                    };
                     controller.enqueue(encoder.encode(JSON.stringify(errorObj) + "\n"));
                     controller.close();
                 }
@@ -43,8 +50,11 @@ export async function POST(req: NextRequest) {
                 "X-Accel-Buffering": "no", // Prevent buffering by Vercel/Nginx
             },
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("API route error:", error);
-        return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+        return new Response(
+            JSON.stringify({ error: getErrorMessage(error, "An unexpected error occurred.") }),
+            { status: 500 }
+        );
     }
 }

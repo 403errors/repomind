@@ -5,6 +5,19 @@ import { useEffect, useState } from "react";
 import { Github, Star } from "lucide-react";
 import { fetchRepoDetails } from "@/app/actions";
 
+interface RepoWithStars {
+    stargazers_count: number;
+}
+
+function isRepoWithStars(data: unknown): data is RepoWithStars {
+    return Boolean(
+        data &&
+        typeof data === "object" &&
+        "stargazers_count" in data &&
+        typeof (data as { stargazers_count?: unknown }).stargazers_count === "number"
+    );
+}
+
 export function GitHubBadge() {
     const [stars, setStars] = useState<number | null>(null);
 
@@ -12,10 +25,8 @@ export function GitHubBadge() {
         const getStars = async () => {
             try {
                 const data = await fetchRepoDetails("403errors", "repomind");
-                // data might be { error: ... } or the repo object
-                // fetchRepoDetails returns getRepo result directly which is the repo object
-                if (data && typeof (data as any).stargazers_count === 'number') {
-                    setStars((data as any).stargazers_count);
+                if (isRepoWithStars(data)) {
+                    setStars(data.stargazers_count);
                 }
             } catch (e) {
                 console.error("Failed to fetch repo stars", e);

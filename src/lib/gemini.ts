@@ -3,6 +3,7 @@ import { buildRepoMindPrompt, formatHistoryText } from "./prompt-builder";
 import { cacheQuerySelection, getCachedQuerySelection } from "./cache";
 import type { GitHubProfile } from "./github";
 import { getRecentCommitsForUser, getUserReposByAge } from "./github";
+import type { GenerationConfig } from "@google/generative-ai";
 
 type JsonObject = Record<string, unknown>;
 type GeminiTool = Record<string, unknown>;
@@ -21,6 +22,15 @@ function asObject(value: unknown): JsonObject {
 
 function getStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function getThinkingGenerationConfig(includeThoughts: boolean, thinkingLevel: "HIGH" | "LOW" | "MINIMAL"): GenerationConfig {
+  return {
+    thinkingConfig: {
+      include_thoughts: includeThoughts,
+      thinking_level: thinkingLevel,
+    },
+  } as unknown as GenerationConfig;
 }
 
 // ─── File Selection ────────────────────────────────────────────────────────────
@@ -114,12 +124,7 @@ ${isDeepThinking ?
     // For large/complex selections, we use the reasoning model with low thinking to keep it fast
     const model = getGenAI().getGenerativeModel({
       model: DEFAULT_MODEL,
-      generationConfig: {
-        thinkingConfig: {
-          include_thoughts: modelPreference === "thinking",
-          thinking_level: modelPreference === "thinking" ? "HIGH" : "LOW"
-        }
-      } as any
+      generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", modelPreference === "thinking" ? "HIGH" : "LOW"),
     });
 
     const result = await model.generateContent(prompt);
@@ -174,12 +179,7 @@ async function pruneFileTreeHierarchically(question: string, fileTree: string[])
   try {
     const model = getGenAI().getGenerativeModel({
       model: DEFAULT_MODEL,
-      generationConfig: {
-        thinkingConfig: {
-          include_thoughts: false,
-          thinking_level: "MINIMAL"
-        }
-      } as any
+      generationConfig: getThinkingGenerationConfig(false, "MINIMAL"),
     });
 
     const result = await model.generateContent(prompt);
@@ -256,12 +256,7 @@ export async function answerWithContext(
   const model = getGenAI().getGenerativeModel({
     model: DEFAULT_MODEL,
     tools,
-    generationConfig: {
-      thinkingConfig: {
-        include_thoughts: modelPreference === "thinking",
-        thinking_level: modelPreference === "thinking" ? "HIGH" : "LOW"
-      }
-    } as any
+    generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", modelPreference === "thinking" ? "HIGH" : "LOW"),
   });
 
   const chat = model.startChat();
@@ -354,12 +349,7 @@ export async function* answerWithContextStream(
   const model = getGenAI().getGenerativeModel({
     model: DEFAULT_MODEL,
     tools,
-    generationConfig: {
-      thinkingConfig: {
-        include_thoughts: modelPreference === "thinking",
-        thinking_level: modelPreference === "thinking" ? "HIGH" : "LOW"
-      }
-    } as any
+    generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", modelPreference === "thinking" ? "HIGH" : "LOW"),
   });
 
   const chat = model.startChat();

@@ -4,14 +4,15 @@ import { useState, useEffect } from "react";
 import { RepoSidebar } from "./RepoSidebar";
 import { ChatInterface } from "./ChatInterface";
 import { FilePreview } from "./FilePreview";
+import type { FileNode, GitHubRepo } from "@/lib/github";
 
 interface RepoLayoutProps {
-    fileTree: any[];
+    fileTree: FileNode[];
     repoName: string;
     owner: string;
     repo: string;
     hiddenFiles?: { path: string; reason: string }[];
-    repoData: any; // Full GitHubRepo object
+    repoData: GitHubRepo;
     initialPrompt?: string;
 }
 
@@ -29,13 +30,14 @@ export function RepoLayout({ fileTree, repoName, owner, repo, hiddenFiles = [], 
 
     // Listen for custom event to open file preview from chat
     useEffect(() => {
-        const handleOpenPreview = (e: CustomEvent<string>) => {
-            setPreviewFile(e.detail);
+        const handleOpenPreview = (event: Event) => {
+            const customEvent = event as CustomEvent<string>;
+            setPreviewFile(customEvent.detail);
         };
 
-        window.addEventListener('open-file-preview' as any, handleOpenPreview as any);
+        window.addEventListener("open-file-preview", handleOpenPreview as EventListener);
         return () => {
-            window.removeEventListener('open-file-preview' as any, handleOpenPreview as any);
+            window.removeEventListener("open-file-preview", handleOpenPreview as EventListener);
         };
     }, []);
 

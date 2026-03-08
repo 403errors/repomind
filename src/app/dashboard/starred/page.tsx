@@ -11,7 +11,10 @@ export default async function StarredPage() {
         redirect("/");
     }
 
-    const username = (session.user as any).username || session.user.name || session.user.email?.split('@')[0];
+    const username =
+        (session.user as { username?: string }).username ??
+        session.user.name ??
+        session.user.email?.split('@')[0];
     const starredRepos = username ? await getStarredRepos(username) : [];
 
     return (
@@ -42,7 +45,7 @@ export default async function StarredPage() {
                     </div>
                     <h2 className="text-xl font-semibold">No Starred Repositories</h2>
                     <p className="text-zinc-500 max-w-md mx-auto">
-                        We couldn't find any public starred repositories for your account. Go star some interesting projects on GitHub!
+                        We couldn&apos;t find any public starred repositories for your account. Go star some interesting projects on GitHub!
                     </p>
                 </div>
             ) : (

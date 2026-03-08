@@ -33,7 +33,7 @@ export function CopyBadge({ owner, repo }: CopyBadgeProps) {
                     </div>
                     <div>
                         <h3 className="text-base font-semibold text-zinc-200">Embed this Badge</h3>
-                        <p className="text-xs text-zinc-400 mt-0.5">Showcase RepoMind's analysis directly in your repository's README.</p>
+                        <p className="text-xs text-zinc-400 mt-0.5">Showcase RepoMind&apos;s analysis directly in your repository&apos;s README.</p>
                     </div>
                 </div>
                 <button

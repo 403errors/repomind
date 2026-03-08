@@ -41,7 +41,6 @@ import type { ModelPreference } from "@/lib/ai-client";
 import {
     executeRepoQuery,
     executeRepoQueryStream,
-    type RepoQueryParams,
 } from "@/lib/services/query-pipeline";
 import {
     buildScanConfig,
@@ -65,6 +64,13 @@ import {
 } from "@/lib/domain";
 import { answerWithContext, answerWithContextStream } from "@/lib/gemini";
 import { mapProfileStreamChunk } from "@/lib/profile-stream";
+
+function getErrorMessage(error: unknown): string {
+    if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+        return (error as { message: string }).message;
+    }
+    return String(error);
+}
 
 // ─── Private: Analytics tracking ─────────────────────────────────────────────
 
@@ -135,8 +141,8 @@ export async function fetchGitHubData(input: string) {
                 await recordSearch(session.user.id, parts[0], "profile");
             }
             return { type: "profile", data };
-        } catch (e: any) {
-            return { error: `User not found: ${e.message ?? e}` };
+        } catch (e: unknown) {
+            return { error: `User not found: ${getErrorMessage(e)}` };
         }
     }
     if (parts.length === 2) {
@@ -152,8 +158,8 @@ export async function fetchGitHubData(input: string) {
                 await recordSearch(session.user.id, input, "repo");
             }
             return { type: "repo", data: repoData, fileTree: tree, hiddenFiles };
-        } catch (e: any) {
-            return { error: `Repository not found: ${e.message ?? e}` };
+        } catch (e: unknown) {
+            return { error: `Repository not found: ${getErrorMessage(e)}` };
         }
     }
     return { error: "Invalid input format" };
@@ -265,15 +271,6 @@ export async function analyzeRepoFiles(
     repo?: string,
     modelPreference: ModelPreference = "flash"
 ): Promise<{ relevantFiles: string[]; fileCount: number }> {
-    // Delegate file-selection step only — the pipeline handles full execution
-    const fakeParams: RepoQueryParams = {
-        query,
-        owner: owner ?? "",
-        repo: repo ?? "",
-        filePaths,
-        modelPreference,
-    } as any;
-
     // For backwards compatibility (some callers only want the file list),
     // we run the selection step directly from gemini rather than the full pipeline
     const { analyzeFileSelection } = await import("@/lib/gemini");
@@ -408,9 +405,9 @@ export async function* processProfileQueryStream(
         }
 
         yield { type: "complete", relevantFiles: [] };
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Profile stream error:", error);
-        yield { type: "error", message: error?.message ?? "An error occurred" };
+        yield { type: "error", message: getErrorMessage(error) || "An error occurred" };
     }
 }
 
@@ -426,18 +423,20 @@ export interface SecurityScanOptions {
     filePaths?: string[];
 }
 
-export async function scanRepositoryVulnerabilities(
-    owner: string,
-    repo: string,
-    files: Array<{ path: string; sha?: string }>,
-    options: SecurityScanOptions = {}
-): Promise<{
+type SecurityScanResult = {
     findings: SecurityFinding[];
     summary: ScanSummary & { debug?: Record<string, number> };
     grouped: Record<string, SecurityFinding[]>;
     meta: { depth: "quick" | "deep"; aiEnabled: boolean; maxFiles: number; aiFilesSelected: number; durationMs: number };
     scanId?: string;
-}> {
+};
+
+export async function scanRepositoryVulnerabilities(
+    owner: string,
+    repo: string,
+    files: Array<{ path: string; sha?: string }>,
+    options: SecurityScanOptions = {}
+): Promise<SecurityScanResult> {
     const config = buildScanConfig(options);
     const filePaths = files.map(f => f.path);
 
@@ -463,10 +462,10 @@ export async function scanRepositoryVulnerabilities(
     let revision = "unknown";
     try {
         revision = await getDefaultBranchHeadSha(owner, repo);
-    } catch (e) {
+    } catch {
         console.warn(`Failed to resolve latest default-branch SHA for ${owner}/${repo}; using fallback revision key.`);
     }
-    const cachedResult = await getCachedSecurityScanResult(owner, repo, cacheKey, filePaths, revision) as any;
+    const cachedResult = await getCachedSecurityScanResult(owner, repo, cacheKey, filePaths, revision) as SecurityScanResult | null;
 
     if (cachedResult) {
         console.log(`🧠 AI Response Cache Hit for Security Scan: ${owner}/${repo}`);

@@ -1,10 +1,24 @@
 "use client";
 
-import React from "react";
+import { Fragment, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Check, X, Brain, Database } from "lucide-react";
 
 export default function CAGComparison() {
+    const ragChunks = useMemo(
+        () =>
+            Array.from({ length: 6 }, (_, i) => {
+                const angle = ((i * 360) / 6) * (Math.PI / 180);
+                const radius = 70 + i * 12;
+                return {
+                    x: Math.cos(angle) * radius,
+                    y: Math.sin(angle) * radius,
+                    rotate: -35 + i * 14,
+                };
+            }),
+        []
+    );
+
     return (
         <section id="cag-comparison" className="py-24 px-4 relative overflow-hidden">
             <div className="max-w-6xl mx-auto relative z-10">
@@ -19,7 +33,7 @@ export default function CAGComparison() {
                         Agentic CAG vs. Traditional RAG
                     </h2>
                     <p className="text-zinc-400 text-lg max-w-2xl mx-auto">
-                        RepoMind uses <strong>Agentic Context Augmented Generation (Agentic CAG)</strong>. We don't just retrieve fragments; we understand the whole picture.
+                        RepoMind uses <strong>Agentic Context Augmented Generation (Agentic CAG)</strong>. We don&apos;t just retrieve fragments; we understand the whole picture.
                     </p>
                 </motion.div>
 
@@ -48,17 +62,17 @@ export default function CAGComparison() {
                             </motion.div>
 
                             {/* Chopped chunks flying away */}
-                            {[...Array(6)].map((_, i) => (
+                            {ragChunks.map((chunk, i) => (
                                 <motion.div
                                     key={i}
                                     className="absolute w-12 h-12 bg-red-900/30 border border-red-500/50 rounded flex items-center justify-center text-[10px] text-red-500 font-mono"
                                     initial={{ x: 0, y: 0, opacity: 0, scale: 0 }}
                                     animate={{
-                                        x: (Math.random() - 0.5) * 200,
-                                        y: (Math.random() - 0.5) * 200,
+                                        x: chunk.x,
+                                        y: chunk.y,
                                         opacity: [0, 1, 0],
                                         scale: [0.5, 1, 0.5],
-                                        rotate: (Math.random() - 0.5) * 90
+                                        rotate: chunk.rotate,
                                     }}
                                     transition={{ duration: 3, repeat: Infinity, delay: 1 + i * 0.2 }}
                                 >
@@ -128,7 +142,7 @@ export default function CAGComparison() {
                                 const x = Math.cos(angle) * radius;
                                 const y = Math.sin(angle) * radius;
                                 return (
-                                    <React.Fragment key={`node-group-${i}`}>
+                                    <Fragment key={`node-group-${i}`}>
                                         {/* Connection Lines */}
                                         <motion.svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
                                             <motion.line
@@ -152,7 +166,7 @@ export default function CAGComparison() {
                                         >
                                             .ts
                                         </motion.div>
-                                    </React.Fragment>
+                                    </Fragment>
                                 );
                             })}
 

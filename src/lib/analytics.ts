@@ -302,10 +302,11 @@ export const getPublicStats = unstable_cache(
                 totalVisitors: totalVisitors || 0,
                 totalQueries: totalQueries || 0
             };
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Failed to fetch public stats from KV:", error);
             // If it's a connection error, it might be worth logging more details
-            if (error?.message?.includes("ECONNREFUSED") || error?.message?.includes("invalid_token")) {
+            const errorMessage = error instanceof Error ? error.message : "";
+            if (errorMessage.includes("ECONNREFUSED") || errorMessage.includes("invalid_token")) {
                 console.error("KV authentication or connection failure. Check environment variables.");
             }
             return {

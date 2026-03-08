@@ -7,7 +7,7 @@ if (fs.existsSync(envPath)) {
     envContent.split("\n").forEach(line => {
         const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
         if (match) {
-            let key = match[1];
+            const key = match[1];
             let value = match[2] || "";
             if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
             if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
@@ -37,8 +37,37 @@ const RANGES = [
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+interface GitHubSearchRepoItem {
+    owner?: { login?: string };
+    name: string;
+    stargazers_count: number;
+    description: string | null;
+    topics?: string[];
+    language: string | null;
+}
+
+interface GitHubSearchResponse {
+    items?: GitHubSearchRepoItem[];
+}
+
+interface TopRepoRecord {
+    owner?: string;
+    repo: string;
+    stars: number;
+    description: string | null;
+    topics: string[];
+    language: string | null;
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+        return (error as { message: string }).message;
+    }
+    return "Unknown error";
+}
+
 async function fetchTopRepos() {
-    const allRepos: any[] = [];
+    const allRepos: TopRepoRecord[] = [];
     const uniqueRepos = new Set<string>();
 
     console.log("🚀 Starting to fetch top GitHub repositories...");
@@ -71,8 +100,8 @@ async function fetchTopRepos() {
                     throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
                 }
 
-                const data: any = await response.json();
-                const items = data.items || [];
+                const data = await response.json() as GitHubSearchResponse;
+                const items = Array.isArray(data.items) ? data.items : [];
 
                 if (items.length === 0) {
                     keepGoing = false;
@@ -102,8 +131,8 @@ async function fetchTopRepos() {
                     page++;
                     await sleep(2000);
                 }
-            } catch (error: any) {
-                console.error("   ❌ Error fetching repositories:", error.message);
+            } catch (error: unknown) {
+                console.error("   ❌ Error fetching repositories:", getErrorMessage(error));
                 keepGoing = false;
             }
         }

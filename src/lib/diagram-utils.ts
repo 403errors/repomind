@@ -122,8 +122,9 @@ export function validateMermaidSyntax(code: string): { valid: boolean; error?: s
         }
 
         return { valid: true };
-    } catch (e: any) {
-        return { valid: false, error: e.message || 'Unknown validation error' };
+    } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : 'Unknown validation error';
+        return { valid: false, error: errorMessage };
     }
 }
 
@@ -161,7 +162,7 @@ export function sanitizeMermaidCode(code: string): string {
     // 3. Process line by line
     const lines = sanitized.split('\n');
     const processedLines = lines.map(line => {
-        let trimmed = line.trim();
+        const trimmed = line.trim();
         if (!trimmed) return '';
 
         // Skip directives and class definitions
