@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectSecrets, detectCodePatterns } from "@/lib/security-scanner";
+import { detectSecrets, detectCodePatterns, analyzeDependencies, runScanEngineV2 } from "@/lib/security-scanner";
 
 // ─── detectSecrets ────────────────────────────────────────────────────────────
 
@@ -102,5 +102,64 @@ export function greet(name: string): string {
             expect(findings[0].recommendation).toBeDefined();
             expect(findings[0].recommendation.length).toBeGreaterThan(0);
         }
+    });
+});
+
+describe("analyzeDependencies", () => {
+    it("flags vulnerable dependency only when resolved version is in vulnerable range", () => {
+        const pkg = JSON.stringify({
+            dependencies: {
+                axios: "^1.5.0",
+            },
+        });
+        const lock = JSON.stringify({
+            packages: {
+                "": { version: "1.0.0" },
+                "node_modules/axios": { version: "1.5.1" },
+            },
+        });
+        const findings = analyzeDependencies(pkg, { packageLock: lock });
+        expect(findings.some((finding) => finding.title.includes("axios@1.5.1"))).toBe(true);
+    });
+
+    it("does not flag dependency when resolved version is outside vulnerable range", () => {
+        const pkg = JSON.stringify({
+            dependencies: {
+                axios: "^1.6.0",
+            },
+        });
+        const lock = JSON.stringify({
+            packages: {
+                "": { version: "1.0.0" },
+                "node_modules/axios": { version: "1.7.1" },
+            },
+        });
+        const findings = analyzeDependencies(pkg, { packageLock: lock });
+        expect(findings.some((finding) => finding.title.includes("axios"))).toBe(false);
+    });
+});
+
+describe("runScanEngineV2", () => {
+    it("detects tainted SQL injection flow and enriches finding metadata", () => {
+        const files = [
+            {
+                path: "src/api.ts",
+                content: `
+                    import { Client } from "pg";
+                    const db = new Client();
+                    export async function handler(req: any) {
+                        const id = req.query.id;
+                        return db.query(\`SELECT * FROM users WHERE id = \${id}\`);
+                    }
+                `,
+            },
+        ];
+        const result = runScanEngineV2(files, { profile: "deep", confidenceThreshold: 0.5 });
+        const finding = result.findings.find((item) => item.ruleId === "sqli-tainted-dynamic-query");
+        expect(finding).toBeDefined();
+        expect(finding?.engine).toBe("deterministic-v2");
+        expect(typeof finding?.id).toBe("string");
+        expect(typeof finding?.fingerprint).toBe("string");
+        expect((finding?.confidenceScore ?? 0) > 0.8).toBe(true);
     });
 });

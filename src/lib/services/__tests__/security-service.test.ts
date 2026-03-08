@@ -132,6 +132,8 @@ describe("buildScanConfig", () => {
         const config = buildScanConfig({});
         expect(config.depth).toBeDefined();
         expect(config.maxFiles).toBeGreaterThan(0);
+        expect(config.aiEnabled).toBe(false);
+        expect(config.analysisProfile).toBe("quick");
     });
 
     it("respects provided depth option", () => {
@@ -139,6 +141,8 @@ describe("buildScanConfig", () => {
         const deepConfig = buildScanConfig({ depth: "deep" });
         expect(quickConfig.depth).toBe("quick");
         expect(deepConfig.depth).toBe("deep");
+        expect(quickConfig.maxFiles).toBe(20);
+        expect(deepConfig.maxFiles).toBe(60);
     });
 
     it("respects maxFiles option", () => {
@@ -151,6 +155,12 @@ describe("buildScanConfig", () => {
         const disabled = buildScanConfig({ enableAi: false });
         expect(enabled.aiEnabled).toBe(true);
         expect(disabled.aiEnabled).toBe(false);
+    });
+
+    it("supports aiAssist option explicitly", () => {
+        const config = buildScanConfig({ aiAssist: "on" });
+        expect(config.aiAssist).toBe("on");
+        expect(config.aiEnabled).toBe(true);
     });
 });
 

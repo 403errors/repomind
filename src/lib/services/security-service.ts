@@ -9,24 +9,39 @@
  */
 import { getFileContent } from "@/lib/github";
 import {
-    scanFiles,
+    runScanEngineV2,
     getScanSummary,
     groupBySeverity,
     type SecurityFinding,
     type ScanSummary,
 } from "@/lib/security-scanner";
 import { analyzeCodeWithGemini } from "@/lib/gemini-security";
+import {
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    SECURITY_CACHE_KEY_VERSION,
+    SECURITY_ENGINE_VERSION,
+    SECURITY_SCAN_FILE_LIMITS,
+} from "@/lib/security-scan-config";
+
+const DEPENDENCY_FILES = new Set(["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"]);
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export interface SecurityScanConfig {
     depth: "quick" | "deep";
+    analysisProfile: "quick" | "deep";
     maxFiles: number;
+    aiAssist: "off" | "on";
     aiEnabled: boolean;
     aiMaxFiles: number;
+    confidenceThreshold: number;
+    includePatterns: string[];
+    excludePatterns: string[];
     includeMatchers: RegExp[];
     excludeMatchers: RegExp[];
     selectedPaths: Set<string> | null;
+    engineVersion: string;
+    cacheKeyVersion: string;
 }
 
 export interface SecurityScanDeps {
@@ -38,7 +53,8 @@ export interface SecurityScanDeps {
     ) => Promise<string>;
     runAiAnalysis?: (
         files: Array<{ path: string; content: string }>,
-        repoAllPaths: string[]
+        repoAllPaths: string[],
+        candidatePaths?: string[]
     ) => Promise<SecurityFinding[]>;
 }
 
@@ -98,11 +114,19 @@ export function attachSnippets(
     });
 }
 
-/** Deduplicate based on file + line + title */
+function findingScore(finding: SecurityFinding): number {
+    if (typeof finding.confidenceScore === "number") return finding.confidenceScore;
+    if (finding.confidence === "high") return 0.9;
+    if (finding.confidence === "medium") return 0.72;
+    if (finding.confidence === "low") return 0.45;
+    return 0.7;
+}
+
+/** Deduplicate based on stable fingerprint first, then fallback key */
 export function deduplicateFindings(findings: SecurityFinding[]): SecurityFinding[] {
     const seen = new Set<string>();
-    return findings.filter((f) => {
-        const key = `${f.file}:${f.line ?? 0}:${f.title}`;
+    return findings.filter((finding) => {
+        const key = finding.fingerprint ?? `${finding.file}:${finding.line ?? 0}:${finding.title}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -112,51 +136,73 @@ export function deduplicateFindings(findings: SecurityFinding[]): SecurityFindin
 /** Build a structured config from raw scan options */
 export function buildScanConfig(options: {
     depth?: "quick" | "deep";
+    analysisProfile?: "quick" | "deep";
     maxFiles?: number;
+    aiAssist?: "off" | "on";
     enableAi?: boolean;
     aiMaxFiles?: number;
+    confidenceThreshold?: number;
     includePatterns?: string[];
     excludePatterns?: string[];
+    selectedPaths?: string[];
     filePaths?: string[];
 }): SecurityScanConfig {
-    const depth = options.depth ?? "quick";
+    const analysisProfile = options.analysisProfile ?? options.depth ?? "quick";
+    const includePatterns = normalizePatterns(options.includePatterns);
+    const excludePatterns = normalizePatterns(options.excludePatterns);
+    const selectedPaths = options.selectedPaths ?? options.filePaths;
+    const aiAssist = options.aiAssist ?? (options.enableAi === true ? "on" : "off");
+
+    const maxFiles = options.maxFiles ?? SECURITY_SCAN_FILE_LIMITS[analysisProfile];
+
     return {
-        depth,
-        // Quick: top 10 files, Deep: top 50 files
-        maxFiles: options.maxFiles ?? (depth === "deep" ? 50 : 10),
-        aiEnabled: options.enableAi !== false,
-        // AI analyses all selected files (up to maxFiles)
-        aiMaxFiles: options.aiMaxFiles ?? (depth === "deep" ? 50 : 10),
-        includeMatchers: buildMatchers(normalizePatterns(options.includePatterns)),
-        excludeMatchers: buildMatchers(normalizePatterns(options.excludePatterns)),
-        selectedPaths: options.filePaths ? new Set(options.filePaths) : null,
+        depth: analysisProfile,
+        analysisProfile,
+        maxFiles,
+        aiAssist,
+        aiEnabled: aiAssist === "on",
+        aiMaxFiles: options.aiMaxFiles ?? Math.min(maxFiles, analysisProfile === "deep" ? 30 : 12),
+        confidenceThreshold: options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD[analysisProfile],
+        includePatterns,
+        excludePatterns,
+        includeMatchers: buildMatchers(includePatterns),
+        excludeMatchers: buildMatchers(excludePatterns),
+        selectedPaths: selectedPaths ? new Set(selectedPaths) : null,
+        engineVersion: SECURITY_ENGINE_VERSION,
+        cacheKeyVersion: SECURITY_CACHE_KEY_VERSION,
     };
 }
 
-/** Filter file list to scannable files based on the scan config */
+function passesPathFilters(path: string, config: SecurityScanConfig): boolean {
+    if (config.selectedPaths && !config.selectedPaths.has(path)) return false;
+    if (config.includeMatchers.length > 0 && !matchesAny(path, config.includeMatchers)) return false;
+    if (config.excludeMatchers.length > 0 && matchesAny(path, config.excludeMatchers)) return false;
+    return true;
+}
+
+/** Filter file list to scannable code/config files (dependency files handled separately) */
 export function filterCodeFiles(
     files: Array<{ path: string; sha?: string }>,
     config: SecurityScanConfig
 ): Array<{ path: string; sha?: string }> {
     return files
         .filter(({ path }) => {
-            const isCode =
+            const isCodeOrConfig =
                 /\.(js|jsx|ts|tsx|py|java|php|rb|go|rs)$/i.test(path) ||
                 /\.(ya?ml|toml|json|env|ini|config|cfg)$/i.test(path) ||
-                /\.env(\.|$)/i.test(path) ||
-                path === "package.json";
-            if (!isCode) return false;
-
-            const isLockfile = /package-lock\.json$|yarn\.lock$|pnpm-lock\.yaml$|Gemfile\.lock$|poetry\.lock$|composer\.lock$/i.test(path);
-            if (isLockfile) return false;
-            if (config.selectedPaths && !config.selectedPaths.has(path)) return false;
-            if (config.includeMatchers.length > 0 && !matchesAny(path, config.includeMatchers))
-                return false;
-            if (config.excludeMatchers.length > 0 && matchesAny(path, config.excludeMatchers))
-                return false;
-            return true;
+                /\.env(\.|$)/i.test(path);
+            if (!isCodeOrConfig) return false;
+            if (DEPENDENCY_FILES.has(path)) return false;
+            return passesPathFilters(path, config);
         })
         .slice(0, config.maxFiles);
+}
+
+function selectDependencyFiles(
+    files: Array<{ path: string; sha?: string }>,
+    config: SecurityScanConfig
+): Array<{ path: string; sha?: string }> {
+    return files.filter(({ path }) => DEPENDENCY_FILES.has(path) && passesPathFilters(path, config));
 }
 
 // ─── Core Service ──────────────────────────────────────────────────────────────
@@ -164,8 +210,6 @@ export function filterCodeFiles(
 /**
  * Run a full security scan on a repository.
  * Accepts optional injectable deps for testing without real API calls.
- *
- * @param allFilePaths - Complete list of all file paths in the repo (for LLM context)
  */
 export async function runSecurityScan(
     owner: string,
@@ -180,82 +224,112 @@ export async function runSecurityScan(
     grouped: Record<string, SecurityFinding[]>;
     meta: {
         depth: "quick" | "deep";
+        analysisProfile: "quick" | "deep";
+        aiAssist: "off" | "on";
         aiEnabled: boolean;
         maxFiles: number;
         aiFilesSelected: number;
+        confidenceThreshold: number;
         durationMs: number;
+        engineVersion: string;
+        cacheKeyVersion: string;
+        fromCache: boolean;
+        timings: Record<string, number>;
+        analyzerStats: Record<string, number>;
     };
 }> {
     const startedAt = Date.now();
     const fetchContent = deps.fetchFileContent ?? getFileContent;
     const runAi = deps.runAiAnalysis ?? analyzeCodeWithGemini;
 
-    // Sort by risk score first, then take top maxFiles
-    const riskSorted = [...files].sort(
-        (a, b) => scorePathRisk(b.path) - scorePathRisk(a.path)
-    );
+    const riskSorted = [...files].sort((a, b) => scorePathRisk(b.path) - scorePathRisk(a.path));
     const codeFiles = filterCodeFiles(riskSorted, config);
-    console.log(`🔍 Security Scan [${config.depth}]: ${codeFiles.length} files selected (of ${files.length} total)`);
+    const dependencyFiles = selectDependencyFiles(riskSorted, config);
 
-    // Fetch file contents
-    const filesWithContent: Array<{ path: string; content: string }> = [];
-    for (const file of codeFiles) {
-        try {
-            const content = await fetchContent(owner, repo, file.path, file.sha);
-            if (typeof content === "string" && content.length > 0) {
-                filesWithContent.push({ path: file.path, content });
-            } else {
-                console.warn(`⚠️ Skipping ${file.path}: empty or non-string content`);
-            }
-        } catch (e) {
-            console.warn(`❌ Failed to fetch ${file.path}:`, e);
+    const selectedFiles = [...codeFiles];
+    for (const file of dependencyFiles) {
+        if (!selectedFiles.find((current) => current.path === file.path)) {
+            selectedFiles.push(file);
         }
     }
 
-    console.log(`📄 Fetched ${filesWithContent.length} files`);
+    console.log(
+        `🔍 Security Scan [${config.analysisProfile}]: ${selectedFiles.length} files selected (code=${codeFiles.length}, deps=${dependencyFiles.length}, total=${files.length})`
+    );
 
-    // Pattern-based scan (secrets + code patterns + config issues + deps)
-    const patternFindings = scanFiles(filesWithContent);
+    const fetchStartedAt = Date.now();
+    const fetchedFiles = await Promise.all(
+        selectedFiles.map(async (file) => {
+            try {
+                const content = await fetchContent(owner, repo, file.path, file.sha);
+                if (typeof content === "string" && content.length > 0) {
+                    return { path: file.path, content };
+                }
+                return null;
+            } catch (error) {
+                console.warn(`❌ Failed to fetch ${file.path}:`, error);
+                return null;
+            }
+        })
+    );
+    const filesWithContent = fetchedFiles.filter((file): file is { path: string; content: string } => Boolean(file));
+    const fetchDurationMs = Date.now() - fetchStartedAt;
 
-    // AI-assisted scan (HIGH thinking, with full repo context)
+    const deterministicStartedAt = Date.now();
+    const deterministic = runScanEngineV2(filesWithContent, {
+        profile: config.analysisProfile,
+        confidenceThreshold: config.confidenceThreshold,
+    });
+    const deterministicFindings = deterministic.findings;
+    const deterministicDurationMs = Date.now() - deterministicStartedAt;
+
     let aiFindings: SecurityFinding[] = [];
     let aiFilesSelected = 0;
+    const aiStartedAt = Date.now();
 
     if (config.aiEnabled && filesWithContent.length > 0) {
         try {
-            const patternHitFiles = new Set(patternFindings.map((f) => f.file));
-
-            // Prioritise files that already had pattern hits, then by risk score
+            const candidateSet = new Set(deterministic.aiCandidateFiles);
             const prioritised: Array<{ path: string; content: string }> = [];
+
             for (const file of filesWithContent) {
-                if (patternHitFiles.has(file.path)) prioritised.push(file);
+                if (candidateSet.has(file.path)) {
+                    prioritised.push(file);
+                }
             }
             for (const file of filesWithContent) {
-                if (!prioritised.find((f) => f.path === file.path)) prioritised.push(file);
+                if (!prioritised.find((item) => item.path === file.path)) {
+                    prioritised.push(file);
+                }
             }
 
             const aiFiles = prioritised.slice(0, config.aiMaxFiles);
             aiFilesSelected = aiFiles.length;
 
             if (aiFiles.length > 0) {
-                // Pass full repo path list so the LLM has structural context
-                aiFindings = await runAi(aiFiles, allFilePaths.length > 0 ? allFilePaths : files.map(f => f.path));
+                aiFindings = await runAi(
+                    aiFiles,
+                    allFilePaths.length > 0 ? allFilePaths : files.map((file) => file.path),
+                    deterministic.aiCandidateFiles
+                );
             }
-        } catch (err) {
-            console.warn("AI security analysis failed, using pattern results only:", err);
+        } catch (error) {
+            console.warn("AI security analysis failed, using deterministic results only:", error);
         }
     }
 
-    const allFindings = deduplicateFindings([...patternFindings, ...aiFindings]);
-    const filtered = allFindings.filter((f) => !f.confidence || f.confidence !== "low");
+    const allFindings = deduplicateFindings([...deterministicFindings, ...aiFindings]);
+    const filtered = allFindings.filter((finding) => findingScore(finding) >= config.confidenceThreshold);
     const withSnippets = attachSnippets(filtered, filesWithContent);
 
-    const summary = getScanSummary(filtered) as ScanSummary & { debug?: Record<string, number> };
+    const summary = getScanSummary(withSnippets) as ScanSummary & { debug?: Record<string, number> };
     summary.debug = {
         filesReceived: files.length,
         codeFilesFiltered: codeFiles.length,
+        dependencyFilesIncluded: dependencyFiles.length,
         filesSuccessfullyFetched: filesWithContent.length,
-        patternFindings: patternFindings.length,
+        patternFindings: deterministicFindings.length,
+        deterministicFindings: deterministicFindings.length,
         aiFindings: aiFindings.length,
         afterDedup: allFindings.length,
         afterConfidenceFilter: filtered.length,
@@ -266,11 +340,23 @@ export async function runSecurityScan(
         summary,
         grouped: groupBySeverity(withSnippets),
         meta: {
-            depth: config.depth,
+            depth: config.analysisProfile,
+            analysisProfile: config.analysisProfile,
+            aiAssist: config.aiAssist,
             aiEnabled: config.aiEnabled,
             maxFiles: config.maxFiles,
             aiFilesSelected,
+            confidenceThreshold: config.confidenceThreshold,
             durationMs: Date.now() - startedAt,
+            engineVersion: config.engineVersion,
+            cacheKeyVersion: config.cacheKeyVersion,
+            fromCache: false,
+            timings: {
+                fetchMs: fetchDurationMs,
+                deterministicMs: deterministicDurationMs,
+                aiMs: Date.now() - aiStartedAt,
+            },
+            analyzerStats: deterministic.analyzerStats,
         },
     };
 }

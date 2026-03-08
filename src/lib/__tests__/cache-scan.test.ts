@@ -27,15 +27,20 @@ describe("security scan cache helpers", () => {
         await cacheSecurityScanResult(
             "acme",
             "widget",
-            "security_scan_quick_true",
-            ["src/b.ts", "src/a.ts"],
-            "abc123",
+            {
+                scanKey: "security_scan",
+                files: ["src/b.ts", "src/a.ts"],
+                revision: "abc123",
+                scanConfig: { analysisProfile: "quick", aiAssist: "off" },
+                engineVersion: "scan-engine-v2",
+                cacheKeyVersion: "v2",
+            },
             { findings: [], summary: { total: 0 } }
         );
 
         expect(setexMock).toHaveBeenCalledTimes(1);
         const [key, ttl] = setexMock.mock.calls[0];
-        expect(key).toContain("scan_answer:acme/widget:security_scan_quick_true:abc123:");
+        expect(key).toContain("scan_answer:acme/widget:v2:");
         expect(ttl).toBe(3600);
     });
 
@@ -47,11 +52,51 @@ describe("security scan cache helpers", () => {
         const result = await getCachedSecurityScanResult(
             "acme",
             "widget",
-            "security_scan_quick_true",
-            ["src/a.ts"],
-            "abc123"
+            {
+                scanKey: "security_scan",
+                files: ["src/a.ts"],
+                revision: "abc123",
+                scanConfig: { analysisProfile: "quick", aiAssist: "off" },
+                engineVersion: "scan-engine-v2",
+                cacheKeyVersion: "v2",
+            }
         );
 
         expect(result).toEqual({ ok: true, total: 2 });
+    });
+
+    it("uses scan config as part of cache identity", async () => {
+        setexMock.mockResolvedValue("OK");
+
+        await cacheSecurityScanResult(
+            "acme",
+            "widget",
+            {
+                scanKey: "security_scan",
+                files: ["src/a.ts"],
+                revision: "abc123",
+                scanConfig: { analysisProfile: "quick", aiAssist: "off" },
+                engineVersion: "scan-engine-v2",
+                cacheKeyVersion: "v2",
+            },
+            { findings: [] }
+        );
+        await cacheSecurityScanResult(
+            "acme",
+            "widget",
+            {
+                scanKey: "security_scan",
+                files: ["src/a.ts"],
+                revision: "abc123",
+                scanConfig: { analysisProfile: "quick", aiAssist: "on" },
+                engineVersion: "scan-engine-v2",
+                cacheKeyVersion: "v2",
+            },
+            { findings: [] }
+        );
+
+        const firstKey = setexMock.mock.calls[0]?.[0];
+        const secondKey = setexMock.mock.calls[1]?.[0];
+        expect(firstKey).not.toBe(secondKey);
     });
 });

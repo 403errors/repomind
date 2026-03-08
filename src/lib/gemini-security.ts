@@ -7,82 +7,82 @@ import type { SecurityFinding } from "./security-scanner";
  */
 const securityAnalysisFunctions = [
     {
-        name: 'report_sql_injection',
-        description: 'Report a potential SQL injection vulnerability',
+        name: "report_sql_injection",
+        description: "Report a potential SQL injection vulnerability",
         parameters: {
-            type: 'object' as const,
+            type: "object" as const,
             properties: {
-                file: { type: 'string', description: 'File path' },
-                line: { type: 'number', description: 'Approximate line number' },
-                code_snippet: { type: 'string', description: 'Vulnerable code snippet' },
-                severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
-                explanation: { type: 'string', description: 'Why this is vulnerable' }
+                file: { type: "string", description: "File path" },
+                line: { type: "number", description: "Approximate line number" },
+                code_snippet: { type: "string", description: "Vulnerable code snippet" },
+                severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                explanation: { type: "string", description: "Why this is vulnerable" },
             },
-            required: ['file', 'code_snippet', 'severity', 'explanation']
-        }
+            required: ["file", "code_snippet", "severity", "explanation"],
+        },
     },
     {
-        name: 'report_xss',
-        description: 'Report a potential XSS (Cross-Site Scripting) vulnerability',
+        name: "report_xss",
+        description: "Report a potential XSS (Cross-Site Scripting) vulnerability",
         parameters: {
-            type: 'object' as const,
+            type: "object" as const,
             properties: {
-                file: { type: 'string', description: 'File path' },
-                line: { type: 'number', description: 'Approximate line number' },
-                code_snippet: { type: 'string', description: 'Vulnerable code snippet' },
-                severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
-                explanation: { type: 'string', description: 'Why this is vulnerable' }
+                file: { type: "string", description: "File path" },
+                line: { type: "number", description: "Approximate line number" },
+                code_snippet: { type: "string", description: "Vulnerable code snippet" },
+                severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                explanation: { type: "string", description: "Why this is vulnerable" },
             },
-            required: ['file', 'code_snippet', 'severity', 'explanation']
-        }
+            required: ["file", "code_snippet", "severity", "explanation"],
+        },
     },
     {
-        name: 'report_auth_issue',
-        description: 'Report an authentication or authorization vulnerability',
+        name: "report_auth_issue",
+        description: "Report an authentication or authorization vulnerability",
         parameters: {
-            type: 'object' as const,
+            type: "object" as const,
             properties: {
-                file: { type: 'string', description: 'File path' },
-                line: { type: 'number', description: 'Approximate line number' },
-                code_snippet: { type: 'string', description: 'Vulnerable code snippet' },
-                severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
-                explanation: { type: 'string', description: 'What\'s wrong with the auth/authz' }
+                file: { type: "string", description: "File path" },
+                line: { type: "number", description: "Approximate line number" },
+                code_snippet: { type: "string", description: "Vulnerable code snippet" },
+                severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                explanation: { type: "string", description: "What's wrong with the auth/authz" },
             },
-            required: ['file', 'code_snippet', 'severity', 'explanation']
-        }
+            required: ["file", "code_snippet", "severity", "explanation"],
+        },
     },
     {
-        name: 'report_injection',
-        description: 'Report a code injection, command injection, or path traversal vulnerability',
+        name: "report_injection",
+        description: "Report a code injection, command injection, or path traversal vulnerability",
         parameters: {
-            type: 'object' as const,
+            type: "object" as const,
             properties: {
-                file: { type: 'string', description: 'File path' },
-                line: { type: 'number', description: 'Approximate line number' },
-                code_snippet: { type: 'string', description: 'Vulnerable code snippet' },
-                severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
-                injection_type: { type: 'string', enum: ['command', 'path_traversal', 'code', 'ldap'] },
-                explanation: { type: 'string', description: 'How the injection could occur' }
+                file: { type: "string", description: "File path" },
+                line: { type: "number", description: "Approximate line number" },
+                code_snippet: { type: "string", description: "Vulnerable code snippet" },
+                severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                injection_type: { type: "string", enum: ["command", "path_traversal", "code", "ldap"] },
+                explanation: { type: "string", description: "How the injection could occur" },
             },
-            required: ['file', 'code_snippet', 'severity', 'injection_type', 'explanation']
-        }
+            required: ["file", "code_snippet", "severity", "injection_type", "explanation"],
+        },
     },
     {
-        name: 'report_crypto_issue',
-        description: 'Report insecure cryptography usage',
+        name: "report_crypto_issue",
+        description: "Report insecure cryptography usage",
         parameters: {
-            type: 'object' as const,
+            type: "object" as const,
             properties: {
-                file: { type: 'string', description: 'File path' },
-                line: { type: 'number', description: 'Approximate line number' },
-                code_snippet: { type: 'string', description: 'Problematic code' },
-                severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
-                issue_type: { type: 'string', enum: ['weak_algorithm', 'hardcoded_key', 'no_encryption', 'insecure_random'] },
-                explanation: { type: 'string', description: 'What\'s wrong with the crypto' }
+                file: { type: "string", description: "File path" },
+                line: { type: "number", description: "Approximate line number" },
+                code_snippet: { type: "string", description: "Problematic code" },
+                severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                issue_type: { type: "string", enum: ["weak_algorithm", "hardcoded_key", "no_encryption", "insecure_random"] },
+                explanation: { type: "string", description: "What's wrong with the crypto" },
             },
-            required: ['file', 'code_snippet', 'severity', 'issue_type', 'explanation']
-        }
-    }
+            required: ["file", "code_snippet", "severity", "issue_type", "explanation"],
+        },
+    },
 ];
 
 type GeminiSecurityCall = {
@@ -115,94 +115,107 @@ function getErrorInfo(error: unknown): { message?: string; status?: unknown; sta
     };
 }
 
+function redactPromptSecrets(input: string): string {
+    return input
+        .replace(/sk-[a-zA-Z0-9]{20,}/g, "[REDACTED_OPENAI_KEY]")
+        .replace(/ghp_[a-zA-Z0-9]{20,}/g, "[REDACTED_GITHUB_TOKEN]")
+        .replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]")
+        .replace(/(password|token|secret)\s*[:=]\s*['"][^'"]+['"]/gi, "$1=[REDACTED]");
+}
+
 /**
- * Analyze code files with Gemini AI for security vulnerabilities
+ * Analyze code files with Gemini AI for security vulnerabilities.
+ *
+ * The method is intentionally conservative and only returns findings
+ * that pass strict local validation.
  */
 export async function analyzeCodeWithGemini(
-    files: Array<{ path: string; content: string }>
+    files: Array<{ path: string; content: string }>,
+    repoAllPaths: string[] = [],
+    candidatePaths: string[] = []
 ): Promise<SecurityFinding[]> {
     try {
         const model = getGenAI().getGenerativeModel({
             model: DEFAULT_MODEL,
-            tools: [{ functionDeclarations: securityAnalysisFunctions as unknown as FunctionDeclaration[] }]
+            tools: [{ functionDeclarations: securityAnalysisFunctions as unknown as FunctionDeclaration[] }],
         });
 
-        // Build analysis prompt
-        const filesContext = files.map(f => `
---- FILE: ${f.path} ---
-\`\`\`
-${f.content.slice(0, 3000)} ${f.content.length > 3000 ? '... (truncated)' : ''}
-\`\`\`
-    `).join('\n');
+        const filesContext = files
+            .map((file) => {
+                const redacted = redactPromptSecrets(file.content);
+                return `\n--- FILE: ${file.path} ---\n\`\`\`\n${redacted.slice(0, 3000)} ${
+                    redacted.length > 3000 ? "... (truncated)" : ""
+                }\n\`\`\``;
+            })
+            .join("\n");
 
         const prompt = `
-You are a security expert analyzing code for CRITICAL vulnerabilities ONLY.
+You are a security engineer assisting a deterministic scanner.
+Return ONLY high-confidence true positives.
+
+Repository paths (truncated to first 300):
+${repoAllPaths.slice(0, 300).join("\n")}
+
+Candidate paths prioritized by deterministic engine:
+${candidatePaths.slice(0, 120).join("\n") || "(none)"}
 
 ${filesContext}
 
-CRITICAL RULES TO PREVENT FALSE POSITIVES:
-1. **RegExp.exec() is NOT child_process.exec()** - Never flag regex operations as command injection
-2. **String concatenation for display is NOT SQL injection** - Only flag if:
-   - User input (req., params., query., body.) flows DIRECTLY into SQL
-   - Database library is imported (mysql, postgres, sequelize, typeorm, etc.)
-3. **Verify actual vulnerability path** - Input must flow to a dangerous sink
-4. **Check for imports** - Don't flag child_process.exec if child_process isn't imported
-5. **No false positives** - When in doubt, DO NOT report
-
-Only use reporting functions for TRUE vulnerabilities where:
-- User-controlled input exists (req.*, params.*, query.*, body.*)
-- Input flows to a dangerous operation (SQL, exec, innerHTML, etc.)
-- No sanitization or validation is present
-- The dangerous module/library is actually imported
-
-Be extremely conservative. False alarms erode trust.
+Rules:
+1) Do not report speculative issues.
+2) Prefer verified source->sink flows.
+3) For command injection, require child_process execution sinks.
+4) For SQL injection, require DB query sink + tainted input.
+5) For path traversal, require filesystem sink + tainted path input.
+6) If uncertain, do not report.
 `;
 
         const result = await model.generateContent(prompt);
         const response = result.response;
-
-        // Extract function calls
         const functionCalls = (response.functionCalls?.() || []) as GeminiSecurityCall[];
 
         const findings: SecurityFinding[] = functionCalls
             .map((call): SecurityFinding | null => {
                 const args = call.args ?? {};
-                let title = '';
-                let cwe = '';
-                let recommendation = '';
+                let title = "";
+                let cwe = "";
+                let recommendation = "";
 
                 switch (call.name) {
-                    case 'report_sql_injection':
-                        title = 'SQL Injection Vulnerability';
-                        cwe = 'CWE-89';
-                        recommendation = 'Use parameterized queries or prepared statements. Never concatenate user input into SQL.';
+                    case "report_sql_injection":
+                        title = "SQL Injection Vulnerability";
+                        cwe = "CWE-89";
+                        recommendation = "Use parameterized queries or prepared statements. Never concatenate user input into SQL.";
                         break;
-                    case 'report_xss':
-                        title = 'Cross-Site Scripting (XSS)';
-                        cwe = 'CWE-79';
-                        recommendation = 'Sanitize user input and use secure DOM manipulation methods. Avoid innerHTML with user data.';
+                    case "report_xss":
+                        title = "Cross-Site Scripting (XSS)";
+                        cwe = "CWE-79";
+                        recommendation = "Sanitize user input and avoid unsafe HTML sinks with untrusted input.";
                         break;
-                    case 'report_auth_issue':
-                        title = 'Authentication/Authorization Issue';
-                        cwe = 'CWE-287';
-                        recommendation = 'Implement proper authentication checks and use established auth libraries.';
+                    case "report_auth_issue":
+                        title = "Authentication/Authorization Issue";
+                        cwe = "CWE-287";
+                        recommendation = "Enforce authn/authz checks at route and action boundaries.";
                         break;
-                    case 'report_injection':
-                        title = `${getString(args.injection_type)} Injection`;
-                        cwe = getString(args.injection_type) === 'command' ? 'CWE-78' : 'CWE-22';
-                        recommendation = 'Validate and sanitize all user input. Use safe APIs that don\'t accept shell commands.';
+                    case "report_injection": {
+                        const type = getString(args.injection_type) || "code";
+                        title = `${type} Injection`;
+                        cwe = type === "command" ? "CWE-78" : type === "path_traversal" ? "CWE-22" : "CWE-94";
+                        recommendation = "Validate and sanitize all user input. Constrain dangerous sinks with allowlists.";
                         break;
-                    case 'report_crypto_issue':
+                    }
+                    case "report_crypto_issue":
                         title = `Cryptography Issue: ${getString(args.issue_type)}`;
-                        cwe = 'CWE-327';
-                        recommendation = 'Use modern cryptographic algorithms (AES-256, SHA-256+). Never hardcode keys.';
+                        cwe = "CWE-327";
+                        recommendation = "Use modern cryptography and never hardcode keys/secrets in source.";
                         break;
                     default:
                         return null;
                 }
 
+                const confidenceScore = call.name === "report_sql_injection" || call.name === "report_injection" ? 0.88 : 0.84;
                 return {
-                    type: 'code' as const,
+                    type: "code",
                     severity: toSeverity(args.severity),
                     title,
                     description: getString(args.explanation),
@@ -210,26 +223,28 @@ Be extremely conservative. False alarms erode trust.
                     line: getNumber(args.line),
                     recommendation,
                     cwe,
-                    confidence: 'high' as const, // AI findings start with high confidence
+                    confidence: "high",
+                    confidenceScore,
+                    engine: "ai-assist",
+                    ruleId: `ai-${call.name ?? "unknown"}`,
+                    evidence: [{ type: "context", message: "AI-assisted finding passed local validator" }],
                 };
             })
             .filter((finding): finding is SecurityFinding => finding !== null)
-            .filter(finding => validateFinding(finding, files)); // Post-process validation
+            .filter((finding) => validateFinding(finding, files));
 
         return findings;
     } catch (error: unknown) {
         const errorInfo = getErrorInfo(error);
-        console.error('Gemini security analysis error:', error);
-        console.error('Error details:', {
+        console.error("Gemini security analysis error:", error);
+        console.error("Error details:", {
             message: errorInfo.message,
             status: errorInfo.status,
-            statusText: errorInfo.statusText
+            statusText: errorInfo.statusText,
         });
-        // Return empty array instead of throwing to allow graceful degradation
         return [];
     }
 }
-
 
 export async function generateSecurityPatch(params: {
     filePath: string;
@@ -241,11 +256,11 @@ export async function generateSecurityPatch(params: {
 }): Promise<{ patch: string; explanation: string }> {
     try {
         const model = getGenAI().getGenerativeModel({
-            model: DEFAULT_MODEL
+            model: DEFAULT_MODEL,
         });
 
-        const contextSnippet = params.snippet || '';
-        const lineInfo = params.line ? `Line: ${params.line}` : 'Line: unknown';
+        const contextSnippet = params.snippet || "";
+        const lineInfo = params.line ? `Line: ${params.line}` : "Line: unknown";
 
         const prompt = `
 You are a security engineer. Generate a minimal, safe fix for the vulnerability.
@@ -267,7 +282,7 @@ ${contextSnippet}
 Full file (may be truncated):
 \`\`\`
 ${params.fileContent.slice(0, 8000)}
-${params.fileContent.length > 8000 ? '\n... (truncated)' : ''}
+${params.fileContent.length > 8000 ? "\n... (truncated)" : ""}
 \`\`\`
 
 Return ONLY valid JSON with keys:
@@ -278,60 +293,75 @@ Do not include markdown fences.`;
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        const start = text.indexOf('{');
-        const end = text.lastIndexOf('}');
-        const jsonPayload = (start !== -1 && end > start) ? text.slice(start, end + 1) : null;
+        const start = text.indexOf("{");
+        const end = text.lastIndexOf("}");
+        const jsonPayload = start !== -1 && end > start ? text.slice(start, end + 1) : null;
         if (!jsonPayload) {
-            return { patch: text.trim(), explanation: 'Model response did not include JSON.' };
+            return { patch: text.trim(), explanation: "Model response did not include JSON." };
         }
 
-        const parsed = JSON.parse(jsonPayload);
+        const parsed = JSON.parse(jsonPayload) as { patch?: unknown; explanation?: unknown };
         return {
-            patch: String(parsed.patch || '').trim(),
-            explanation: String(parsed.explanation || '').trim()
+            patch: String(parsed.patch || "").trim(),
+            explanation: String(parsed.explanation || "").trim(),
         };
     } catch (error: unknown) {
-        console.error('Gemini patch generation error:', error);
+        console.error("Gemini patch generation error:", error);
         return {
-            patch: '',
-            explanation: 'Failed to generate patch.'
+            patch: "",
+            explanation: "Failed to generate patch.",
         };
     }
 }
 
 /**
- * Validate AI findings to prevent false positives
+ * Validate AI findings to prevent false positives.
  */
 function validateFinding(
     finding: SecurityFinding,
     files: Array<{ path: string; content: string }>
 ): boolean {
-    const file = files.find(f => f.path === finding.file);
+    const file = files.find((item) => item.path === finding.file);
     if (!file) return false;
 
-    // Validate command injection findings
-    if (finding.title.toLowerCase().includes('command') || finding.title.toLowerCase().includes('injection')) {
-        // Reject if it's actually about RegExp.exec
-        if (/regexp.*exec/i.test(finding.description)) {
-            return false;
-        }
-        // Reject if child_process isn't imported
-        if (!/(?:require|import).*['"]child_process['"]/.test(file.content)) {
-            return false;
-        }
+    const description = (finding.description || "").toLowerCase();
+    const title = finding.title.toLowerCase();
+    const content = file.content;
+
+    const hasDbLib = /(?:require|import).*(?:mysql|postgres|pg|sqlite|sequelize|knex|typeorm|mongodb|mongoose)/i.test(content);
+    const hasSqlSink = /(?:query|execute|raw|run)\s*\(/i.test(content);
+    const hasChildProcess = /(?:require|import).*['"](?:node:)?child_process['"]/.test(content);
+    const hasCommandSink = /(?:exec|execSync|spawn|spawnSync)\s*\(/.test(content);
+    const hasPathSink = /(?:readFile|readFileSync|createReadStream|open|readdir)\s*\(/.test(content);
+    const hasXssSink = /(?:innerHTML\s*=|dangerouslySetInnerHTML|document\.write\s*\(|res\.send\s*\()/i.test(content);
+    const hasInputSource = /(?:req\.|params\.|query\.|body\.|headers\.|cookies\.)/i.test(content);
+
+    if (title.includes("sql")) {
+        if (!hasDbLib || !hasSqlSink) return false;
+        if (!hasInputSource) return false;
+        if (/console\.|log\(|print\(/i.test(description)) return false;
+        return true;
     }
 
-    // Validate SQL injection findings
-    if (finding.title.toLowerCase().includes('sql')) {
-        // Reject if no database library is imported
-        if (!/(?:require|import).*(?:mysql|postgres|sqlite|sequelize|knex|typeorm|mongodb|mongoose)/i.test(file.content)) {
-            return false;
-        }
-        // Reject if it's just string concatenation for display/logging
-        if (/console\.|log\(|print\(/i.test(finding.description)) {
-            return false;
-        }
+    if (title.includes("command")) {
+        return hasChildProcess && hasCommandSink && hasInputSource;
     }
 
-    return true;
+    if (title.includes("path_traversal") || title.includes("path traversal")) {
+        return hasPathSink && hasInputSource;
+    }
+
+    if (title.includes("xss") || title.includes("cross-site")) {
+        return hasXssSink && hasInputSource;
+    }
+
+    if (title.includes("cryptography")) {
+        return /(crypto|md5|sha1|random|encrypt|decrypt|cipher)/i.test(content);
+    }
+
+    if (title.includes("auth")) {
+        return /(route|middleware|handler|auth|authorize|permission|role|token)/i.test(content);
+    }
+
+    return description.length > 20;
 }

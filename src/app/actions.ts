@@ -33,7 +33,6 @@ import {
 } from "@/lib/analytics";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import type { GitHubProfile } from "@/lib/github";
-import type { SecurityFinding, ScanSummary } from "@/lib/security-scanner";
 import type { SearchResult } from "@/lib/search-engine";
 import { getCachedSecurityScanResult, cacheSecurityScanResult } from "@/lib/cache";
 import type { ModelPreference } from "@/lib/ai-client";
@@ -46,8 +45,6 @@ import {
 import {
     buildScanConfig,
     runSecurityScan,
-    extractSnippet,
-    type SecurityScanDeps,
 } from "@/lib/services/security-service";
 import {
     saveScanResult,
@@ -398,18 +395,17 @@ export interface SecurityScanOptions {
     excludePatterns?: string[];
     maxFiles?: number;
     depth?: "quick" | "deep";
+    analysisProfile?: "quick" | "deep";
+    aiAssist?: "off" | "on";
     enableAi?: boolean;
     aiMaxFiles?: number;
+    confidenceThreshold?: number;
+    selectedPaths?: string[];
     filePaths?: string[];
 }
 
-type SecurityScanResult = {
-    findings: SecurityFinding[];
-    summary: ScanSummary & { debug?: Record<string, number> };
-    grouped: Record<string, SecurityFinding[]>;
-    meta: { depth: "quick" | "deep"; aiEnabled: boolean; maxFiles: number; aiFilesSelected: number; durationMs: number };
-    scanId?: string;
-};
+type SecurityScanCoreResult = Awaited<ReturnType<typeof runSecurityScan>>;
+type SecurityScanResult = SecurityScanCoreResult & { scanId?: string };
 
 export async function scanRepositoryVulnerabilities(
     owner: string,
@@ -423,7 +419,7 @@ export async function scanRepositoryVulnerabilities(
     const session = await auth();
     let limitKey = "";
 
-    if (config.depth === "deep") {
+    if (config.analysisProfile === "deep") {
         if (!session?.user?.id) {
             throw new Error("Authentication required for Deep Scan.");
         }
@@ -438,26 +434,51 @@ export async function scanRepositoryVulnerabilities(
     }
 
     // Check cache first using commit-aware keying
-    const cacheKey = `security_scan_${config.depth}_${config.aiEnabled}`;
     let revision = "unknown";
     try {
         revision = await getDefaultBranchHeadSha(owner, repo);
     } catch {
         console.warn(`Failed to resolve latest default-branch SHA for ${owner}/${repo}; using fallback revision key.`);
     }
-    const cachedResult = await getCachedSecurityScanResult(owner, repo, cacheKey, filePaths, revision) as SecurityScanResult | null;
+    const cacheIdentity = {
+        scanKey: "security_scan",
+        files: filePaths,
+        revision,
+        scanConfig: {
+            analysisProfile: config.analysisProfile,
+            maxFiles: config.maxFiles,
+            aiAssist: config.aiAssist,
+            aiMaxFiles: config.aiMaxFiles,
+            confidenceThreshold: config.confidenceThreshold,
+            includePatterns: config.includePatterns,
+            excludePatterns: config.excludePatterns,
+            selectedPaths: config.selectedPaths ? Array.from(config.selectedPaths).sort() : null,
+        },
+        engineVersion: config.engineVersion,
+        cacheKeyVersion: config.cacheKeyVersion,
+    };
 
+    const cachedResult = await getCachedSecurityScanResult(owner, repo, cacheIdentity) as SecurityScanCoreResult | null;
+
+    let result: SecurityScanCoreResult;
     if (cachedResult) {
-        console.log(`🧠 AI Response Cache Hit for Security Scan: ${owner}/${repo}`);
-        return cachedResult;
+        console.log(`🧠 Security Scan Cache Hit: ${owner}/${repo}`);
+        result = {
+            ...cachedResult,
+            meta: {
+                ...cachedResult.meta,
+                fromCache: true,
+            },
+        };
+    } else {
+        result = await runSecurityScan(owner, repo, files, config);
+
+        // Cache the full core result object for 1 hour.
+        await cacheSecurityScanResult(owner, repo, cacheIdentity, result);
     }
 
-    const result = await runSecurityScan(owner, repo, files, config);
-
-    // Cache the full result object for 1 hour, keyed by current default-branch head SHA
-    await cacheSecurityScanResult(owner, repo, cacheKey, filePaths, revision, result);
-
-    if (config.depth === "deep" && limitKey) {
+    // Deep quota counts every deep request (including cache hits) for consistent product semantics.
+    if (config.analysisProfile === "deep" && limitKey) {
         await kv.incr(limitKey);
         // Expire key after 32 days to clean up
         await kv.expire(limitKey, 32 * 24 * 60 * 60);

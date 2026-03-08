@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Shield, Sparkles, X } from "lucide-react";
 
 import { DEEP_SCAN_FILE_LIMIT, QUICK_SCAN_FILE_LIMIT } from "@/lib/chat-constants";
@@ -14,8 +15,8 @@ interface SecurityScanModalProps {
     deepScansData: DeepScansData | null;
     latestScanId?: string | null;
     onClose: () => void;
-    onRunQuickScan: () => void;
-    onRunDeepScan: () => void;
+    onRunQuickScan: (scanAiAssist: boolean) => void;
+    onRunDeepScan: (scanAiAssist: boolean) => void;
 }
 
 export function SecurityScanModal({
@@ -27,6 +28,8 @@ export function SecurityScanModal({
     onRunQuickScan,
     onRunDeepScan,
 }: SecurityScanModalProps) {
+    const [scanAiAssist, setScanAiAssist] = useState(false);
+
     if (!isOpen) {
         return null;
     }
@@ -35,7 +38,10 @@ export function SecurityScanModal({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-md overflow-hidden flex flex-col relative shadow-2xl">
                 <button
-                    onClick={onClose}
+                    onClick={() => {
+                        setScanAiAssist(false);
+                        onClose();
+                    }}
                     className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors z-10"
                 >
                     <X className="w-5 h-5" />
@@ -49,7 +55,10 @@ export function SecurityScanModal({
 
                     <div className="space-y-4">
                         <button
-                            onClick={onRunQuickScan}
+                            onClick={() => {
+                                onRunQuickScan(scanAiAssist);
+                                setScanAiAssist(false);
+                            }}
                             className="w-full bg-zinc-800 hover:bg-zinc-700 border border-white/5 rounded-xl p-4 text-left transition-all group"
                         >
                             <div className="flex items-center justify-between mb-1">
@@ -62,7 +71,10 @@ export function SecurityScanModal({
                         </button>
 
                         <button
-                            onClick={onRunDeepScan}
+                            onClick={() => {
+                                onRunDeepScan(scanAiAssist);
+                                setScanAiAssist(false);
+                            }}
                             className="w-full bg-zinc-800 hover:bg-zinc-700 border border-red-500/20 rounded-xl p-4 text-left transition-all group"
                         >
                             <div className="flex items-center justify-between mb-1">
@@ -80,9 +92,21 @@ export function SecurityScanModal({
                                 </div>
                             </div>
                             <p className="text-xs text-zinc-400 leading-relaxed">
-                                Analyzes up to {DEEP_SCAN_FILE_LIMIT} files. Utilizes advanced AI pipeline to follow code paths and find complex vulnerabilities.
+                                Analyzes up to {DEEP_SCAN_FILE_LIMIT} files. Runs broader deterministic analysis and can optionally include AI assistance.
                             </p>
                         </button>
+
+                        <label className="flex items-start gap-3 p-3 rounded-xl border border-white/10 bg-zinc-950/60">
+                            <input
+                                type="checkbox"
+                                checked={scanAiAssist}
+                                onChange={(event) => setScanAiAssist(event.target.checked)}
+                                className="mt-0.5 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-red-500 focus:ring-red-500/60"
+                            />
+                            <span className="text-xs text-zinc-400 leading-relaxed">
+                                Enable AI assist (optional): sends selected code snippets to third-party model APIs for additional review.
+                            </span>
+                        </label>
 
                         {latestScanId && (
                             <div className="pt-2 border-t border-white/5">

@@ -3,10 +3,35 @@
  * Covers: secrets detection, code pattern analysis, config/IaC misconfigs,
  * and dependency vulnerability heuristics.
  */
+import { createHash } from "node:crypto";
+
+import { parse } from "@babel/parser";
+import traverse from "@babel/traverse";
+import * as t from "@babel/types";
+
+type SecuritySeverity = "critical" | "high" | "medium" | "low" | "info";
+type SecurityConfidence = "high" | "medium" | "low";
+
+export interface SecurityEvidence {
+    type: "source" | "sink" | "sanitizer" | "context";
+    message: string;
+    line?: number;
+    snippet?: string;
+}
+
+export interface SecurityTraceStep {
+    type: "source" | "sink" | "flow";
+    line?: number;
+    detail: string;
+}
 
 export interface SecurityFinding {
-    type: 'dependency' | 'code' | 'secret' | 'configuration';
-    severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+    id?: string;
+    fingerprint?: string;
+    ruleId?: string;
+    engine?: "deterministic-v2" | "regex-v1" | "ai-assist";
+    type: "dependency" | "code" | "secret" | "configuration";
+    severity: SecuritySeverity;
     title: string;
     description: string;
     file: string;
@@ -15,7 +40,10 @@ export interface SecurityFinding {
     recommendation: string;
     cwe?: string;
     cvss?: number;
-    confidence?: 'high' | 'medium' | 'low';
+    confidence?: SecurityConfidence;
+    confidenceScore?: number;
+    evidence?: SecurityEvidence[];
+    trace?: SecurityTraceStep[];
 }
 
 export interface ScanSummary {
@@ -34,6 +62,94 @@ export interface ScanSummary {
         afterDedup: number;
         afterConfidenceFilter: number;
     };
+}
+
+export interface ScanEngineV2Options {
+    profile?: "quick" | "deep";
+    confidenceThreshold?: number;
+}
+
+export interface ScanEngineV2Result {
+    findings: SecurityFinding[];
+    analyzerStats: Record<string, number>;
+    aiCandidateFiles: string[];
+}
+
+const ENGINE_NAME: SecurityFinding["engine"] = "deterministic-v2";
+const CODE_EXTENSIONS = /\.(js|jsx|ts|tsx|mjs|cjs)$/i;
+const LOCKFILE_PATHS = new Set(["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
+
+function scoreToConfidence(score: number): SecurityConfidence {
+    if (score >= 0.85) return "high";
+    if (score >= 0.65) return "medium";
+    return "low";
+}
+
+function confidenceToScore(confidence?: SecurityConfidence): number {
+    if (confidence === "high") return 0.9;
+    if (confidence === "medium") return 0.72;
+    if (confidence === "low") return 0.45;
+    return 0.7;
+}
+
+function slugifyRuleId(value: string): string {
+    return value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 80) || "security-rule";
+}
+
+function findingFingerprint(finding: SecurityFinding): string {
+    const payload = [
+        finding.ruleId ?? slugifyRuleId(`${finding.type}-${finding.title}`),
+        finding.file,
+        String(finding.line ?? 0),
+        finding.title,
+        finding.description.slice(0, 200),
+    ].join("|");
+    return createHash("sha256").update(payload).digest("hex");
+}
+
+function withFindingMetadata(
+    finding: SecurityFinding,
+    defaults: {
+        engine?: SecurityFinding["engine"];
+        ruleId?: string;
+        confidenceScore?: number;
+    } = {}
+): SecurityFinding {
+    const baseRuleId = finding.ruleId ?? defaults.ruleId ?? slugifyRuleId(`${finding.type}-${finding.title}`);
+    const score = Math.max(
+        0,
+        Math.min(1, finding.confidenceScore ?? defaults.confidenceScore ?? confidenceToScore(finding.confidence))
+    );
+    const confidence = finding.confidence ?? scoreToConfidence(score);
+    const enriched: SecurityFinding = {
+        ...finding,
+        ruleId: baseRuleId,
+        engine: finding.engine ?? defaults.engine ?? ENGINE_NAME,
+        confidence,
+        confidenceScore: score,
+    };
+    const fingerprint = finding.fingerprint ?? findingFingerprint(enriched);
+    return {
+        ...enriched,
+        fingerprint,
+        id: finding.id ?? `${baseRuleId}:${fingerprint.slice(0, 12)}`,
+    };
+}
+
+function hasCodeExtension(path: string): boolean {
+    return CODE_EXTENSIONS.test(path);
+}
+
+function looksTaintedIdentifier(name: string): boolean {
+    return /^(req|request|params|query|body|input|payload|cmd|command|path|url|user|token|headers?)$/i.test(name);
+}
+
+function lineOf(node: { loc?: { start?: { line?: number } } | null }): number | undefined {
+    return node.loc?.start?.line;
 }
 
 // ─── Secret Detection Patterns ────────────────────────────────────────────────
@@ -401,36 +517,302 @@ const CODE_PATTERNS: CodePattern[] = [
     },
 ];
 
-export function detectCodePatterns(filepath: string, content: string): SecurityFinding[] {
-    if (!/\.(js|jsx|ts|tsx|py|java|php|rb|go|rs)$/i.test(filepath)) return [];
-    if (typeof content !== 'string') return [];
+function isTaintedExpression(node: t.Node | null | undefined, tainted: Set<string>): boolean {
+    if (!node) return false;
+    if (t.isIdentifier(node)) {
+        return tainted.has(node.name) || looksTaintedIdentifier(node.name);
+    }
+    if (t.isMemberExpression(node)) {
+        if (t.isIdentifier(node.object) && looksTaintedIdentifier(node.object.name)) {
+            return true;
+        }
+        if (t.isIdentifier(node.object) && tainted.has(node.object.name)) {
+            return true;
+        }
+        return isTaintedExpression(node.object, tainted) || isTaintedExpression(node.property, tainted);
+    }
+    if (t.isTemplateLiteral(node)) {
+        return node.expressions.some((expr) => isTaintedExpression(expr, tainted));
+    }
+    if (t.isBinaryExpression(node)) {
+        return isTaintedExpression(node.left, tainted) || isTaintedExpression(node.right, tainted);
+    }
+    if (t.isCallExpression(node)) {
+        return node.arguments.some((arg) => (t.isExpression(arg) ? isTaintedExpression(arg, tainted) : false));
+    }
+    return false;
+}
+
+function isDynamicQueryExpression(node: t.Node | null | undefined): boolean {
+    if (!node) return false;
+    return t.isTemplateLiteral(node) || t.isBinaryExpression(node);
+}
+
+function createAstFinding(params: {
+    filepath: string;
+    title: string;
+    description: string;
+    recommendation: string;
+    cwe: string;
+    severity: SecuritySeverity;
+    line?: number;
+    ruleId: string;
+    confidenceScore: number;
+    evidence: SecurityEvidence[];
+}): SecurityFinding {
+    return withFindingMetadata(
+        {
+            type: "code",
+            title: params.title,
+            description: params.description,
+            recommendation: params.recommendation,
+            cwe: params.cwe,
+            severity: params.severity,
+            file: params.filepath,
+            line: params.line,
+            evidence: params.evidence,
+            engine: "deterministic-v2",
+        },
+        {
+            ruleId: params.ruleId,
+            confidenceScore: params.confidenceScore,
+            engine: "deterministic-v2",
+        }
+    );
+}
+
+export function detectCodePatternsAst(filepath: string, content: string): SecurityFinding[] {
+    if (!hasCodeExtension(filepath) || typeof content !== "string" || content.length > 250_000) {
+        return [];
+    }
+
+    let ast: t.File;
+    try {
+        ast = parse(content, {
+            sourceType: "unambiguous",
+            plugins: [
+                "typescript",
+                "jsx",
+                "classProperties",
+                "decorators-legacy",
+                "dynamicImport",
+            ],
+            errorRecovery: true,
+        });
+    } catch {
+        return [];
+    }
 
     const findings: SecurityFinding[] = [];
-    const lines = content.split('\n');
+    const tainted = new Set<string>();
+    let hasDbLibrary = false;
+    const childProcessAliases = new Set<string>();
+    const childProcessFns = new Set<string>();
 
-    lines.forEach((line, index) => {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*') || trimmed.startsWith('#')) return;
+    const addFinding = (finding: SecurityFinding) => {
+        findings.push(finding);
+    };
 
-        CODE_PATTERNS.forEach(pattern => {
-            if (pattern.regex.test(line)) {
-                if (pattern.validate && !pattern.validate(content, line)) return;
-                findings.push({
-                    type: 'code',
-                    severity: pattern.severity,
-                    title: pattern.name,
-                    description: `Potentially unsafe code pattern at line ${index + 1}`,
-                    file: filepath,
-                    line: index + 1,
-                    recommendation: pattern.recommendation,
-                    cwe: pattern.cwe,
-                    confidence: pattern.validate ? 'high' : 'medium',
-                });
+    traverse(ast, {
+        ImportDeclaration(path) {
+            const source = path.node.source.value;
+            if (/(mysql|postgres|pg|sqlite|sequelize|knex|typeorm|mongodb|mongoose)/i.test(source)) {
+                hasDbLibrary = true;
             }
-        });
+            if (source === "child_process" || source === "node:child_process") {
+                for (const spec of path.node.specifiers) {
+                    if (t.isImportNamespaceSpecifier(spec) || t.isImportDefaultSpecifier(spec)) {
+                        childProcessAliases.add(spec.local.name);
+                    }
+                    if (t.isImportSpecifier(spec)) {
+                        childProcessFns.add(spec.local.name);
+                    }
+                }
+            }
+        },
+        VariableDeclarator(path) {
+            if (t.isIdentifier(path.node.id) && isTaintedExpression(path.node.init, tainted)) {
+                tainted.add(path.node.id.name);
+            }
+            if (
+                t.isIdentifier(path.node.id) &&
+                t.isCallExpression(path.node.init) &&
+                t.isIdentifier(path.node.init.callee) &&
+                path.node.init.callee.name === "require" &&
+                path.node.init.arguments.length > 0 &&
+                t.isStringLiteral(path.node.init.arguments[0]) &&
+                (path.node.init.arguments[0].value === "child_process" ||
+                    path.node.init.arguments[0].value === "node:child_process")
+            ) {
+                childProcessAliases.add(path.node.id.name);
+            }
+        },
+        AssignmentExpression(path) {
+            if (t.isIdentifier(path.node.left) && isTaintedExpression(path.node.right, tainted)) {
+                tainted.add(path.node.left.name);
+            }
+            if (
+                t.isMemberExpression(path.node.left) &&
+                t.isIdentifier(path.node.left.property) &&
+                path.node.left.property.name === "innerHTML" &&
+                isTaintedExpression(path.node.right, tainted)
+            ) {
+                addFinding(
+                    createAstFinding({
+                        filepath,
+                        title: "Tainted data assigned to innerHTML",
+                        description: "Potential XSS path detected: tainted user input reaches innerHTML.",
+                        recommendation: "Sanitize or encode user input before writing to innerHTML.",
+                        cwe: "CWE-79",
+                        severity: "high",
+                        line: lineOf(path.node),
+                        ruleId: "xss-innerhtml-taint",
+                        confidenceScore: 0.9,
+                        evidence: [{ type: "sink", message: "innerHTML assignment with tainted expression", line: lineOf(path.node) }],
+                    })
+                );
+            }
+        },
+        Function(path) {
+            for (const param of path.node.params) {
+                if (t.isIdentifier(param) && looksTaintedIdentifier(param.name)) {
+                    tainted.add(param.name);
+                }
+            }
+        },
+        CallExpression(path) {
+            const callee = path.node.callee;
+            const args = path.node.arguments;
+
+            const firstArg = args[0];
+            const firstArgExpr = t.isExpression(firstArg) ? firstArg : null;
+            const line = lineOf(path.node);
+
+            // SQL injection with tainted dynamic query
+            const isSqlCall =
+                t.isMemberExpression(callee) &&
+                t.isIdentifier(callee.property) &&
+                /^(query|execute|raw|run)$/i.test(callee.property.name);
+            if (
+                isSqlCall &&
+                hasDbLibrary &&
+                firstArgExpr &&
+                isTaintedExpression(firstArgExpr, tainted) &&
+                isDynamicQueryExpression(firstArgExpr)
+            ) {
+                addFinding(
+                    createAstFinding({
+                        filepath,
+                        title: "SQL injection via tainted query construction",
+                        description: "Tainted input appears in dynamically constructed SQL query.",
+                        recommendation: "Use parameterized queries/prepared statements and never interpolate user input into SQL.",
+                        cwe: "CWE-89",
+                        severity: "high",
+                        line,
+                        ruleId: "sqli-tainted-dynamic-query",
+                        confidenceScore: 0.92,
+                        evidence: [{ type: "sink", message: "Database query sink receives tainted dynamic expression", line }],
+                    })
+                );
+            }
+
+            // Command injection through child_process sinks
+            const isChildProcessCall =
+                (t.isIdentifier(callee) &&
+                    (childProcessFns.has(callee.name) || /^(exec|execSync|spawn|spawnSync)$/i.test(callee.name))) ||
+                (t.isMemberExpression(callee) &&
+                    t.isIdentifier(callee.object) &&
+                    t.isIdentifier(callee.property) &&
+                    childProcessAliases.has(callee.object.name) &&
+                    /^(exec|execSync|spawn|spawnSync)$/i.test(callee.property.name));
+
+            if (isChildProcessCall && firstArgExpr && isTaintedExpression(firstArgExpr, tainted)) {
+                addFinding(
+                    createAstFinding({
+                        filepath,
+                        title: "Command injection via tainted process invocation",
+                        description: "Tainted user input appears to reach a child_process execution sink.",
+                        recommendation: "Avoid shell execution for user input. Use allowlisted arguments with execFile/spawn and strict validation.",
+                        cwe: "CWE-78",
+                        severity: "high",
+                        line,
+                        ruleId: "command-injection-taint",
+                        confidenceScore: 0.91,
+                        evidence: [{ type: "sink", message: "child_process sink receives tainted input", line }],
+                    })
+                );
+            }
+
+            // Path traversal heuristics using tainted path
+            const isPathSink =
+                t.isMemberExpression(callee) &&
+                t.isIdentifier(callee.property) &&
+                /^(readFile|readFileSync|open|createReadStream|readdir|readdirSync|stat|statSync)$/i.test(
+                    callee.property.name
+                );
+            if (isPathSink && firstArgExpr && isTaintedExpression(firstArgExpr, tainted)) {
+                addFinding(
+                    createAstFinding({
+                        filepath,
+                        title: "Path traversal via tainted filesystem path",
+                        description: "Untrusted input appears to control filesystem path access.",
+                        recommendation: "Normalize and validate paths against an allowlisted root before filesystem access.",
+                        cwe: "CWE-22",
+                        severity: "high",
+                        line,
+                        ruleId: "path-traversal-taint",
+                        confidenceScore: 0.88,
+                        evidence: [{ type: "sink", message: "Filesystem sink receives tainted path input", line }],
+                    })
+                );
+            }
+        },
     });
 
     return findings;
+}
+
+export function detectCodePatterns(filepath: string, content: string): SecurityFinding[] {
+    if (!/\.(js|jsx|ts|tsx|py|java|php|rb|go|rs)$/i.test(filepath)) return [];
+    if (typeof content !== "string") return [];
+
+    const astFindings = detectCodePatternsAst(filepath, content);
+    const regexFindings: SecurityFinding[] = [];
+    const lines = content.split("\n");
+
+    lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*") || trimmed.startsWith("#")) {
+            return;
+        }
+        CODE_PATTERNS.forEach((pattern) => {
+            if (!pattern.regex.test(line)) return;
+            if (pattern.validate && !pattern.validate(content, line)) return;
+            regexFindings.push(
+                withFindingMetadata(
+                    {
+                        type: "code",
+                        severity: pattern.severity,
+                        title: pattern.name,
+                        description: `Potentially unsafe code pattern at line ${index + 1}`,
+                        file: filepath,
+                        line: index + 1,
+                        recommendation: pattern.recommendation,
+                        cwe: pattern.cwe,
+                        confidence: pattern.validate ? "high" : "medium",
+                        engine: "regex-v1",
+                    },
+                    {
+                        ruleId: slugifyRuleId(`regex-${pattern.name}`),
+                        confidenceScore: pattern.validate ? 0.83 : 0.68,
+                        engine: "regex-v1",
+                    }
+                )
+            );
+        });
+    });
+
+    return [...astFindings, ...regexFindings];
 }
 
 // ─── Configuration / IaC Misconfiguration Detection ──────────────────────────
@@ -548,50 +930,241 @@ export function detectConfigIssues(filepath: string, content: string): SecurityF
 
 // ─── Dependency Vulnerability Heuristics ─────────────────────────────────────
 
-const KNOWN_VULNERABLE: Record<string, { severity: SecurityFinding['severity']; issue: string; cve?: string }> = {
-    'lodash': { severity: 'high', issue: 'Prototype pollution vulnerability (CVE-2019-10744)', cve: 'CVE-2019-10744' },
-    'moment': { severity: 'low', issue: 'Deprecated package with known ReDoS vulnerability. Switch to date-fns or dayjs.' },
-    'request': { severity: 'medium', issue: 'Deprecated HTTP client. Switch to axios or native fetch.' },
-    'node-fetch': { severity: 'high', issue: 'Versions < 2.6.7 have a SSRF vulnerability (CVE-2022-0235)', cve: 'CVE-2022-0235' },
-    'axios': { severity: 'medium', issue: 'Versions < 1.6.0 are vulnerable to CSRF (CVE-2023-45857)', cve: 'CVE-2023-45857' },
-    'jsonwebtoken': { severity: 'high', issue: 'Versions < 9.0.0 allow algorithm confusion attacks (CVE-2022-23529)', cve: 'CVE-2022-23529' },
-    'express': { severity: 'medium', issue: 'Versions < 4.19.2 have open redirect and XSS vulnerabilities (CVE-2024-29041)', cve: 'CVE-2024-29041' },
-    'ws': { severity: 'high', issue: 'Versions < 7.4.6 have a ReDoS vulnerability (CVE-2021-32640)', cve: 'CVE-2021-32640' },
-    'serialize-javascript': { severity: 'high', issue: 'Versions < 3.1.0 allow remote code execution (CVE-2020-7660)', cve: 'CVE-2020-7660' },
-    'ejs': { severity: 'high', issue: 'Server-Side Template Injection in versions < 3.1.7 (CVE-2022-29078)', cve: 'CVE-2022-29078' },
-    'tar': { severity: 'high', issue: 'Path traversal in versions < 6.1.9 (CVE-2021-37713)', cve: 'CVE-2021-37713' },
-    'semver': { severity: 'medium', issue: 'ReDoS in versions < 7.5.2 (CVE-2022-25883)', cve: 'CVE-2022-25883' },
-    'tough-cookie': { severity: 'medium', issue: 'Prototype pollution in versions < 4.1.3 (CVE-2023-26136)', cve: 'CVE-2023-26136' },
-    'xml2js': { severity: 'medium', issue: 'Prototype pollution in versions < 0.5.0 (CVE-2023-0842)', cve: 'CVE-2023-0842' },
-    'minimist': { severity: 'high', issue: 'Prototype pollution in versions < 1.2.6 (CVE-2021-44906)', cve: 'CVE-2021-44906' },
-    'shelljs': { severity: 'medium', issue: 'Improper privilege management (CVE-2022-0144)', cve: 'CVE-2022-0144' },
-    'marked': { severity: 'medium', issue: 'XSS vulnerability in older versions. Keep updated.', },
-    'sanitize-html': { severity: 'low', issue: 'Older versions have XSS bypass. Keep to latest version.' },
+interface DependencyVulnerabilityRule {
+    range: string;
+    severity: SecuritySeverity;
+    issue: string;
+    cve?: string;
+}
+
+const KNOWN_VULNERABLE: Record<string, DependencyVulnerabilityRule[]> = {
+    lodash: [{ range: "<4.17.21", severity: "high", issue: "Prototype pollution vulnerability", cve: "CVE-2019-10744" }],
+    "node-fetch": [{ range: "<2.6.7", severity: "high", issue: "Potential SSRF vulnerability in older versions", cve: "CVE-2022-0235" }],
+    axios: [{ range: "<1.6.0", severity: "medium", issue: "Potential CSRF vulnerability in older versions", cve: "CVE-2023-45857" }],
+    jsonwebtoken: [{ range: "<9.0.0", severity: "high", issue: "Algorithm confusion risk in older versions", cve: "CVE-2022-23529" }],
+    express: [{ range: "<4.19.2", severity: "medium", issue: "Open redirect/XSS risks in older versions", cve: "CVE-2024-29041" }],
+    ws: [{ range: "<7.4.6", severity: "high", issue: "Potential ReDoS vulnerability in older versions", cve: "CVE-2021-32640" }],
+    "serialize-javascript": [{ range: "<3.1.0", severity: "high", issue: "Potential remote code execution risk", cve: "CVE-2020-7660" }],
+    ejs: [{ range: "<3.1.7", severity: "high", issue: "Template injection risk in older versions", cve: "CVE-2022-29078" }],
+    tar: [{ range: "<6.1.9", severity: "high", issue: "Path traversal vulnerability in older versions", cve: "CVE-2021-37713" }],
+    semver: [{ range: "<7.5.2", severity: "medium", issue: "Potential ReDoS vulnerability in older versions", cve: "CVE-2022-25883" }],
+    "tough-cookie": [{ range: "<4.1.3", severity: "medium", issue: "Prototype pollution vulnerability in older versions", cve: "CVE-2023-26136" }],
+    xml2js: [{ range: "<0.5.0", severity: "medium", issue: "Prototype pollution vulnerability in older versions", cve: "CVE-2023-0842" }],
+    minimist: [{ range: "<1.2.6", severity: "high", issue: "Prototype pollution vulnerability in older versions", cve: "CVE-2021-44906" }],
 };
 
-export function analyzeDependencies(packageJsonContent: string): SecurityFinding[] {
-    const findings: SecurityFinding[] = [];
-    try {
-        const pkg = JSON.parse(packageJsonContent);
-        const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+function downgradeDevSeverity(severity: SecuritySeverity): SecuritySeverity {
+    if (severity === "critical") return "high";
+    if (severity === "high") return "medium";
+    if (severity === "medium") return "low";
+    return severity;
+}
 
-        for (const [dep] of Object.entries(allDeps || {})) {
-            const vuln = KNOWN_VULNERABLE[dep];
-            if (vuln) {
-                findings.push({
-                    type: 'dependency',
-                    severity: vuln.severity,
-                    title: `Potentially Vulnerable Dependency: ${dep}`,
-                    description: vuln.issue,
-                    file: 'package.json',
-                    recommendation: `Update or replace \`${dep}\` with a maintained, patched version. ${vuln.cve ? `See ${vuln.cve}.` : ''}`,
-                    cwe: 'CWE-1035',
-                    confidence: 'medium',
+function toVersionTuple(input: string): [number, number, number] | null {
+    const normalized = input.trim().replace(/^[~^<>=\sv]+/, "").split("-")[0];
+    const match = normalized.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+    if (!match) return null;
+    return [Number(match[1] ?? 0), Number(match[2] ?? 0), Number(match[3] ?? 0)];
+}
+
+function compareVersions(a: string, b: string): number {
+    const left = toVersionTuple(a);
+    const right = toVersionTuple(b);
+    if (!left || !right) return 0;
+    for (let i = 0; i < 3; i += 1) {
+        if (left[i] < right[i]) return -1;
+        if (left[i] > right[i]) return 1;
+    }
+    return 0;
+}
+
+function matchesComparator(version: string, comparator: string): boolean {
+    const trimmed = comparator.trim();
+    if (!trimmed) return true;
+    if (trimmed.startsWith("<=")) return compareVersions(version, trimmed.slice(2).trim()) <= 0;
+    if (trimmed.startsWith(">=")) return compareVersions(version, trimmed.slice(2).trim()) >= 0;
+    if (trimmed.startsWith("<")) return compareVersions(version, trimmed.slice(1).trim()) < 0;
+    if (trimmed.startsWith(">")) return compareVersions(version, trimmed.slice(1).trim()) > 0;
+    if (trimmed.startsWith("=")) return compareVersions(version, trimmed.slice(1).trim()) === 0;
+    return compareVersions(version, trimmed) === 0;
+}
+
+function isVersionInRange(version: string, range: string): boolean {
+    const parts = range
+        .split(" ")
+        .map((part) => part.trim())
+        .filter(Boolean);
+    return parts.every((part) => matchesComparator(version, part));
+}
+
+function parseDeclaredPinnedVersion(input: string): string | undefined {
+    const match = input.match(/^\s*(\d+\.\d+\.\d+)/);
+    return match?.[1];
+}
+
+function dependencyNameFromSpecifier(specifier: string): string {
+    const trimmed = specifier.trim().replace(/^['"]|['"]$/g, "");
+    const scoped = trimmed.match(/^(@[^/]+\/[^@]+)@/);
+    if (scoped) return scoped[1];
+    const plain = trimmed.match(/^([^@]+)@/);
+    return plain?.[1] ?? trimmed;
+}
+
+function parsePackageLockVersions(content: string): Map<string, string> {
+    const map = new Map<string, string>();
+    try {
+        const lock = JSON.parse(content) as {
+            packages?: Record<string, { version?: string }>;
+            dependencies?: Record<string, { version?: string; dependencies?: Record<string, unknown> }>;
+        };
+        if (lock.packages) {
+            for (const [key, value] of Object.entries(lock.packages)) {
+                if (!value?.version) continue;
+                const dep = key.startsWith("node_modules/") ? key.replace(/^node_modules\//, "") : key;
+                if (!dep || dep === ".") continue;
+                map.set(dep, value.version);
+            }
+        }
+        if (lock.dependencies) {
+            const visit = (deps: Record<string, { version?: string; dependencies?: Record<string, unknown> }>) => {
+                for (const [dep, meta] of Object.entries(deps)) {
+                    if (meta?.version && !map.has(dep)) {
+                        map.set(dep, meta.version);
+                    }
+                    if (meta?.dependencies) {
+                        visit(meta.dependencies as Record<string, { version?: string; dependencies?: Record<string, unknown> }>);
+                    }
+                }
+            };
+            visit(lock.dependencies);
+        }
+    } catch {
+        return map;
+    }
+    return map;
+}
+
+function parseYarnLockVersions(content: string): Map<string, string> {
+    const map = new Map<string, string>();
+    const lines = content.split("\n");
+    let currentDeps: string[] = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+
+        if (!rawLine.startsWith(" ") && line.endsWith(":")) {
+            const specifiers = line
+                .slice(0, -1)
+                .split(",")
+                .map((part) => dependencyNameFromSpecifier(part));
+            currentDeps = specifiers;
+            continue;
+        }
+
+        if (line.startsWith("version ") && currentDeps.length > 0) {
+            const match = line.match(/^version\s+"([^"]+)"/);
+            const version = match?.[1];
+            if (version) {
+                currentDeps.forEach((dep) => {
+                    if (!map.has(dep)) map.set(dep, version);
                 });
             }
         }
+    }
+    return map;
+}
+
+function parsePnpmLockVersions(content: string): Map<string, string> {
+    const map = new Map<string, string>();
+    const lines = content.split("\n");
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        const match = line.match(/^\/?(@?[^@/\s]+(?:\/[^@/\s]+)?)@([^:]+):$/);
+        if (!match) continue;
+        const dep = match[1];
+        const version = match[2].split("(")[0];
+        if (!map.has(dep)) {
+            map.set(dep, version);
+        }
+    }
+    return map;
+}
+
+function buildResolvedDependencyIndex(lockfiles: { packageLock?: string; yarnLock?: string; pnpmLock?: string }): Map<string, string> {
+    const map = new Map<string, string>();
+    const fromPackageLock = lockfiles.packageLock ? parsePackageLockVersions(lockfiles.packageLock) : new Map<string, string>();
+    const fromYarn = lockfiles.yarnLock ? parseYarnLockVersions(lockfiles.yarnLock) : new Map<string, string>();
+    const fromPnpm = lockfiles.pnpmLock ? parsePnpmLockVersions(lockfiles.pnpmLock) : new Map<string, string>();
+    for (const source of [fromPackageLock, fromYarn, fromPnpm]) {
+        for (const [dep, version] of source.entries()) {
+            if (!map.has(dep)) map.set(dep, version);
+        }
+    }
+    return map;
+}
+
+export function analyzeDependencies(
+    packageJsonContent: string,
+    lockfiles: { packageLock?: string; yarnLock?: string; pnpmLock?: string } = {}
+): SecurityFinding[] {
+    const findings: SecurityFinding[] = [];
+    try {
+        const pkg = JSON.parse(packageJsonContent) as {
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+        };
+        const runtimeDeps = Object.entries(pkg.dependencies ?? {}).map(([name, declared]) => ({
+            name,
+            declared,
+            isDev: false,
+        }));
+        const devDeps = Object.entries(pkg.devDependencies ?? {}).map(([name, declared]) => ({
+            name,
+            declared,
+            isDev: true,
+        }));
+        const resolvedIndex = buildResolvedDependencyIndex(lockfiles);
+
+        for (const dep of [...runtimeDeps, ...devDeps]) {
+            const rules = KNOWN_VULNERABLE[dep.name];
+            if (!rules?.length) continue;
+
+            const resolved = resolvedIndex.get(dep.name) ?? parseDeclaredPinnedVersion(dep.declared);
+            if (!resolved) continue;
+
+            for (const rule of rules) {
+                if (!isVersionInRange(resolved, rule.range)) continue;
+                const severity = dep.isDev ? downgradeDevSeverity(rule.severity) : rule.severity;
+                findings.push(
+                    withFindingMetadata(
+                        {
+                            type: "dependency",
+                            severity,
+                            title: `Vulnerable dependency version: ${dep.name}@${resolved}`,
+                            description: `${rule.issue}. Affected range: ${rule.range}.`,
+                            file: "package.json",
+                            recommendation: `Upgrade \`${dep.name}\` to a non-vulnerable version. ${rule.cve ? `See ${rule.cve}.` : ""}`,
+                            cwe: "CWE-1035",
+                            confidence: "high",
+                            evidence: [
+                                {
+                                    type: "context",
+                                    message: `Declared: ${dep.declared}, resolved: ${resolved}, scope: ${dep.isDev ? "dev" : "runtime"}`,
+                                },
+                            ],
+                        },
+                        {
+                            ruleId: `dep-${dep.name}-${rule.cve?.toLowerCase() ?? "advisory"}`,
+                            confidenceScore: dep.isDev ? 0.76 : 0.9,
+                            engine: ENGINE_NAME,
+                        }
+                    )
+                );
+            }
+        }
     } catch {
-        // Invalid package.json — skip
+        return findings;
     }
     return findings;
 }
@@ -623,16 +1196,92 @@ export function getScanSummary(findings: SecurityFinding[]): ScanSummary {
 
 /** Main scanning function — runs all detectors across the given files */
 export function scanFiles(files: Array<{ path: string; content: string }>): SecurityFinding[] {
-    const allFindings: SecurityFinding[] = [];
+    return runScanEngineV2(files, { profile: "deep", confidenceThreshold: 0 }).findings;
+}
+
+function dedupeFindings(findings: SecurityFinding[]): SecurityFinding[] {
+    const seen = new Set<string>();
+    const out: SecurityFinding[] = [];
+    for (const raw of findings) {
+        const finding = withFindingMetadata(raw, { engine: raw.engine ?? ENGINE_NAME });
+        if (!finding.fingerprint) continue;
+        if (seen.has(finding.fingerprint)) continue;
+        seen.add(finding.fingerprint);
+        out.push(finding);
+    }
+    return out;
+}
+
+export function runScanEngineV2(
+    files: Array<{ path: string; content: string }>,
+    options: ScanEngineV2Options = {}
+): ScanEngineV2Result {
+    const profile = options.profile ?? "quick";
+    const confidenceThreshold = options.confidenceThreshold ?? (profile === "deep" ? 0.68 : 0.78);
+    const findings: SecurityFinding[] = [];
+
+    const fileMap = new Map(files.map((file) => [file.path, file.content]));
+    const analyzerStats: Record<string, number> = {
+        filesReceived: files.length,
+        secretFindings: 0,
+        codeFindings: 0,
+        configFindings: 0,
+        dependencyFindings: 0,
+    };
 
     for (const file of files) {
-        allFindings.push(...detectSecrets(file.path, file.content));
-        allFindings.push(...detectCodePatterns(file.path, file.content));
-        allFindings.push(...detectConfigIssues(file.path, file.content));
-        if (file.path === 'package.json') {
-            allFindings.push(...analyzeDependencies(file.content));
+        if (!LOCKFILE_PATHS.has(file.path)) {
+            const secretFindings = detectSecrets(file.path, file.content).map((finding) =>
+                withFindingMetadata(finding, {
+                    ruleId: slugifyRuleId(`secret-${finding.title}`),
+                    confidenceScore: 0.95,
+                    engine: ENGINE_NAME,
+                })
+            );
+            const codeFindings = detectCodePatterns(file.path, file.content);
+            const configFindings = detectConfigIssues(file.path, file.content).map((finding) =>
+                withFindingMetadata(finding, {
+                    ruleId: slugifyRuleId(`config-${finding.title}`),
+                    confidenceScore: finding.confidence === "high" ? 0.86 : 0.72,
+                    engine: ENGINE_NAME,
+                })
+            );
+            analyzerStats.secretFindings += secretFindings.length;
+            analyzerStats.codeFindings += codeFindings.length;
+            analyzerStats.configFindings += configFindings.length;
+            findings.push(...secretFindings, ...codeFindings, ...configFindings);
         }
     }
 
-    return allFindings;
+    const packageJson = fileMap.get("package.json");
+    if (packageJson) {
+        const dependencyFindings = analyzeDependencies(packageJson, {
+            packageLock: fileMap.get("package-lock.json"),
+            yarnLock: fileMap.get("yarn.lock"),
+            pnpmLock: fileMap.get("pnpm-lock.yaml"),
+        });
+        analyzerStats.dependencyFindings += dependencyFindings.length;
+        findings.push(...dependencyFindings);
+    }
+
+    const deduped = dedupeFindings(findings);
+    const filtered = deduped.filter((finding) => (finding.confidenceScore ?? confidenceToScore(finding.confidence)) >= confidenceThreshold);
+
+    const aiCandidateFiles = Array.from(
+        new Set(
+            filtered
+                .filter((finding) => (finding.confidenceScore ?? 0) < 0.9 || finding.severity === "critical")
+                .map((finding) => finding.file)
+        )
+    );
+
+    return {
+        findings: filtered,
+        analyzerStats: {
+            ...analyzerStats,
+            afterDedup: deduped.length,
+            afterConfidenceThreshold: filtered.length,
+        },
+        aiCandidateFiles,
+    };
 }

@@ -1,4 +1,5 @@
 import { kv } from "@vercel/kv";
+import { createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 
 /**
@@ -351,21 +352,41 @@ export async function getLatestRepoQueryAnswer(
     return resultString;
 }
 
-function buildScanFileHash(files: string[]): string {
-    return [...files].sort().join("|").substring(0, 100);
+export interface SecurityScanCacheIdentity {
+    scanKey: string;
+    files: string[];
+    revision: string;
+    scanConfig: unknown;
+    engineVersion: string;
+    cacheKeyVersion: string;
 }
 
-function buildSecurityScanCacheKey(
-    owner: string,
-    repo: string,
-    scanKey: string,
-    files: string[],
-    revision: string
-): string {
-    const normalizedScanKey = scanKey.toLowerCase().trim();
-    const fileHash = buildScanFileHash(files);
-    const normalizedRevision = revision.trim() || "unknown";
-    return `scan_answer:${owner}/${repo}:${normalizedScanKey}:${normalizedRevision}:${fileHash}`;
+function stableStringify(value: unknown): string {
+    if (value === null || value === undefined) return "null";
+    if (typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+        return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+    }
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(",")}}`;
+}
+
+function buildSecurityScanIdentityHash(identity: SecurityScanCacheIdentity): string {
+    const payload = stableStringify({
+        scanKey: identity.scanKey.toLowerCase().trim(),
+        revision: identity.revision.trim() || "unknown",
+        files: [...identity.files].sort(),
+        engineVersion: identity.engineVersion,
+        cacheKeyVersion: identity.cacheKeyVersion,
+        scanConfig: identity.scanConfig,
+    });
+    return createHash("sha256").update(payload).digest("hex");
+}
+
+function buildSecurityScanCacheKey(owner: string, repo: string, identity: SecurityScanCacheIdentity): string {
+    const identityHash = buildSecurityScanIdentityHash(identity);
+    return `scan_answer:${owner}/${repo}:${identity.cacheKeyVersion}:${identityHash}`;
 }
 
 /**
@@ -375,12 +396,10 @@ function buildSecurityScanCacheKey(
 export async function cacheSecurityScanResult(
     owner: string,
     repo: string,
-    scanKey: string,
-    files: string[],
-    revision: string,
+    identity: SecurityScanCacheIdentity,
     result: unknown
 ): Promise<void> {
-    const key = buildSecurityScanCacheKey(owner, repo, scanKey, files, revision);
+    const key = buildSecurityScanCacheKey(owner, repo, identity);
 
     try {
         const stringified = typeof result === "string" ? result : JSON.stringify(result);
@@ -400,11 +419,9 @@ export async function cacheSecurityScanResult(
 export async function getCachedSecurityScanResult(
     owner: string,
     repo: string,
-    scanKey: string,
-    files: string[],
-    revision: string
+    identity: SecurityScanCacheIdentity
 ): Promise<unknown | null> {
-    const key = buildSecurityScanCacheKey(owner, repo, scanKey, files, revision);
+    const key = buildSecurityScanCacheKey(owner, repo, identity);
     const cached = await safeKvOperation(() => kv.get<string>(key));
     if (!cached) return null;
 

@@ -94,7 +94,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     const [deepScansData, setDeepScansData] = useState<{ used: number; total: number; resetsAt: string } | null>(null);
     const [latestScanId, setLatestScanId] = useState<string | null>(null);
 
-    const handleSubmitRef = useRef<((e?: React.FormEvent, overrideText?: string, submitMode?: SubmitMode) => Promise<void>) | null>(null);
+    const handleSubmitRef = useRef<((e?: React.FormEvent, overrideText?: string, submitMode?: SubmitMode, scanAiAssist?: boolean) => Promise<void>) | null>(null);
     const isSubmittingRef = useRef(false);
 
     // Fetch deep scan limits on mount/session change
@@ -218,7 +218,8 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     const runSecurityScanFlow = async (
         isQuickScan: boolean,
         isDeepScan: boolean,
-        placeholderMessageId: string
+        placeholderMessageId: string,
+        scanAiAssist: boolean
     ) => {
         console.log(`🎯 Security scan triggered! (Type: ${isDeepScan ? "Deep" : "Quick"})`);
         setScanning(true);
@@ -228,7 +229,10 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 repoContext.owner,
                 repoContext.repo,
                 filesToScan,
-                { depth: isDeepScan ? "deep" : "quick" }
+                {
+                    analysisProfile: isDeepScan ? "deep" : "quick",
+                    aiAssist: scanAiAssist ? "on" : "off",
+                }
             );
 
             let content = "";
@@ -413,7 +417,8 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     const handleSubmit = async (
         e?: React.FormEvent,
         overrideText?: string,
-        submitMode: SubmitMode = "normal"
+        submitMode: SubmitMode = "normal",
+        scanAiAssist: boolean = false
     ) => {
         if (e) e.preventDefault();
 
@@ -470,7 +475,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 scanStatus: isDeepScan ? "deep_running" : "quick_running",
             };
             setMessages((prev) => [...prev, placeholderMsg]);
-            await runSecurityScanFlow(isQuickScan, isDeepScan, placeholderMessageId);
+            await runSecurityScanFlow(isQuickScan, isDeepScan, placeholderMessageId, scanAiAssist);
             return;
         }
 
@@ -547,18 +552,18 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         toast.success("Chat exported");
     };
 
-    const handleRunQuickScanFromModal = () => {
+    const handleRunQuickScanFromModal = (scanAiAssist: boolean) => {
         setShowSecurityModal(false);
-        handleSubmitRef.current?.(undefined, QUICK_SCAN_PROMPT, "quick_scan");
+        handleSubmitRef.current?.(undefined, QUICK_SCAN_PROMPT, "quick_scan", scanAiAssist);
     };
 
-    const handleRunDeepScanFromModal = () => {
+    const handleRunDeepScanFromModal = (scanAiAssist: boolean) => {
         setShowSecurityModal(false);
         if (!session) {
             setShowLoginModal(true);
             return;
         }
-        handleSubmitRef.current?.(undefined, DEEP_SCAN_PROMPT, "deep_scan");
+        handleSubmitRef.current?.(undefined, DEEP_SCAN_PROMPT, "deep_scan", scanAiAssist);
     };
 
     return (
