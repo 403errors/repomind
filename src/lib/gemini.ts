@@ -119,7 +119,7 @@ ${isDeepThinking ?
           include_thoughts: modelPreference === "thinking",
           thinking_level: modelPreference === "thinking" ? "HIGH" : "LOW"
         }
-      }
+      } as any
     });
 
     const result = await model.generateContent(prompt);
@@ -179,7 +179,7 @@ async function pruneFileTreeHierarchically(question: string, fileTree: string[])
           include_thoughts: false,
           thinking_level: "MINIMAL"
         }
-      }
+      } as any
     });
 
     const result = await model.generateContent(prompt);
@@ -261,7 +261,7 @@ export async function answerWithContext(
         include_thoughts: modelPreference === "thinking",
         thinking_level: modelPreference === "thinking" ? "HIGH" : "LOW"
       }
-    }
+    } as any
   });
 
   const chat = model.startChat();
@@ -359,7 +359,7 @@ export async function* answerWithContextStream(
         include_thoughts: modelPreference === "thinking",
         thinking_level: modelPreference === "thinking" ? "HIGH" : "LOW"
       }
-    }
+    } as any
   });
 
   const chat = model.startChat();

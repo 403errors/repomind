@@ -266,7 +266,7 @@ export async function cacheRepoQueryAnswer(
     repo: string,
     query: string,
     files: string[],
-    answer: unknown
+    answer: string
 ): Promise<void> {
     // We hash the file list to ensure if files change, cache invalidates.
     // A simple join is sufficient for our keys since they are relative paths.
@@ -277,7 +277,7 @@ export async function cacheRepoQueryAnswer(
     // Cache for 24 hours
     // We compress the answer if it's large as AI responses can be long
     try {
-        const stringified = typeof answer === 'string' ? answer : JSON.stringify(answer);
+        const stringified = answer;
         const compressed = gzipSync(Buffer.from(stringified));
         const value = `gz:${compressed.toString('base64')}`;
         // Store both the specific (hashed) and latest answer
@@ -287,7 +287,7 @@ export async function cacheRepoQueryAnswer(
         ]);
     } catch {
         console.warn("Failed to compress answer, caching plain text...");
-        const stringified = typeof answer === 'string' ? answer : JSON.stringify(answer);
+        const stringified = answer;
         await Promise.all([
             safeKvOperation(() => kv.setex(key, 86400, stringified)),
             safeKvOperation(() => kv.setex(`latest_answer:${owner}/${repo}:${normalizedQuery}`, 86400, stringified))
@@ -300,7 +300,7 @@ export async function getCachedRepoQueryAnswer(
     repo: string,
     query: string,
     files: string[]
-): Promise<unknown | null> {
+): Promise<string | null> {
     const fileHash = files.sort().join('|').substring(0, 100);
     const normalizedQuery = query.toLowerCase().trim();
     const key = `answer:${owner}/${repo}:${normalizedQuery}:${fileHash}`;
@@ -319,11 +319,7 @@ export async function getCachedRepoQueryAnswer(
         }
     }
 
-    try {
-        return JSON.parse(resultString);
-    } catch {
-        return resultString;
-    }
+    return resultString;
 }
 
 /**
@@ -335,7 +331,7 @@ export async function getLatestRepoQueryAnswer(
     owner: string,
     repo: string,
     query: string
-): Promise<unknown | null> {
+): Promise<string | null> {
     const normalizedQuery = query.toLowerCase().trim();
     const key = `latest_answer:${owner}/${repo}:${normalizedQuery}`;
 
@@ -352,11 +348,7 @@ export async function getLatestRepoQueryAnswer(
         }
     }
 
-    try {
-        return JSON.parse(resultString);
-    } catch {
-        return resultString;
-    }
+    return resultString;
 }
 
 function buildScanFileHash(files: string[]): string {

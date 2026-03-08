@@ -1,6 +1,6 @@
 import type { ChatRole, StoredMessage } from "@/lib/chat-types";
 
-export type Message = StoredMessage & Record<string, unknown>;
+export type Message = StoredMessage;
 
 interface StoredConversation {
     owner: string;

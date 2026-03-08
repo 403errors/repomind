@@ -24,6 +24,8 @@
 .DS_Store
 *.pem
 .vscode
+.agents
+.codex-artifacts
 
 # debug
 npm-debug.log*

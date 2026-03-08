@@ -74,6 +74,16 @@ function isErrorWithMessage(error: unknown): error is { message: string } {
   );
 }
 
+function isGitHubProfile(value: unknown): value is GitHubProfile {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "login" in value &&
+    "avatar_url" in value &&
+    "html_url" in value
+  );
+}
+
 function isGitHubRepo(value: unknown): value is GitHubRepo {
   return Boolean(
     value &&
@@ -145,6 +155,30 @@ export interface GitHubRepo {
   updated_at: string;
 }
 
+export interface RepoLanguage {
+  name: string;
+  color: string | null;
+  size: number;
+  percentage: string;
+}
+
+export interface RepoCommit {
+  message: string;
+  date: string;
+  author: {
+    name: string;
+    login?: string;
+    avatar: string | null;
+  };
+}
+
+export interface RepoFullContext {
+  metadata: GitHubRepo;
+  languages: RepoLanguage[];
+  commits: RepoCommit[];
+  readme: string | null;
+}
+
 export interface FileNode {
   path: string;
   mode?: string;
@@ -208,7 +242,7 @@ async function getProfileRaw(username: string): Promise<GitHubProfile> {
 
   // Check KV cache
   const cached = await getCachedProfileData(username);
-  if (cached) {
+  if (cached && isGitHubProfile(cached)) {
     profileCache.set(username, cached);
     return cached;
   }
@@ -247,7 +281,7 @@ export async function getRepo(owner: string, repo: string): Promise<GitHubRepo> 
 
   // Check KV cache
   const cached = await getCachedRepoMetadata(owner, repo);
-  if (cached) {
+  if (cached && isGitHubRepo(cached)) {
     repoCache.set(cacheKey, cached);
     return cached;
   }
@@ -302,7 +336,7 @@ export async function getRepoFileTree(owner: string, repo: string, branch: strin
   // Check KV cache for tree
   const cachedTree = await getCachedFileTree(owner, repo, sha);
   if (cachedTree) {
-    return { tree: cachedTree, hiddenFiles: [] }; // Hidden files not cached separately but that's ok
+    return { tree: cachedTree as FileNode[], hiddenFiles: [] }; // Hidden files not cached separately but that's ok
   }
 
   const { data } = await octokit.rest.git.getTree({
@@ -407,15 +441,18 @@ export async function getRepoDetailsGraphQL(owner: string, repo: string) {
 /**
  * Core Repo Context Fetcher (hit by unstable_cache)
  */
-async function getRepoFullContextRaw(owner: string, repo: string) {
+async function getRepoFullContextRaw(owner: string, repo: string): Promise<RepoFullContext> {
   // Check Mega-Key cache first
   const cached = await getCachedRepoFullContext(owner, repo);
-  if (cached) {
+  if (cached && isGitHubRepo(cached.metadata)) {
     // Put into memory caches for efficiency if needed
-    if (isGitHubRepo(cached.metadata)) {
-      repoCache.set(`${owner}/${repo}`, cached.metadata);
-    }
-    return cached;
+    repoCache.set(`${owner}/${repo}`, cached.metadata);
+    return {
+      metadata: cached.metadata,
+      languages: Array.isArray(cached.languages) ? (cached.languages as RepoLanguage[]) : [],
+      commits: Array.isArray(cached.commits) ? (cached.commits as RepoCommit[]) : [],
+      readme: typeof cached.readme === "string" ? cached.readme : null
+    };
   }
 
   // Fetch all in parallel

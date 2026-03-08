@@ -1,6 +1,6 @@
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getRepo, getRepoDetailsGraphQL, getRepoReadme } from '@/lib/github';
+import type { GitHubRepo, RepoCommit, RepoLanguage } from '@/lib/github';
 import { ArrowLeft, Star, GitFork, AlertCircle, Clock, FileCode, Search } from 'lucide-react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
@@ -49,19 +49,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function RepoPage({ params }: Props) {
     const { owner, repo } = await params;
 
-    let repoData;
-    let detailsData;
-    let readmeContent;
+    let repoData: GitHubRepo | null = null;
+    let detailsData: { languages: RepoLanguage[]; commits: RepoCommit[] } = { languages: [], commits: [] };
+    let readmeContent: string | null = null;
 
     try {
         // MEGA-OPTIMIZATION: Fetch all repository data in a single consolidated call
         // This uses the "Mega-Key" strategy to reduce KV commands and utilize bandwidth
         const context = await import('@/lib/github').then(m => m.getRepoFullContext(owner, repo));
         repoData = context.metadata;
-        detailsData = {
-            languages: context.languages,
-            commits: context.commits
-        };
+        detailsData = { languages: context.languages, commits: context.commits };
         readmeContent = context.readme;
     } catch (error) {
         console.error("Failed to load repo data:", error);
@@ -116,9 +113,9 @@ export default async function RepoPage({ params }: Props) {
                         </div>
                         <div className="flex items-center flex-wrap gap-2">
                             <FileCode className="w-4 h-4 mr-1 text-green-400" />
-                            {detailsData?.languages?.slice(0, 3).map((lang: any) => (
+                            {detailsData.languages.slice(0, 3).map((lang) => (
                                 <span key={lang.name} className="flex items-center mr-2">
-                                    <span className="w-2 h-2 rounded-full mr-1" style={{ backgroundColor: lang.color }}></span>
+                                    <span className="w-2 h-2 rounded-full mr-1" style={{ backgroundColor: lang.color ?? undefined }}></span>
                                     {lang.name}
                                 </span>
                             ))}
