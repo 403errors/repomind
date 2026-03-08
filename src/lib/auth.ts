@@ -3,16 +3,6 @@ import GitHub from "next-auth/providers/github"
 import { kv } from '@vercel/kv'
 import { sendWelcomeEmail } from "./emails/mailer"
 
-type SessionUserWithUsername = {
-    id?: string;
-    username?: string;
-};
-
-type SessionWithTokens = {
-    accessToken?: string;
-    oauthScope?: string;
-};
-
 export const { handlers, auth, signIn, signOut } = NextAuth({
     providers: [
         GitHub({
@@ -63,20 +53,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             return token;
         },
         async session({ session, token }) {
-            if (token.id && session.user) {
-                session.user.id = token.id as string;
+            if (typeof token.id === "string" && session.user) {
+                session.user.id = token.id;
             }
             if (typeof token.username === "string" && session.user) {
-                const sessionUser = session.user as SessionUserWithUsername;
-                sessionUser.username = token.username;
+                session.user.username = token.username;
             }
             if (typeof token.accessToken === "string") {
-                const sessionWithTokens = session as SessionWithTokens;
-                sessionWithTokens.accessToken = token.accessToken;
+                session.accessToken = token.accessToken;
             }
             if (typeof token.oauthScope === "string") {
-                const sessionWithTokens = session as SessionWithTokens;
-                sessionWithTokens.oauthScope = token.oauthScope;
+                session.oauthScope = token.oauthScope;
             }
             return session;
         },

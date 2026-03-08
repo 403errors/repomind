@@ -10,7 +10,7 @@
  * No orchestration, no raw GitHub shapes, no inline context building.
  */
 
-import { headers, cookies } from "next/headers";
+import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { kv } from "@vercel/kv";
 import {
@@ -175,32 +175,6 @@ export async function fetchPublicStats() {
 
 export async function trackReportConversion(event: ReportConversionEvent, scanId?: string) {
     await trackReportConversionEvent(event, scanId);
-}
-
-/**
- * Verify admin password and set a session cookie (10 min)
- */
-export async function verifyAdminPassword(password: string) {
-    const adminPassword = process.env.ADMIN_PASSWORD;
-
-    if (!adminPassword) {
-        console.error("ADMIN_PASSWORD environment variable is not set");
-        return { success: false, error: "Authentication system is misconfigured. Please contact administrator." };
-    }
-
-    if (password === adminPassword) {
-        const cookieStore = await cookies();
-        cookieStore.set("admin_session", "authenticated", {
-            maxAge: 10 * 60, // 10 minutes
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
-            path: "/"
-        });
-        return { success: true };
-    }
-
-    return { success: false, error: "Invalid password" };
 }
 
 /**

@@ -1,16 +1,21 @@
 import { getAnalyticsData } from "@/lib/analytics";
-import { headers, cookies } from "next/headers";
+import { auth } from "@/lib/auth";
+import { isAdminUser } from "@/lib/admin-auth";
+import { headers } from "next/headers";
 import AdminLoginPage from "./AdminLoginPage";
+import AdminAccessDeniedPage from "./AdminAccessDeniedPage";
 import StatsDashboardClient from "./StatsDashboardClient";
 
 export const dynamic = 'force-dynamic'; // Ensure real-time data
 
 export default async function AdminStatsPage() {
-    const cookieStore = await cookies();
-    const isAdmin = cookieStore.get("admin_session")?.value === "authenticated";
+    const session = await auth();
 
-    if (!isAdmin) {
+    if (!session?.user) {
         return <AdminLoginPage />;
+    }
+    if (!isAdminUser(session)) {
+        return <AdminAccessDeniedPage />;
     }
 
     const data = await getAnalyticsData();
