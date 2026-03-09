@@ -3,8 +3,6 @@
 import Link from "next/link";
 import type { ReportFalsePositiveReason } from "@prisma/client";
 import { useEffect, useMemo, useState } from "react";
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import type { StoredScan } from "@/lib/services/scan-storage";
 import type { PriorScanDiff, ReportFindingView } from "@/lib/services/report-service";
 import { getCanonicalSiteUrl } from "@/lib/site-url";
@@ -13,7 +11,6 @@ import {
     trackReportConversion,
 } from "@/app/actions";
 import { CodeBlock } from "@/components/CodeBlock";
-import { LoginModal } from "@/components/LoginModal";
 import {
     AlertCircle,
     AlertTriangle,
@@ -29,8 +26,6 @@ import { toast } from "sonner";
 import { formatReportCountdown, getReportExpiryState } from "@/app/report/report-expiry";
 import ShareButton from "./ShareButton";
 import { ExportButtons } from "./components/ExportButtons";
-
-const PENDING_FIX_STORAGE_KEY = "repomind_pending_fix_chat_v1";
 
 const severityConfig = {
     critical: { color: "text-red-500", bg: "bg-red-500/10", border: "border-red-500/20", icon: Flame },
@@ -128,7 +123,6 @@ export function ReportContent({
     topFixes,
     findingViews,
     globalFixPrompt,
-    globalChatHref,
     hasPreviousScan,
     isSharedView,
     canShareReport,
@@ -138,11 +132,9 @@ export function ReportContent({
 }: ReportContentProps) {
     const baseUrl = getCanonicalSiteUrl();
     const date = new Date(scan.timestamp);
-    const { data: session } = useSession();
-    const router = useRouter();
-    const [showLoginModal, setShowLoginModal] = useState(false);
-    const [loginCallbackUrl, setLoginCallbackUrl] = useState<string | undefined>(undefined);
     const [now, setNow] = useState(() => Date.now());
+    const [showFixPromptModal, setShowFixPromptModal] = useState(false);
+    const [isCopyingFixPrompt, setIsCopyingFixPrompt] = useState(false);
     const [pendingFalsePositives, setPendingFalsePositives] = useState<Record<string, boolean>>({});
     const [activeFalsePositiveKey, setActiveFalsePositiveKey] = useState<string | null>(null);
     const [falsePositiveReason, setFalsePositiveReason] = useState<ReportFalsePositiveReason>("NOT_A_VULNERABILITY");
@@ -155,27 +147,6 @@ export function ReportContent({
 
         return () => window.clearInterval(intervalId);
     }, []);
-
-    useEffect(() => {
-        if (!session?.user) return;
-
-        const raw = sessionStorage.getItem(PENDING_FIX_STORAGE_KEY);
-        if (!raw) return;
-
-        try {
-            const pending = JSON.parse(raw) as { scanId?: string; chatHref?: string };
-            if (pending.scanId !== scan.id || typeof pending.chatHref !== "string") {
-                return;
-            }
-
-            sessionStorage.removeItem(PENDING_FIX_STORAGE_KEY);
-            void trackReportConversion("report_fix_login_completed", scan.id);
-            void trackReportConversion("report_fix_chat_started", scan.id);
-            router.push(pending.chatHref);
-        } catch {
-            sessionStorage.removeItem(PENDING_FIX_STORAGE_KEY);
-        }
-    }, [router, scan.id, session?.user]);
 
     const expiryState = useMemo(
         () => getReportExpiryState(reportExpiresAt, now),
@@ -191,35 +162,30 @@ export function ReportContent({
         return findingViews.filter((view) => fpSet.has(view.fingerprint)).slice(0, 3);
     }, [findingViews, topFixes]);
 
-    const handleCopyGlobalPrompt = async () => {
+    const openFixPromptModal = () => {
+        if (isOutdated || findingViews.length === 0) return;
+        setShowFixPromptModal(true);
+    };
+
+    const closeFixPromptModal = () => {
+        if (isCopyingFixPrompt) return;
+        setShowFixPromptModal(false);
+    };
+
+    const handleCopyFixPrompt = async () => {
         if (isOutdated || findingViews.length === 0) return;
 
+        setIsCopyingFixPrompt(true);
         try {
             await navigator.clipboard.writeText(globalFixPrompt);
             void trackReportConversion("report_fix_prompt_copied", scan.id);
-            toast.success("Global remediation prompt copied");
+            toast.success("Fix prompt copied. Paste it in Repo Chat to remediate vulnerabilities.");
+            setShowFixPromptModal(false);
         } catch {
             toast.error("Failed to copy prompt");
+        } finally {
+            setIsCopyingFixPrompt(false);
         }
-    };
-
-    const handleOpenGlobalFixInChat = () => {
-        if (isOutdated || findingViews.length === 0) return;
-
-        if (session?.user) {
-            void trackReportConversion("report_fix_chat_started", scan.id);
-            router.push(globalChatHref);
-            return;
-        }
-
-        const callbackUrl = window.location.href;
-        sessionStorage.setItem(
-            PENDING_FIX_STORAGE_KEY,
-            JSON.stringify({ scanId: scan.id, chatHref: globalChatHref })
-        );
-        setLoginCallbackUrl(callbackUrl);
-        setShowLoginModal(true);
-        void trackReportConversion("report_fix_login_gate_shown", scan.id);
     };
 
     const activeFalsePositiveView = useMemo(() => {
@@ -274,7 +240,10 @@ export function ReportContent({
     return (
         <div className="min-h-screen bg-black text-white p-4 md:p-8 selection:bg-indigo-500/30">
             <div className="max-w-4xl mx-auto space-y-8">
-                <div className="print:hidden rounded-2xl border border-white/10 bg-zinc-950/80 p-4 md:p-5">
+                <div
+                    data-testid="report-actions-navbar"
+                    className="print:hidden sticky top-0 z-50 rounded-2xl border border-white/10 bg-zinc-950/80 p-4 md:p-5 backdrop-blur-xl shadow-lg"
+                >
                     <div className="flex flex-col gap-4">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                             <div className="flex flex-wrap items-center gap-2">
@@ -309,7 +278,7 @@ export function ReportContent({
                                     className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-800 px-3.5 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700"
                                 >
                                     <MessageCircle className="w-4 h-4" />
-                                    Open Repo Chat
+                                    Talk to the Codebase
                                 </Link>
                             )}
                             {!isOutdated && canShareReport && (
@@ -321,32 +290,15 @@ export function ReportContent({
                                 />
                             )}
                             {!isOutdated && (
-                                <>
-                                    <button
-                                        onClick={handleCopyGlobalPrompt}
-                                        disabled={findingViews.length === 0}
-                                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3.5 py-2 text-sm font-medium text-zinc-200 transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        <Copy className="w-4 h-4" />
-                                        Copy Global Prompt
-                                    </button>
-                                    <button
-                                        onClick={handleOpenGlobalFixInChat}
-                                        disabled={findingViews.length === 0}
-                                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        <MessageCircle className="w-4 h-4" />
-                                        Fix All in Repo Chat
-                                    </button>
-                                </>
+                                <button
+                                    onClick={openFixPromptModal}
+                                    disabled={findingViews.length === 0}
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3.5 py-2 text-sm font-medium text-zinc-200 transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    <Copy className="w-4 h-4" />
+                                    Get LLM-Ready Fix Prompt
+                                </button>
                             )}
-                            <Link
-                                href={repoProfileHref}
-                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3.5 py-2 text-sm font-medium text-zinc-200 transition-all hover:bg-zinc-700"
-                            >
-                                <Shield className="w-4 h-4" />
-                                Repository Profile
-                            </Link>
                         </div>
                     </div>
                 </div>
@@ -376,6 +328,13 @@ export function ReportContent({
                             </div>
                         </div>
                         <div className="print:hidden flex flex-col gap-3 lg:items-end">
+                            <Link
+                                href={repoProfileHref}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/50 bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white transition-all hover:bg-indigo-500"
+                            >
+                                <Shield className="w-4 h-4" />
+                                Repository Profile
+                            </Link>
                             <ExportButtons scan={scan} />
                         </div>
                     </div>
@@ -550,13 +509,54 @@ export function ReportContent({
                 </div>
             </div>
 
-            <LoginModal
-                isOpen={showLoginModal}
-                onClose={() => setShowLoginModal(false)}
-                title="Sign in to start remediation chat"
-                description="Your global remediation prompt is ready. Sign in to continue in Repo Chat with the prefilled fix prompt."
-                callbackUrl={loginCallbackUrl}
-            />
+            {showFixPromptModal && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                        onClick={closeFixPromptModal}
+                    />
+                    <div className="relative w-full max-w-3xl rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl">
+                        <div className="space-y-4 p-6">
+                            <div className="space-y-2">
+                                <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
+                                    <Copy className="w-3.5 h-3.5" />
+                                    LLM-Ready Prompt
+                                </div>
+                                <h3 className="text-xl font-semibold text-white">Preview Fix Prompt</h3>
+                                <p className="text-sm text-zinc-400">
+                                    Review the remediation prompt, then copy it to continue fixing vulnerabilities in chat.
+                                </p>
+                            </div>
+
+                            <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-xl border border-white/10 bg-zinc-900 p-4 text-sm text-zinc-200">
+                                {globalFixPrompt}
+                            </pre>
+
+                            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                                <button
+                                    type="button"
+                                    onClick={closeFixPromptModal}
+                                    disabled={isCopyingFixPrompt}
+                                    className="inline-flex items-center justify-center rounded-lg border border-white/10 bg-zinc-900 px-4 py-2.5 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    Close
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        void handleCopyFixPrompt();
+                                    }}
+                                    disabled={isCopyingFixPrompt}
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <Copy className="w-4 h-4" />
+                                    {isCopyingFixPrompt ? "Copying..." : "Copy Prompt"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {activeFalsePositiveView && (
                 <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">

@@ -92,7 +92,7 @@ export function ExportButtons({ scan }: ExportButtonsProps) {
             </button>
             <button
                 onClick={handlePdfExport}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 rounded-lg transition-colors shadow-sm"
+                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 hover:text-white border border-white/10 rounded-lg transition-colors shadow-sm"
                 title="Download PDF"
             >
                 <Download className="w-3.5 h-3.5" />

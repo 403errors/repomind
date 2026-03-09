@@ -106,10 +106,16 @@ describe("ReportContent", () => {
             />
         );
 
-        expect(html).toContain("Copy Global Prompt");
-        expect(html).toContain("Fix All in Repo Chat");
+        expect(html).toContain("Get LLM-Ready Fix Prompt");
+        expect(html).toContain("Talk to the Codebase");
         expect(html).toContain("Repository Profile");
         expect(html).toContain("Share Report");
+        expect(html).toContain("data-testid=\"report-actions-navbar\"");
+        expect(html).toContain("sticky top-0 z-50");
+        expect(html).not.toContain("Copy Global Prompt");
+        expect(html).not.toContain("Copy Fix Prompt");
+        expect(html).not.toContain("Open Repo Chat");
+        expect(html).not.toContain("Fix All in Repo Chat");
         expect(html).not.toContain(">Copy Prompt<");
         expect(html).not.toContain("Fix in Repo Chat");
     });
