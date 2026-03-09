@@ -17,7 +17,7 @@
     "hygiene:freeze-baseline": "node scripts/freeze-hygiene-baseline.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
+    "prisma:deploy": "node scripts/prisma-deploy.mjs",
     "backfill:kv": "node scripts/backfill-kv-to-postgres.mjs"
   },
   "dependencies": {

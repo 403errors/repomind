@@ -246,7 +246,7 @@ We don't just analyze code; we analyze **coders**. RepoMind is the only platform
 
     # Postgres (Neon)
     DATABASE_URL="your_neon_pooled_connection_url"
-    DIRECT_URL="your_neon_direct_connection_url"
+    DIRECT_URL="your_neon_direct_connection_url" # Required for migrations/deploy (non-pooler host)
 
     # Resend (Transactional email)
     RESEND_API_KEY="your_resend_api_key"
