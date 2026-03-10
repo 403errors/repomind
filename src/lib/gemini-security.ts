@@ -258,7 +258,7 @@ ${policySummary}
 
         const model = getGenAI().getGenerativeModel({
             model: DEFAULT_MODEL,
-            tools: [{ googleSearch: {} }],
+            tools: [{ googleSearchRetrieval: {} }],
         });
 
         const response = await model.generateContent(prompt);
