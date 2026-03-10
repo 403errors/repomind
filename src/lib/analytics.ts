@@ -641,15 +641,17 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
  */
 export async function getPublicStats() {
     try {
-        const [totalVisitors, totalQueries, manualAdjustments] = await Promise.all([
+        const [totalVisitors, totalQueries, totalScans, manualAdjustments] = await Promise.all([
             kv.scard("visitors"),
             kv.get<number>("queries:total"),
+            prisma.repoScan.count(),
             getManualAnalyticsAdjustments(),
         ]);
 
         return {
             totalVisitors: (totalVisitors || 0) + manualAdjustments.visitors,
             totalQueries: (totalQueries || 0) + manualAdjustments.queries,
+            totalScans,
         };
     } catch (error: unknown) {
         console.error("Failed to fetch public stats from KV:", error);
@@ -660,6 +662,7 @@ export async function getPublicStats() {
         return {
             totalVisitors: 0,
             totalQueries: 0,
+            totalScans: 0,
         };
     }
 }

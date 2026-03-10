@@ -15,6 +15,7 @@ import {
     AlertCircle,
     AlertTriangle,
     CheckCircle,
+    ChevronDown,
     Copy,
     Flame,
     Info,
@@ -139,6 +140,7 @@ export function ReportContent({
     const [activeFalsePositiveKey, setActiveFalsePositiveKey] = useState<string | null>(null);
     const [falsePositiveReason, setFalsePositiveReason] = useState<ReportFalsePositiveReason>("NOT_A_VULNERABILITY");
     const [falsePositiveDetails, setFalsePositiveDetails] = useState("");
+    const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
 
     useEffect(() => {
         const intervalId = window.setInterval(() => {
@@ -240,65 +242,120 @@ export function ReportContent({
     return (
         <div className="min-h-screen bg-black text-white p-4 md:p-8 selection:bg-indigo-500/30">
             <div className="max-w-4xl mx-auto space-y-8">
-                <div
-                    data-testid="report-actions-navbar"
-                    className="print:hidden sticky top-0 z-50 rounded-2xl border border-white/10 bg-zinc-950/80 p-4 md:p-5 backdrop-blur-xl shadow-lg"
-                >
-                    <div className="flex flex-col gap-4">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <span className="inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
-                                    <Shield className="w-3.5 h-3.5" />
-                                    Report Actions
-                                </span>
-                                <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider ${isOutdated ? "border-red-500/20 bg-red-500/10 text-red-300" : "border-amber-500/20 bg-amber-500/10 text-amber-300"}`}>
-                                    {isOutdated ? "Outdated" : `Expires in ${expiryLabel}`}
-                                </span>
-                                {isSharedView && (
-                                    <span className="inline-flex items-center rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-indigo-300">
-                                        Shared Link
-                                    </span>
-                                )}
-                            </div>
-                            {isOutdated && (
-                                <Link
-                                    href={repoChatHref}
-                                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-indigo-500"
-                                >
-                                    <MessageCircle className="w-4 h-4" />
-                                    Rescan in Repo Chat
-                                </Link>
-                            )}
+                <div data-testid="report-actions-navbar" className="print:hidden">
+                    <div className="rounded-2xl border border-white/10 bg-zinc-950/80 p-4 shadow-lg md:hidden">
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
+                                <Shield className="w-3.5 h-3.5" />
+                                Report Actions
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setIsMobileActionsOpen((current) => !current)}
+                                className="inline-flex items-center justify-center rounded-lg border border-white/10 bg-zinc-900 p-2 text-zinc-300 transition-colors hover:bg-zinc-800"
+                                aria-expanded={isMobileActionsOpen}
+                                aria-controls="report-actions-mobile-menu"
+                            >
+                                <ChevronDown className={`h-4 w-4 transition-transform ${isMobileActionsOpen ? "rotate-180" : ""}`} />
+                                <span className="sr-only">{isMobileActionsOpen ? "Collapse report actions" : "Expand report actions"}</span>
+                            </button>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
-                            {!isOutdated && (
-                                <Link
-                                    href={repoChatHref}
-                                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-800 px-3.5 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700"
-                                >
-                                    <MessageCircle className="w-4 h-4" />
-                                    Talk to the Codebase
-                                </Link>
-                            )}
-                            {!isOutdated && canShareReport && (
-                                <ShareButton
-                                    scanId={scan.id}
-                                    canGenerateOutreach={canGenerateOutreach}
-                                    shareMode={shareMode}
-                                    reportExpiresAt={reportExpiresAt}
-                                />
-                            )}
-                            {!isOutdated && (
-                                <button
-                                    onClick={openFixPromptModal}
-                                    disabled={findingViews.length === 0}
-                                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3.5 py-2 text-sm font-medium text-zinc-200 transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                    <Copy className="w-4 h-4" />
-                                    Get LLM-Ready Fix Prompt
-                                </button>
-                            )}
+                        {isMobileActionsOpen && (
+                            <div id="report-actions-mobile-menu" className="mt-3 flex flex-col gap-2">
+                                {isOutdated ? (
+                                    <Link
+                                        href={repoChatHref}
+                                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-indigo-500"
+                                    >
+                                        <MessageCircle className="w-4 h-4" />
+                                        Rescan in Repo Chat
+                                    </Link>
+                                ) : (
+                                    <>
+                                        <Link
+                                            href={repoChatHref}
+                                            className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-800 px-3.5 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700"
+                                        >
+                                            <MessageCircle className="w-4 h-4" />
+                                            Talk to the Codebase
+                                        </Link>
+                                        {canShareReport && (
+                                            <ShareButton
+                                                scanId={scan.id}
+                                                canGenerateOutreach={canGenerateOutreach}
+                                                shareMode={shareMode}
+                                                reportExpiresAt={reportExpiresAt}
+                                            />
+                                        )}
+                                        <button
+                                            onClick={openFixPromptModal}
+                                            disabled={findingViews.length === 0}
+                                            className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3.5 py-2 text-sm font-medium text-zinc-200 transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            <Copy className="w-4 h-4" />
+                                            Get LLM-Ready Fix Prompt
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="hidden md:block sticky top-0 z-50 rounded-2xl border border-white/10 bg-zinc-950/80 p-4 md:p-5 backdrop-blur-xl shadow-lg">
+                        <div className="flex flex-col gap-4">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
+                                        <Shield className="w-3.5 h-3.5" />
+                                        Report Actions
+                                    </span>
+                                    {isSharedView && (
+                                        <span className="inline-flex items-center rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-indigo-300">
+                                            Shared Link
+                                        </span>
+                                    )}
+                                </div>
+                                {isOutdated && (
+                                    <Link
+                                        href={repoChatHref}
+                                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-indigo-500"
+                                    >
+                                        <MessageCircle className="w-4 h-4" />
+                                        Rescan in Repo Chat
+                                    </Link>
+                                )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                                {!isOutdated && (
+                                    <Link
+                                        href={repoChatHref}
+                                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-800 px-3.5 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700"
+                                    >
+                                        <MessageCircle className="w-4 h-4" />
+                                        Talk to the Codebase
+                                    </Link>
+                                )}
+                                {!isOutdated && canShareReport && (
+                                    <ShareButton
+                                        scanId={scan.id}
+                                        canGenerateOutreach={canGenerateOutreach}
+                                        shareMode={shareMode}
+                                        reportExpiresAt={reportExpiresAt}
+                                    />
+                                )}
+                                {!isOutdated && (
+                                    <button
+                                        onClick={openFixPromptModal}
+                                        disabled={findingViews.length === 0}
+                                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3.5 py-2 text-sm font-medium text-zinc-200 transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        <Copy className="w-4 h-4" />
+                                        Get LLM-Ready Fix Prompt
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -94,18 +94,21 @@ export default function HomeClient() {
                         />
                     </div>
 
-                    <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-b from-white to-white/60 relative w-fit mx-auto">
+                    <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold tracking-tight mb-2 md:mb-6 bg-clip-text text-transparent bg-gradient-to-b from-white to-white/60 relative w-fit mx-auto">
                         RepoMind
-                        <div className="absolute -right-10 -top-2 md:-right-20 md:-top-4 scale-75 md:scale-100">
+                        <div className="hidden md:block absolute -right-20 -top-4">
                             <WhatsNewBadge />
                         </div>
                     </h1>
+                    <div className="mb-6 md:hidden">
+                        <WhatsNewBadge />
+                    </div>
 
                     <CAGBadge />
 
                     <p className="text-base sm:text-lg md:text-xl text-zinc-400 mb-8 max-w-lg mx-auto">
                         Understand any codebase in seconds. Deep dive into repositories,
-                        explore profiles, and get instant clarity on complex projects.
+                        explore profiles, run deep security scans and much more.
                     </p>
 
                     {hasInvalidSessionError && (
