@@ -11,7 +11,7 @@ import { gzipSync, gunzipSync } from "node:zlib";
 const TTL_FILE = 3600; // 1 hour
 const TTL_REPO = 900; // 15 minutes
 const TTL_PROFILE = 1800; // 30 minutes
-const TTL_SCAN = 3600; // 1 hour
+const TTL_SCAN = 604800; // 7 days
 
 interface RepoFullContextCachePayload {
     metadata: unknown;
@@ -391,7 +391,7 @@ function buildSecurityScanCacheKey(owner: string, repo: string, identity: Securi
 
 /**
  * Cache security scan result with commit-aware keying.
- * Scan cache TTL is intentionally short (1h).
+ * Scan cache TTL is 7 days (commit/config-aware keying handles invalidation).
  */
 export async function cacheSecurityScanResult(
     owner: string,

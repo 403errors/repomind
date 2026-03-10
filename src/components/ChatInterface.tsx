@@ -36,6 +36,7 @@ import { MessageContent } from "./chat/MessageContent";
 import { useMessageSelection } from "./chat/useMessageSelection";
 import { BadgeModal } from "./chat/BadgeModal";
 import { SecurityScanModal } from "./chat/SecurityScanModal";
+import { buildSecurityScanMessage } from "./chat/security-scan-message";
 
 const REPO_SUGGESTIONS = [
     "Show me the user flow chart",
@@ -225,7 +226,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         setScanning(true);
         try {
             const filesToScan = repoContext.fileTree.map((file) => ({ path: file.path, sha: file.sha }));
-            const { findings, summary, scanId } = await scanRepositoryVulnerabilities(
+            const { findings, summary, scanId, meta } = await scanRepositoryVulnerabilities(
                 repoContext.owner,
                 repoContext.repo,
                 filesToScan,
@@ -235,34 +236,12 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 }
             );
 
-            let content = "";
-            if (summary.total === 0) {
-                content = `✅ **Security scan complete!**\n\nI've comprehensively scanned the **core repository files** and found **no verified security vulnerabilities**.\n\nYour code looks secure! The scan checked for:\n- SQL injection vulnerabilities\n- Cross-site scripting (XSS)\n- Unsafe child_process usage\n- Hardcoded secrets\n- Weak cryptographic algorithms\n- Command injection\n\nKeep up the good security practices! 🔒`;
-            } else {
-                content = `⚠️ **Security scan complete!**\n\nI've comprehensively scanned the **core repository files** and found **${summary.total} verified vulnerabilit${summary.total !== 1 ? "ies" : "y"}**.\n\n`;
-
-                if (summary.critical > 0) content += `🔴 **${summary.critical} Critical**\n`;
-                if (summary.high > 0) content += `🟠 **${summary.high} High**\n`;
-                if (summary.medium > 0) content += `🟡 **${summary.medium} Medium**\n`;
-                if (summary.low > 0) content += `🔵 **${summary.low} Low**\n`;
-
-                content += `\nHere are the key findings:\n\n`;
-                findings.slice(0, MAX_FINDINGS_PREVIEW).forEach((f) => {
-                    content += `### ${f.title}\n`;
-                    content += `**Severity**: ${f.severity.toUpperCase()}\n`;
-                    content += `**File**: \`${f.file}\` ${f.line ? `(Line ${f.line})` : ""}\n`;
-                    content += `**Issue**: ${f.description}\n`;
-                    content += `**Fix**: ${f.recommendation}\n\n`;
-
-                    // Add Copy Fix Prompt for external AI agents
-                    const prompt = `Fix this security vulnerability:\n\nIssue: ${f.title}\nSeverity: ${f.severity.toUpperCase()}\nFile: ${f.file}${f.line ? ` (Line ${f.line})` : ""}\nDescription: ${f.description}\nRecommendation: ${f.recommendation}\n\nPlease analyze the code in ${f.file} and implement the fix.`;
-                    content += "```fix-prompt\n" + prompt + "\n```\n\n";
-                });
-                if (findings.length > MAX_FINDINGS_PREVIEW) {
-                    const hiddenCount = findings.length - MAX_FINDINGS_PREVIEW;
-                    content += `*...and ${hiddenCount} more issue${hiddenCount !== 1 ? "s" : ""}.*`;
-                }
-            }
+            const content = buildSecurityScanMessage({
+                summary,
+                findings,
+                isFromCache: Boolean(meta?.fromCache),
+                maxFindingsPreview: MAX_FINDINGS_PREVIEW,
+            });
 
             const modelMsg: RepoChatMessage = {
                 id: placeholderMessageId,

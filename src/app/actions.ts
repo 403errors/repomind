@@ -444,7 +444,7 @@ export interface SecurityScanOptions {
 
 type SecurityScanCoreResult = Awaited<ReturnType<typeof runSecurityScan>>;
 type SecurityScanResult = SecurityScanCoreResult & { scanId?: string };
-const DEEP_SCAN_MONTHLY_LIMIT = 5;
+const DEEP_SCAN_MONTHLY_LIMIT = 15;
 
 export async function scanRepositoryVulnerabilities(
     owner: string,
@@ -467,11 +467,6 @@ export async function scanRepositoryVulnerabilities(
             const now = new Date();
             const monthKey = `${now.getFullYear()}_${now.getMonth() + 1}`;
             limitKey = `user:${session.user.id}:deep_scans:${monthKey}`;
-
-            const currentScans = await kv.get<number>(limitKey) || 0;
-            if (currentScans >= DEEP_SCAN_MONTHLY_LIMIT) {
-                throw new Error(`Monthly Deep Scan limit reached (${DEEP_SCAN_MONTHLY_LIMIT}/${DEEP_SCAN_MONTHLY_LIMIT}).`);
-            }
         }
     }
 
@@ -501,6 +496,7 @@ export async function scanRepositoryVulnerabilities(
     };
 
     const cachedResult = await getCachedSecurityScanResult(owner, repo, cacheIdentity) as SecurityScanCoreResult | null;
+    const isCacheHit = Boolean(cachedResult);
 
     let result: SecurityScanCoreResult;
     if (cachedResult) {
@@ -525,14 +521,21 @@ export async function scanRepositoryVulnerabilities(
             },
         };
     } else {
+        if (config.analysisProfile === "deep" && limitKey) {
+            const currentScans = await kv.get<number>(limitKey) || 0;
+            if (currentScans >= DEEP_SCAN_MONTHLY_LIMIT) {
+                throw new Error(`Monthly Deep Scan limit reached (${DEEP_SCAN_MONTHLY_LIMIT}/${DEEP_SCAN_MONTHLY_LIMIT}).`);
+            }
+        }
+
         result = await runSecurityScan(owner, repo, files, config);
 
-        // Cache the full core result object for 1 hour.
+        // Cache the full core result object for 7 days.
         await cacheSecurityScanResult(owner, repo, cacheIdentity, result);
     }
 
-    // Deep quota counts every deep request (including cache hits) for consistent product semantics.
-    if (config.analysisProfile === "deep" && limitKey) {
+    // Deep quota counts only fresh deep scans (cache hits do not consume quota).
+    if (config.analysisProfile === "deep" && limitKey && !isCacheHit) {
         await kv.incr(limitKey);
         // Expire key after 32 days to clean up
         await kv.expire(limitKey, 32 * 24 * 60 * 60);

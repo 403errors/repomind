@@ -21,7 +21,7 @@ describe("security scan cache helpers", () => {
         getMock.mockReset();
     });
 
-    it("stores scan results with 1-hour TTL and revision-aware key", async () => {
+    it("stores scan results with 7-day TTL and revision-aware key", async () => {
         setexMock.mockResolvedValue("OK");
 
         await cacheSecurityScanResult(
@@ -41,7 +41,7 @@ describe("security scan cache helpers", () => {
         expect(setexMock).toHaveBeenCalledTimes(1);
         const [key, ttl] = setexMock.mock.calls[0];
         expect(key).toContain("scan_answer:acme/widget:v2:");
-        expect(ttl).toBe(3600);
+        expect(ttl).toBe(604800);
     });
 
     it("reads back and parses cached scan JSON", async () => {

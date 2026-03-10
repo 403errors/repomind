@@ -99,6 +99,24 @@ export function SecurityScanModal({
                             </p>
                         </button>
 
+                        <div
+                            aria-disabled="true"
+                            className="w-full bg-zinc-900 border border-zinc-700/60 rounded-xl p-4 text-left opacity-75 cursor-not-allowed"
+                        >
+                            <div className="flex items-center justify-between mb-1">
+                                <h3 className="text-zinc-200 font-medium flex items-center gap-2">
+                                    Full Repo Scan
+                                    <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-700/40 text-zinc-300 border border-zinc-600/60">
+                                        Coming soon
+                                    </span>
+                                </h3>
+                                <span className="text-xs font-mono bg-zinc-950 px-2 py-0.5 rounded text-zinc-500">3/month</span>
+                            </div>
+                            <p className="text-xs text-zinc-400 leading-relaxed">
+                                Recommended for repositories with more than 500 files.
+                            </p>
+                        </div>
+
                         <label className="flex items-start gap-3 p-3 rounded-xl border border-red-500/20 bg-zinc-950/60">
                             <input
                                 type="checkbox"
