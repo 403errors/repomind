@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processProfileQueryStream } from "@/app/actions";
+import { trackAuthenticatedQueryEvent, trackEvent } from "@/lib/analytics";
 import { auth } from "@/lib/auth";
 import { getInvalidSessionApiError, getSessionAuthState, getSessionUserId } from "@/lib/session-guard";
 import type { StreamUpdate } from "@/lib/streaming-types";
@@ -22,15 +23,26 @@ async function requireAuthenticatedUser() {
         return NextResponse.json(getInvalidSessionApiError(), { status: 401 });
     }
 
-    return null;
+    return session;
 }
 
 export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     try {
-        const unauthorizedResponse = await requireAuthenticatedUser();
-        if (unauthorizedResponse) {
-            return unauthorizedResponse;
+        const session = await requireAuthenticatedUser();
+        if (session instanceof NextResponse) {
+            return session;
+        }
+
+        const userId = getSessionUserId(session);
+        if (userId) {
+            const userAgent = req.headers.get("user-agent") ?? "";
+            const country = req.headers.get("x-vercel-ip-country") ?? "Unknown";
+            const device = /mobile/i.test(userAgent) ? "mobile" : "desktop";
+            await Promise.all([
+                trackAuthenticatedQueryEvent(userId),
+                trackEvent(userId, "query", { country, device, userAgent }),
+            ]);
         }
 
         const body = await req.json();
