@@ -1,12 +1,11 @@
 import { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import type { GitHubRepo, RepoCommit, RepoLanguage } from '@/lib/github';
 import { ArrowLeft, Star, GitFork, AlertCircle, Clock, FileCode, Search } from 'lucide-react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
 import { CopyBadge } from '@/components/CopyBadge';
 import { normalizeReadmeForPreview } from './repo-page-utils';
 
@@ -17,12 +16,17 @@ interface Props {
     }>;
 }
 
+export const revalidate = 900;
+
+function isLikelyCrawler(userAgent: string): boolean {
+    return /bot|crawl|spider|slurp|preview|facebookexternalhit|linkedinbot|whatsapp|telegram|discord/i.test(userAgent);
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const { owner, repo } = await params;
 
     try {
-        const context = await import('@/lib/github').then((m) => m.getRepoFullContext(owner, repo));
-        const data = context.metadata;
+        const data = await import('@/lib/github').then((m) => m.getRepo(owner, repo));
         return {
             title: `${data.name} by ${data.owner.login} - RepoMind Architecture & Analysis`,
             description: data.description
@@ -50,6 +54,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function RepoPage({ params }: Props) {
     const { owner, repo } = await params;
+    const userAgent = (await headers()).get('user-agent') || '';
+    const shouldRenderReadmePreview = !isLikelyCrawler(userAgent);
 
     let repoData: GitHubRepo | null = null;
     let detailsData: { languages: RepoLanguage[]; commits: RepoCommit[] } = { languages: [], commits: [] };
@@ -187,7 +193,7 @@ export default async function RepoPage({ params }: Props) {
                     <CopyBadge owner={owner} repo={repo} />
                 </div>
 
-                {fullReadme && (
+                {shouldRenderReadmePreview && fullReadme && (
                     <section className="bg-zinc-900/30 border border-zinc-800/50 rounded-xl p-8 mb-12">
                         <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-6">
                             <h2 className="text-xl font-medium text-zinc-300 uppercase tracking-wider text-sm">Repository Summary (README)</h2>
@@ -198,7 +204,7 @@ export default async function RepoPage({ params }: Props) {
                             <div className="prose prose-invert prose-zinc max-w-none prose-img:inline prose-img:m-0 prose-img:mr-1 prose-img:align-middle prose-p:leading-relaxed prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-headings:font-semibold prose-h1:text-3xl prose-h2:text-2xl">
                                 <ReactMarkdown
                                     remarkPlugins={[remarkGfm]}
-                                    rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                                    skipHtml
                                 >
                                     {fullReadme}
                                 </ReactMarkdown>

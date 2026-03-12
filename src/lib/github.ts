@@ -209,7 +209,7 @@ const REPO_DETAILS_QUERY = `
       defaultBranchRef {
         target {
           ... on Commit {
-            history(first: 20) {
+            history(first: 5) {
               edges {
                 node {
                   message

@@ -1,15 +1,18 @@
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import Link from 'next/link';
 import { ArrowLeft, ArrowRight, Star, FileCode } from 'lucide-react';
+import { unstable_cache } from 'next/cache';
 
 interface Props {
     params: Promise<{
         topic: string;
     }>;
 }
+
+export const revalidate = 604800;
 
 interface TopicRepository {
     owner: string;
@@ -29,20 +32,53 @@ function isTopicRepository(value: unknown): value is TopicRepository {
         Array.isArray(item.topics);
 }
 
+const getTopicRepoIndex = unstable_cache(
+    async (): Promise<Record<string, TopicRepository[]>> => {
+        try {
+            const dataPath = path.join(process.cwd(), 'public', 'data', 'top-repos.json');
+            const fileContent = await fs.promises.readFile(dataPath, 'utf8');
+            const parsed = JSON.parse(fileContent) as unknown;
+            const repos = Array.isArray(parsed) ? parsed.filter(isTopicRepository) : [];
+            const index: Record<string, TopicRepository[]> = {};
+
+            for (const repo of repos) {
+                const normalizedTopics = new Set(
+                    repo.topics
+                        .filter((topic): topic is string => typeof topic === 'string' && topic.trim().length > 0)
+                        .map((topic) => topic.toLowerCase())
+                );
+
+                for (const topic of normalizedTopics) {
+                    if (!index[topic]) {
+                        index[topic] = [];
+                    }
+                    index[topic].push(repo);
+                }
+            }
+
+            for (const [topic, topicRepos] of Object.entries(index)) {
+                topicRepos.sort((a, b) => b.stars - a.stars);
+                index[topic] = topicRepos.slice(0, 50);
+            }
+
+            return index;
+        } catch (error) {
+            console.error("Error building topic repository index:", error);
+            return {};
+        }
+    },
+    ['topics-repo-index'],
+    {
+        revalidate: 604800,
+        tags: ['topics-repo-index']
+    }
+);
+
 // Helper to get matching repositories for a topic
 async function getReposForTopic(topic: string): Promise<TopicRepository[]> {
     try {
-        const dataPath = path.join(process.cwd(), 'public', 'data', 'top-repos.json');
-        if (!fs.existsSync(dataPath)) return [];
-
-        const fileContent = fs.readFileSync(dataPath, 'utf8');
-        const parsed = JSON.parse(fileContent) as unknown;
-        const repos = Array.isArray(parsed) ? parsed.filter(isTopicRepository) : [];
-
-        // Exact match or includes
-        return repos
-            .filter((r) => r.topics.includes(topic.toLowerCase()))
-            .slice(0, 50); // Top 50 max per topic
+        const index = await getTopicRepoIndex();
+        return index[topic.toLowerCase()] || [];
     } catch (e) {
         console.error("Error reading repos for topic:", e);
         return [];
