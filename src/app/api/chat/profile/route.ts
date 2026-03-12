@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
 
         const body = await req.json();
         const { query, profileContext, modelPreference } = body;
+        const username = typeof profileContext?.username === "string" ? profileContext.username : undefined;
+        const queryPreview = typeof query === "string" ? query.slice(0, 160) : undefined;
 
         const stream = new ReadableStream({
             async start(controller) {
@@ -59,7 +61,11 @@ export async function POST(req: NextRequest) {
                     }
                     controller.close();
                 } catch (error: unknown) {
-                    console.error("Stream generation error:", error);
+                    console.error("Profile chat stream generation error:", {
+                        username,
+                        queryPreview,
+                        error,
+                    });
                     const errorObj: StreamUpdate = {
                         type: "error",
                         message: getErrorMessage(error, "An error occurred during streaming."),
@@ -78,7 +84,10 @@ export async function POST(req: NextRequest) {
             },
         });
     } catch (error: unknown) {
-        console.error("API route error:", error);
+        console.error("Profile chat API route error:", {
+            path: req.nextUrl.pathname,
+            error,
+        });
         return new Response(
             JSON.stringify({ error: getErrorMessage(error, "An unexpected error occurred.") }),
             { status: 500 }

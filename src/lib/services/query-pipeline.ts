@@ -186,7 +186,14 @@ export async function* executeRepoQueryStream(
 
         yield { type: "complete", relevantFiles };
     } catch (error: unknown) {
-        console.error("Query pipeline error:", error);
+        console.error("Query pipeline error:", {
+            owner,
+            repo,
+            modelPreference: modelPreference ?? "flash",
+            filePathCount: filePaths.length,
+            queryPreview: query.slice(0, 160),
+            error,
+        });
         const message = error instanceof Error ? error.message : "An unexpected error occurred";
         yield { type: "error", message };
     }

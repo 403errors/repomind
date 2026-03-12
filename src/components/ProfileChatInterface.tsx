@@ -38,6 +38,31 @@ const PROFILE_SUGGESTIONS = [
     "What programming languages does he/she use?",
 ];
 
+type HttpError = Error & { status?: number };
+
+function getResponseErrorMessage(rawResponseText: string, status: number): string {
+    if (!rawResponseText.trim()) {
+        return `Failed to start analysis stream (HTTP ${status}).`;
+    }
+
+    try {
+        const parsed = JSON.parse(rawResponseText) as { error?: unknown };
+        if (typeof parsed.error === "string" && parsed.error.trim()) {
+            return parsed.error;
+        }
+    } catch {
+        // Ignore parse failure and fall back to raw response text.
+    }
+
+    return rawResponseText.trim();
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+    if (!error || typeof error !== "object") return undefined;
+    const maybeStatus = (error as { status?: unknown }).status;
+    return typeof maybeStatus === "number" ? maybeStatus : undefined;
+}
+
 export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: ProfileChatInterfaceProps) {
     const { data: session } = useSession();
     const [messages, setMessages] = useState<ProfileChatMessage[]>([
@@ -134,6 +159,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
     };
 
     const runProfileStreamingFlow = async (modelMsgId: string, combinedInput: string) => {
+        const historyForServer = messages.slice(-8).map((message) => ({ role: message.role, content: message.content }));
         const response = await fetch("/api/chat/profile", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -145,13 +171,27 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                     profileReadme,
                     repoReadmes,
                 },
+                history: historyForServer,
                 modelPreference,
             }),
         });
 
         if (!response.ok || !response.body) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData?.error || "Failed to start analysis stream.");
+            const rawResponseText = await response.text().catch(() => "");
+            const message = getResponseErrorMessage(rawResponseText, response.status);
+            const httpError = new Error(message) as HttpError;
+            httpError.status = response.status;
+
+            console.error("Profile chat stream initialization failed", {
+                username: profile.login,
+                status: response.status,
+                statusText: response.statusText,
+                historyMessageCount: historyForServer.length,
+                queryPreview: combinedInput.slice(0, 160),
+                errorMessage: message,
+            });
+
+            throw httpError;
         }
 
         const reader = response.body.getReader();
@@ -262,9 +302,22 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
             await runProfileStreamingFlow(modelMsgId, combinedInput);
         } catch (error: unknown) {
             console.error(error);
+            const errorStatus = getErrorStatus(error);
+            const isAuthError = errorStatus === 401 || errorStatus === 403;
+            const isPayloadTooLarge = errorStatus === 413;
 
-            // Check if it's a rate limit error
-            if (isRateLimitError(error)) {
+            if (isAuthError) {
+                toast.error("Sign in required", {
+                    description: "Your session has expired or is invalid. Please sign in and try again.",
+                    duration: 5000,
+                });
+                setShowLoginModal(true);
+            } else if (isPayloadTooLarge) {
+                toast.error("Request too large", {
+                    description: "The profile context is too large. Ask a narrower question and try again.",
+                    duration: 5000,
+                });
+            } else if (isRateLimitError(error)) {
                 toast.error(getRateLimitErrorMessage(error), {
                     description: "Please wait a few moments before trying again.",
                     duration: 5000,
@@ -279,7 +332,11 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
             const errorMsg: ProfileChatMessage = {
                 id: (Date.now() + 1).toString(),
                 role: "model",
-                content: "I encountered an error while analyzing the profile. Please try again or rephrase your question.",
+                content: isAuthError
+                    ? "Please sign in again to continue analyzing this profile."
+                    : isPayloadTooLarge
+                        ? "This request was too large to process. Try a narrower question focused on a specific project or timeframe."
+                        : "I encountered an error while analyzing the profile. Please try again or rephrase your question.",
             };
             setMessages((prev) => [...prev, errorMsg]);
         } finally {

@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
 
         const body = await req.json();
         const { query, repoDetails, filePaths, history, profileData, modelPreference } = body;
+        const owner = typeof repoDetails?.owner === "string" ? repoDetails.owner : undefined;
+        const repo = typeof repoDetails?.repo === "string" ? repoDetails.repo : undefined;
+        const queryPreview = typeof query === "string" ? query.slice(0, 160) : undefined;
 
         const stream = new ReadableStream({
             async start(controller) {
@@ -67,7 +70,12 @@ export async function POST(req: NextRequest) {
                     }
                     controller.close();
                 } catch (error: unknown) {
-                    console.error("Stream generation error:", error);
+                    console.error("Repo chat stream generation error:", {
+                        owner,
+                        repo,
+                        queryPreview,
+                        error,
+                    });
                     const errorObj: StreamUpdate = {
                         type: "error",
                         message: getErrorMessage(error, "An error occurred during streaming."),
@@ -87,7 +95,10 @@ export async function POST(req: NextRequest) {
             },
         });
     } catch (error: unknown) {
-        console.error("API route error:", error);
+        console.error("Repo chat API route error:", {
+            path: req.nextUrl.pathname,
+            error,
+        });
         return new Response(
             JSON.stringify({ error: getErrorMessage(error, "An unexpected error occurred.") }),
             { status: 500 }

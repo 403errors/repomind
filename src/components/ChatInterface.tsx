@@ -59,6 +59,34 @@ interface ChatInterfaceProps {
 }
 
 type SubmitMode = "normal" | "quick_scan" | "deep_scan";
+type HttpError = Error & { status?: number };
+
+// Keep this in sync with server-side pruneFilePaths to avoid sending noisy/binary paths in request payloads.
+const REQUEST_FILE_PATH_SKIP_PATTERN =
+    /(\.(png|jpg|jpeg|gif|svg|ico|lock|pdf|zip|tar|gz|map|wasm|min\.js|min\.css|woff|woff2|ttf|otf|eot)|package-lock\.json|yarn\.lock)$/i;
+
+function getResponseErrorMessage(rawResponseText: string, status: number): string {
+    if (!rawResponseText.trim()) {
+        return `Failed to start analysis stream (HTTP ${status}).`;
+    }
+
+    try {
+        const parsed = JSON.parse(rawResponseText) as { error?: unknown };
+        if (typeof parsed.error === "string" && parsed.error.trim()) {
+            return parsed.error;
+        }
+    } catch {
+        // Ignore parse failure and fall back to raw response text.
+    }
+
+    return rawResponseText.trim();
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+    if (!error || typeof error !== "object") return undefined;
+    const maybeStatus = (error as { status?: unknown }).status;
+    return typeof maybeStatus === "number" ? maybeStatus : undefined;
+}
 
 export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: ChatInterfaceProps) {
     const { data: session } = useSession();
@@ -311,7 +339,14 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     };
 
     const runRepoStreamingFlow = async (modelMsgId: string, combinedInputForServer: string) => {
-        const filePaths = repoContext.fileTree.map((file) => file.path);
+        const filePaths = repoContext.fileTree
+            .map((file) => file.path)
+            .filter((path) =>
+                !REQUEST_FILE_PATH_SKIP_PATTERN.test(path) &&
+                !path.includes("node_modules/") &&
+                !path.includes(".git/")
+            );
+        const historyForServer = messages.slice(-8).map((message) => ({ role: message.role, content: message.content }));
         const response = await fetch("/api/chat/repo", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -319,15 +354,30 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 query: combinedInputForServer,
                 repoDetails: { owner: repoContext.owner, repo: repoContext.repo },
                 filePaths,
-                history: messages.map(m => ({ role: m.role, content: m.content })),
+                history: historyForServer,
                 profileData: ownerProfile,
                 modelPreference,
             }),
         });
 
         if (!response.ok || !response.body) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData?.error || "Failed to start analysis stream.");
+            const rawResponseText = await response.text().catch(() => "");
+            const message = getResponseErrorMessage(rawResponseText, response.status);
+            const httpError = new Error(message) as HttpError;
+            httpError.status = response.status;
+
+            console.error("Repo chat stream initialization failed", {
+                owner: repoContext.owner,
+                repo: repoContext.repo,
+                status: response.status,
+                statusText: response.statusText,
+                filePathCount: filePaths.length,
+                historyMessageCount: historyForServer.length,
+                queryPreview: combinedInputForServer.slice(0, 160),
+                errorMessage: message,
+            });
+
+            throw httpError;
         }
 
         const reader = response.body.getReader();
@@ -476,9 +526,22 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         } catch (error: unknown) {
 
             console.error(error);
+            const errorStatus = getErrorStatus(error);
+            const isAuthError = errorStatus === 401 || errorStatus === 403;
+            const isPayloadTooLarge = errorStatus === 413;
 
-            // Check if it's a rate limit error
-            if (isRateLimitError(error)) {
+            if (isAuthError) {
+                toast.error("Sign in required", {
+                    description: "Your session has expired or is invalid. Please sign in and try again.",
+                    duration: 5000,
+                });
+                setShowLoginModal(true);
+            } else if (isPayloadTooLarge) {
+                toast.error("Request too large", {
+                    description: "This repository is large. Ask about a specific folder or feature and try again.",
+                    duration: 5000,
+                });
+            } else if (isRateLimitError(error)) {
                 toast.error(getRateLimitErrorMessage(error), {
                     description: "Please wait a few moments before trying again.",
                     duration: 5000,
@@ -493,7 +556,11 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
             const errorMsg: RepoChatMessage = {
                 id: (Date.now() + 1).toString(),
                 role: "model",
-                content: "I encountered an error while analyzing the code. Please try again or rephrase your question.",
+                content: isAuthError
+                    ? "Please sign in again to continue analyzing this repository."
+                    : isPayloadTooLarge
+                        ? "This request was too large to process. Try a narrower question focused on a specific module or folder."
+                        : "I encountered an error while analyzing the code. Please try again or rephrase your question.",
             };
             setMessages((prev) => [...prev, errorMsg]);
         } finally {
