@@ -27,6 +27,7 @@ RepoMind is an open-source, AI-powered platform for understanding public GitHub 
 - **Context-aware analysis**: selects full, relevant files instead of fragmented vector chunks.
 - **Visual understanding**: generates architecture maps and flow diagrams for faster onboarding.
 - **Security scanning built in**: quick/deep scans with verification-focused reporting.
+- **Live step feedback**: chat shows real-time processing stages (selecting files, reading files, preparing answer).
 - **Contributor-friendly codebase**: clear TypeScript services, tests, and modular features.
 
 ## Product Highlights
@@ -60,30 +61,32 @@ These diagrams provide a quick mental model of how RepoMind processes queries, o
 ```mermaid
 graph TD
     A[User enters repo or profile query] --> B[Context-Aware Engine]
-    B --> C[Repository/Profile metadata fetch]
-    B --> D[Hierarchical file pruning]
-    D --> E[Relevant full-file context assembly]
-    C --> F[Prompt synthesis]
-    E --> F
-    F --> G[Gemini model execution]
-    G --> H[Streaming response + optional diagrams]
+    B --> C[Repository/Profile metadata fetch + file tree]
+    B --> D[File selection via GEMINI_FILE_SELECTOR_MODEL]
+    D --> E[25 files for Lite or 50 files for Thinking]
+    E --> F[Fetch selected files with SHA-aware cache reuse]
+    F --> G[Build context with repo folder structure + selected files]
+    G --> H[Answer generation via Lite or Thinking model]
+    H --> I[Streaming response with text-only live steps]
 ```
 
 ### 2) Caching + Retrieval Strategy
 
 ```mermaid
 graph TD
-    A[Request file/data] --> B{KV cache hit?}
+    A[Request selected files] --> B{SHA-keyed file cache hit?}
     B -->|Yes| C{Compressed entry?}
     C -->|Yes| D[Decompress]
     C -->|No| E[Return cached payload]
     D --> E
-    B -->|No| F[Fetch from GitHub API]
+    B -->|No| F[Fetch only missing/new files from GitHub API]
     F --> G{Payload <= 2MB?}
     G -->|Yes| H[Gzip + store in KV]
     G -->|No| I[Skip cache write]
-    H --> J[Return response]
+    H --> J[Return full context]
     I --> J
+    J --> K[Cache query -> selected files (24h)]
+    J --> L[Cache query answer (24h)]
 ```
 
 ### 3) Security Scan + Verification Flow
@@ -151,6 +154,14 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+### Model Environment Variables
+
+Repo chat now uses separate models for file selection and answer generation:
+
+- `GEMINI_FILE_SELECTOR_MODEL` (default: `gemini-3.1-flash-lite-preview`)
+- `GEMINI_LITE_MODEL` (default: `gemini-3.1-flash-lite-preview`)
+- `GEMINI_THINKING_MODEL` (default: `gemini-3-flash-preview`)
 
 ### Developer Commands
 

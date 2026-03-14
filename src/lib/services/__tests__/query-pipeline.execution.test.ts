@@ -48,6 +48,7 @@ describe("executeRepoQueryStream", () => {
         }
 
         expect(updates).toEqual([
+            { type: "status", message: "Using cached answer...", progress: 95 },
             { type: "content", text: "recent answer", append: true },
             { type: "complete", relevantFiles: [] },
         ]);
@@ -116,7 +117,8 @@ describe("executeRepoQuery", () => {
             "widget",
             "summarize core logic",
             ["src/core.ts"],
-            "First Second"
+            "First Second",
+            undefined
         );
     });
 });

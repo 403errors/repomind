@@ -11,6 +11,7 @@ import {
   cacheRepoFullContext,
   getCachedRepoFullContext,
   getCachedFilesBatch,
+  type FileCachePolicy,
 } from "./cache";
 import { unstable_cache } from 'next/cache';
 
@@ -144,6 +145,7 @@ export interface GitHubRepo {
   full_name: string;
   description: string | null;
   html_url: string;
+  private?: boolean;
   stargazers_count: number;
   language: string | null;
   forks_count: number;
@@ -491,12 +493,13 @@ export async function getFileContent(
   owner: string,
   repo: string,
   path: string,
-  sha?: string
+  sha?: string,
+  fileCachePolicy?: FileCachePolicy
 ) {
   try {
     // If SHA is provided, check cache directly
     if (sha) {
-      const cached = await getCachedFile(owner, repo, path, sha);
+      const cached = await getCachedFile(owner, repo, path, sha, fileCachePolicy);
       if (cached) {
         return cached;
       }
@@ -523,7 +526,7 @@ export async function getFileContent(
         });
 
         const content = Buffer.from(data.content, "base64").toString("utf-8");
-        await cacheFile(owner, repo, path, sha, content);
+        await cacheFile(owner, repo, path, sha, content, fileCachePolicy);
         return content;
       } catch (error: unknown) {
         const status = getErrorStatus(error);
@@ -545,7 +548,7 @@ export async function getFileContent(
 
       // Check KV cache with SHA (if we didn't have it before)
       if (!sha) {
-        const cached = await getCachedFile(owner, repo, path, currentSha);
+        const cached = await getCachedFile(owner, repo, path, currentSha, fileCachePolicy);
         if (cached) {
           return cached;
         }
@@ -555,7 +558,7 @@ export async function getFileContent(
       const content = Buffer.from(data.content, "base64").toString("utf-8");
 
       // Cache for future requests
-      await cacheFile(owner, repo, path, currentSha, content);
+      await cacheFile(owner, repo, path, currentSha, content, fileCachePolicy);
 
       return content;
     }
@@ -574,14 +577,15 @@ export async function getFileContent(
 export async function getFileContentBatch(
   owner: string,
   repo: string,
-  files: Array<{ path: string; sha?: string }>
+  files: Array<{ path: string; sha?: string }>,
+  fileCachePolicy?: FileCachePolicy
 ): Promise<Array<{ path: string; content: string | null }>> {
   // Step 1: Separate files that already have SHAs (eligible for batch cache hit)
   const filesWithSha = files.filter(f => !!f.sha) as Array<{ path: string; sha: string }>;
   const filesWithoutSha = files.filter(f => !f.sha);
 
   // Step 2: Batch fetch from KV for files with SHAs
-  const cachedContents = await getCachedFilesBatch(owner, repo, filesWithSha);
+  const cachedContents = await getCachedFilesBatch(owner, repo, filesWithSha, fileCachePolicy);
 
   const results: Array<{ path: string; content: string | null }> = [];
   const missingFromCache: Array<{ path: string; sha: string }> = [];
@@ -600,7 +604,7 @@ export async function getFileContentBatch(
   const remainingFiles = [...filesWithoutSha, ...missingFromCache];
   const remainingPromises = remainingFiles.map(async ({ path, sha }) => {
     try {
-      const content = await getFileContent(owner, repo, path, sha);
+      const content = await getFileContent(owner, repo, path, sha, fileCachePolicy);
       return { path, content };
     } catch (error: unknown) {
       if (!isErrorWithMessage(error) || error.message !== "Not a file") {

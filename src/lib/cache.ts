@@ -9,10 +9,25 @@ import { gzipSync, gunzipSync } from "node:zlib";
 
 // Cache TTLs (in seconds)
 const TTL_FILE = 3600; // 1 hour
+const TTL_FILE_ANON = 1800; // 30 minutes
 const TTL_REPO = 900; // 15 minutes
 const TTL_PROFILE = 1800; // 30 minutes
 const TTL_SCAN = 604800; // 7 days
 const TTL_REPO_UNAVAILABLE = 1800; // 30 minutes
+const TTL_BUDGET_WINDOW = 86400; // 24 hours
+const FILE_CACHE_MAX_ANON_BYTES = 10 * 1024 * 1024; // 10MB/day
+const FILE_CACHE_MAX_AUTH_BYTES = 20 * 1024 * 1024; // 20MB/day
+const ANON_MAX_CACHEABLE_FILE_BYTES = 128 * 1024; // 128KB
+
+export type CacheAudience = "anonymous" | "authenticated";
+export type RepoVisibility = "public" | "private";
+
+export interface FileCachePolicy {
+    audience: CacheAudience;
+    actorId?: string;
+    visibility?: RepoVisibility;
+    consecutivePaths?: string[];
+}
 
 interface RepoFullContextCachePayload {
     metadata: unknown;
@@ -31,6 +46,137 @@ async function safeKvOperation<T>(operation: () => Promise<T>): Promise<T | null
     }
 }
 
+function normalizePolicy(policy?: FileCachePolicy): Required<FileCachePolicy> {
+    return {
+        audience: policy?.audience ?? "authenticated",
+        actorId: policy?.actorId ?? "unknown",
+        visibility: policy?.visibility ?? "public",
+        consecutivePaths: policy?.consecutivePaths ?? [],
+    };
+}
+
+function getFileCacheNamespace(owner: string, repo: string, policy?: FileCachePolicy): string {
+    const normalized = normalizePolicy(policy);
+    if (normalized.visibility === "private") {
+        const actor = normalized.actorId || "unknown";
+        return `private:${actor}:${owner}/${repo}`;
+    }
+    return `public:${owner}/${repo}`;
+}
+
+function getFileCacheKey(owner: string, repo: string, path: string, sha: string, policy?: FileCachePolicy): string {
+    const namespace = getFileCacheNamespace(owner, repo, policy);
+    return `file:${namespace}:${path}:${sha}`;
+}
+
+function getDailyBudgetKey(policy?: FileCachePolicy): string {
+    const normalized = normalizePolicy(policy);
+    const day = new Date().toISOString().slice(0, 10);
+    const actor = normalized.actorId || "unknown";
+    return `cache_budget:file:${normalized.audience}:${actor}:${day}`;
+}
+
+function getQueryCacheNamespace(owner: string, repo: string, policy?: FileCachePolicy): string {
+    const normalized = normalizePolicy(policy);
+    if (normalized.visibility === "private") {
+        const actor = normalized.actorId || "unknown";
+        return `private:${actor}:${owner}/${repo}`;
+    }
+    return `public:${owner}/${repo}`;
+}
+
+function getAnonConsecutiveNamespace(owner: string, repo: string, policy?: FileCachePolicy): string {
+    const normalized = normalizePolicy(policy);
+    const actor = normalized.actorId || "unknown";
+    if (normalized.visibility === "private") {
+        return `private:${actor}:${owner}/${repo}`;
+    }
+    return `public:${actor}:${owner}/${repo}`;
+}
+
+export async function resolveAnonymousConsecutivePaths(
+    owner: string,
+    repo: string,
+    paths: string[],
+    policy?: FileCachePolicy
+): Promise<string[]> {
+    const normalized = normalizePolicy(policy);
+    if (normalized.audience !== "anonymous" || paths.length === 0) {
+        return [];
+    }
+
+    const namespace = getAnonConsecutiveNamespace(owner, repo, normalized);
+    const sequenceKey = `anon_query_seq:${namespace}`;
+    const currentSeqRaw = await safeKvOperation(() => kv.incrby(sequenceKey, 1));
+    const currentSeq = typeof currentSeqRaw === "number" ? currentSeqRaw : 0;
+    if (currentSeq === 1) {
+        await safeKvOperation(() => kv.expire(sequenceKey, TTL_BUDGET_WINDOW));
+    }
+
+    const uniquePaths = Array.from(new Set(paths));
+    const lastSeenKeys = uniquePaths.map((path) => `anon_last_seen:${namespace}:${path}`);
+    const lastSeenValues = await safeKvOperation(() => kv.mget<number[]>(lastSeenKeys));
+    const consecutive: string[] = [];
+
+    if (Array.isArray(lastSeenValues)) {
+        lastSeenValues.forEach((seen, index) => {
+            if (typeof seen === "number" && seen === currentSeq - 1) {
+                consecutive.push(uniquePaths[index]);
+            }
+        });
+    }
+
+    await Promise.all(
+        uniquePaths.map(async (path) => {
+            const key = `anon_last_seen:${namespace}:${path}`;
+            await safeKvOperation(() => kv.setex(key, TTL_BUDGET_WINDOW, currentSeq));
+        })
+    );
+
+    return consecutive;
+}
+
+async function isWithinFileCacheBudget(estimatedBytes: number, policy?: FileCachePolicy): Promise<boolean> {
+    const normalized = normalizePolicy(policy);
+    const limit = normalized.audience === "anonymous" ? FILE_CACHE_MAX_ANON_BYTES : FILE_CACHE_MAX_AUTH_BYTES;
+    const key = getDailyBudgetKey(normalized);
+    const currentRaw = await safeKvOperation(() => kv.get<number>(key));
+    const current = typeof currentRaw === "number" ? currentRaw : 0;
+    return current + estimatedBytes <= limit;
+}
+
+async function addToFileCacheBudget(estimatedBytes: number, policy?: FileCachePolicy): Promise<void> {
+    const key = getDailyBudgetKey(policy);
+    await safeKvOperation(async () => {
+        const next = await kv.incrby(key, estimatedBytes);
+        if (typeof next === "number" && next === estimatedBytes) {
+            await kv.expire(key, TTL_BUDGET_WINDOW);
+        }
+        return next;
+    });
+}
+
+async function shouldAdmitAnonymousFileCache(
+    owner: string,
+    repo: string,
+    path: string,
+    sha: string,
+    policy?: FileCachePolicy
+): Promise<boolean> {
+    const normalized = normalizePolicy(policy);
+    if (normalized.audience !== "anonymous") return true;
+
+    const namespace = getFileCacheNamespace(owner, repo, normalized);
+    const key = `file_hit:${namespace}:${path}:${sha}`;
+    const hitsRaw = await safeKvOperation(() => kv.incrby(key, 1));
+    const hits = typeof hitsRaw === "number" ? hitsRaw : 0;
+    if (hits === 1) {
+        await safeKvOperation(() => kv.expire(key, TTL_BUDGET_WINDOW));
+    }
+    // Cache-on-second-hit for anonymous traffic to avoid low-value one-offs.
+    return hits >= 2;
+}
+
 /**
  * Cache file content with SHA-based key for auto-invalidation
  * Compresses content and skips files > 2MB
@@ -40,22 +186,44 @@ export async function cacheFile(
     repo: string,
     path: string,
     sha: string,
-    content: string
+    content: string,
+    policy?: FileCachePolicy
 ): Promise<void> {
-    // Skip caching if content is too large (> 2MB)
-    // to avoid hitting Vercel KV request/value size limits
-    if (content.length > 2 * 1024 * 1024) {
+    const normalized = normalizePolicy(policy);
+    const maxValueBytes = 2 * 1024 * 1024;
+    const isConsecutiveAnonPath =
+        normalized.audience === "anonymous" &&
+        Array.isArray(normalized.consecutivePaths) &&
+        normalized.consecutivePaths.includes(path);
+    const maxBytes = normalized.audience === "anonymous"
+        ? (isConsecutiveAnonPath ? maxValueBytes : ANON_MAX_CACHEABLE_FILE_BYTES)
+        : maxValueBytes;
+
+    // Skip caching large files to avoid value limits and low ROI.
+    if (content.length > maxBytes) {
         return;
     }
 
-    const key = `file:${owner}/${repo}:${path}:${sha}`;
+    if (!(await shouldAdmitAnonymousFileCache(owner, repo, path, sha, normalized))) {
+        return;
+    }
+
+    const key = getFileCacheKey(owner, repo, path, sha, normalized);
+    const ttl = normalized.audience === "anonymous" ? TTL_FILE_ANON : TTL_FILE;
 
     // Compress content
     try {
         const compressed = gzipSync(Buffer.from(content));
         // Store as base64 with prefix to identify compressed content
         const value = `gz:${compressed.toString('base64')}`;
-        await safeKvOperation(() => kv.setex(key, TTL_FILE, value));
+        const estimatedBytes = Buffer.byteLength(value, "utf8");
+
+        if (!(await isWithinFileCacheBudget(estimatedBytes, normalized))) {
+            return;
+        }
+
+        await safeKvOperation(() => kv.setex(key, ttl, value));
+        await addToFileCacheBudget(estimatedBytes, normalized);
     } catch {
         console.warn("Failed to compress/cache file:", path);
         // Fallback: don't cache or cache uncompressed if small enough?
@@ -72,9 +240,10 @@ export async function getCachedFile(
     owner: string,
     repo: string,
     path: string,
-    sha: string
+    sha: string,
+    policy?: FileCachePolicy
 ): Promise<string | null> {
-    const key = `file:${owner}/${repo}:${path}:${sha}`;
+    const key = getFileCacheKey(owner, repo, path, sha, policy);
     const cached = await safeKvOperation(() => kv.get<string>(key));
 
     if (!cached) return null;
@@ -99,11 +268,12 @@ export async function getCachedFile(
 export async function getCachedFilesBatch(
     owner: string,
     repo: string,
-    files: Array<{ path: string; sha: string }>
+    files: Array<{ path: string; sha: string }>,
+    policy?: FileCachePolicy
 ): Promise<Array<string | null>> {
     if (files.length === 0) return [];
 
-    const keys = files.map(f => `file:${owner}/${repo}:${f.path}:${f.sha}`);
+    const keys = files.map(f => getFileCacheKey(owner, repo, f.path, f.sha, policy));
     const results = await safeKvOperation(() => kv.mget<string[]>(keys));
 
     if (!results) return files.map(() => null);
@@ -262,11 +432,13 @@ export async function cacheQuerySelection(
     owner: string,
     repo: string,
     query: string,
-    files: string[]
+    files: string[],
+    policy?: FileCachePolicy
 ): Promise<void> {
     // Normalize query to lowercase and trim to increase hit rate
     const normalizedQuery = query.toLowerCase().trim();
-    const key = `query:${owner}/${repo}:${normalizedQuery}`;
+    const namespace = getQueryCacheNamespace(owner, repo, policy);
+    const key = `query:${namespace}:${normalizedQuery}`;
     // Cache for 24 hours - queries usually yield same files
     await safeKvOperation(() => kv.setex(key, 86400, files));
 }
@@ -274,10 +446,12 @@ export async function cacheQuerySelection(
 export async function getCachedQuerySelection(
     owner: string,
     repo: string,
-    query: string
+    query: string,
+    policy?: FileCachePolicy
 ): Promise<string[] | null> {
     const normalizedQuery = query.toLowerCase().trim();
-    const key = `query:${owner}/${repo}:${normalizedQuery}`;
+    const namespace = getQueryCacheNamespace(owner, repo, policy);
+    const key = `query:${namespace}:${normalizedQuery}`;
     return await safeKvOperation(() => kv.get<string[]>(key));
 }
 
@@ -290,13 +464,15 @@ export async function cacheRepoQueryAnswer(
     repo: string,
     query: string,
     files: string[],
-    answer: string
+    answer: string,
+    policy?: FileCachePolicy
 ): Promise<void> {
     // We hash the file list to ensure if files change, cache invalidates.
     // A simple join is sufficient for our keys since they are relative paths.
     const fileHash = files.sort().join('|').substring(0, 100);
     const normalizedQuery = query.toLowerCase().trim();
-    const key = `answer:${owner}/${repo}:${normalizedQuery}:${fileHash}`;
+    const namespace = getQueryCacheNamespace(owner, repo, policy);
+    const key = `answer:${namespace}:${normalizedQuery}:${fileHash}`;
 
     // Cache for 24 hours
     // We compress the answer if it's large as AI responses can be long
@@ -307,14 +483,14 @@ export async function cacheRepoQueryAnswer(
         // Store both the specific (hashed) and latest answer
         await Promise.all([
             safeKvOperation(() => kv.setex(key, 86400, value)),
-            safeKvOperation(() => kv.setex(`latest_answer:${owner}/${repo}:${normalizedQuery}`, 86400, value))
+            safeKvOperation(() => kv.setex(`latest_answer:${namespace}:${normalizedQuery}`, 86400, value))
         ]);
     } catch {
         console.warn("Failed to compress answer, caching plain text...");
         const stringified = answer;
         await Promise.all([
             safeKvOperation(() => kv.setex(key, 86400, stringified)),
-            safeKvOperation(() => kv.setex(`latest_answer:${owner}/${repo}:${normalizedQuery}`, 86400, stringified))
+            safeKvOperation(() => kv.setex(`latest_answer:${namespace}:${normalizedQuery}`, 86400, stringified))
         ]);
     }
 }
@@ -323,11 +499,13 @@ export async function getCachedRepoQueryAnswer(
     owner: string,
     repo: string,
     query: string,
-    files: string[]
+    files: string[],
+    policy?: FileCachePolicy
 ): Promise<string | null> {
     const fileHash = files.sort().join('|').substring(0, 100);
     const normalizedQuery = query.toLowerCase().trim();
-    const key = `answer:${owner}/${repo}:${normalizedQuery}:${fileHash}`;
+    const namespace = getQueryCacheNamespace(owner, repo, policy);
+    const key = `answer:${namespace}:${normalizedQuery}:${fileHash}`;
 
     const cached = await safeKvOperation(() => kv.get<string>(key));
     if (!cached) return null;
@@ -354,10 +532,12 @@ export async function getCachedRepoQueryAnswer(
 export async function getLatestRepoQueryAnswer(
     owner: string,
     repo: string,
-    query: string
+    query: string,
+    policy?: FileCachePolicy
 ): Promise<string | null> {
     const normalizedQuery = query.toLowerCase().trim();
-    const key = `latest_answer:${owner}/${repo}:${normalizedQuery}`;
+    const namespace = getQueryCacheNamespace(owner, repo, policy);
+    const key = `latest_answer:${namespace}:${normalizedQuery}`;
 
     const cached = await safeKvOperation(() => kv.get<string>(key));
     if (!cached) return null;

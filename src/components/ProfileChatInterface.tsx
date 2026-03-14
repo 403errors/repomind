@@ -24,6 +24,7 @@ import { ChatInput } from "./ChatInput";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { MessageContent } from "./chat/MessageContent";
 import { useMessageSelection } from "./chat/useMessageSelection";
+import { StreamStatus } from "./chat/StreamStatus";
 
 interface ProfileChatInterfaceProps {
     profile: GitHubProfile;
@@ -153,6 +154,8 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                 content: "",
                 reasoningSteps: [],
                 modelUsed: selectedModelPreference,
+                streamStatus: "Preparing profile analysis...",
+                streamProgress: 5,
             },
         ]);
         return modelMsgId;
@@ -217,7 +220,14 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                 if (chunk.type === "status") {
                     accumulatedReasoning.push(chunk.message);
                     setMessages((prev) => prev.map((message) =>
-                        message.id === modelMsgId ? { ...message, reasoningSteps: [...accumulatedReasoning] } : message
+                        message.id === modelMsgId
+                            ? {
+                                ...message,
+                                reasoningSteps: [...accumulatedReasoning],
+                                streamStatus: chunk.message,
+                                streamProgress: chunk.progress,
+                            }
+                            : message
                     ));
                 } else if (chunk.type === "thought") {
                     accumulatedReasoning.push(chunk.text);
@@ -256,7 +266,9 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
         }
 
         setMessages((prev) => prev.map((message) =>
-            message.id === modelMsgId ? { ...message, content: contentText } : message
+            message.id === modelMsgId
+                ? { ...message, content: contentText, streamStatus: "Completed", streamProgress: 100 }
+                : message
         ));
     };
 
@@ -506,6 +518,12 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                 "flex flex-col gap-2",
                                 msg.role === "user" ? "items-end max-w-[80%]" : "items-start w-full min-w-0"
                             )}>
+                                {msg.role === "model" && (
+                                    <StreamStatus
+                                        message={msg.streamStatus}
+                                        isStreaming={loading && isLatestMessage}
+                                    />
+                                )}
                                 {/* ── REASONING: outside bubble, no background ── */}
                                 {msg.role === "model" && msg.modelUsed === "thinking" && loading && msg.id === messages[messages.length - 1]?.id && (
                                     <ReasoningBlock
@@ -521,7 +539,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                 )}
 
                                 {/* ── CONTENT BUBBLE: only when content exists OR flash model loading ── */}
-                                {(msg.role === "user" || msg.content || (msg.modelUsed !== "thinking" && loading && msg.id === messages[messages.length - 1]?.id)) && (
+                                {(msg.role === "user" || msg.content) && (
                                     <div className={cn(
                                         "relative px-4 py-2.5 rounded-2xl overflow-hidden min-w-0",
                                         msg.role === "user"
@@ -545,21 +563,6 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                             </button>
                                         )}
                                         <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words overflow-hidden w-full min-w-0">
-                                            {/* Flash model loading dots */}
-                                            {msg.role === "model" && msg.modelUsed !== "thinking" && loading && isLatestMessage && !msg.content && (
-                                                <div className="flex items-center gap-2 py-1">
-                                                    <span className="flex gap-1 items-center">
-                                                        {[0, 1, 2].map(i => (
-                                                            <span
-                                                                key={i}
-                                                                className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse"
-                                                                style={{ animationDelay: `${i * 0.2}s` }}
-                                                            />
-                                                        ))}
-                                                    </span>
-                                                    <span className="text-xs text-zinc-500">Composing response...</span>
-                                                </div>
-                                            )}
                                             {msg.content && (
                                                 <MessageContent
                                                     content={msg.content + (loading && isLatestMessage ? "▋" : "")}

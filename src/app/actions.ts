@@ -37,6 +37,7 @@ import type { StreamUpdate } from "@/lib/streaming-types";
 import type { GitHubProfile } from "@/lib/github";
 import type { SearchResult } from "@/lib/search-engine";
 import { getCachedSecurityScanResult, cacheSecurityScanResult } from "@/lib/cache";
+import type { CacheAudience, FileCachePolicy } from "@/lib/cache";
 import type { ModelPreference } from "@/lib/ai-client";
 
 // ─── Services & Domain ────────────────────────────────────────────────────────
@@ -340,15 +341,34 @@ export async function* generateAnswerStream(
     query: string,
     repoDetails: { owner: string; repo: string },
     filePaths: string[],
+    fileShas?: Record<string, string>,
+    cacheAudience: CacheAudience = "authenticated",
+    cacheActorId?: string,
     history: { role: "user" | "model"; content: string }[] = [],
     profileData?: GitHubProfile,
     modelPreference: ModelPreference = "flash"
 ): AsyncGenerator<StreamUpdate> {
+    let visibility: "public" | "private" = "public";
+    try {
+        const repo = await getRepo(repoDetails.owner, repoDetails.repo) as { private?: boolean };
+        visibility = repo.private ? "private" : "public";
+    } catch {
+        visibility = "public";
+    }
+
+    const fileCachePolicy: FileCachePolicy = {
+        audience: cacheAudience,
+        actorId: cacheActorId,
+        visibility,
+    };
+
     yield* executeRepoQueryStream({
         query,
         owner: repoDetails.owner,
         repo: repoDetails.repo,
         filePaths,
+        fileShas,
+        fileCachePolicy,
         history,
         profileData,
         modelPreference,

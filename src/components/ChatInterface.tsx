@@ -37,6 +37,7 @@ import { useMessageSelection } from "./chat/useMessageSelection";
 import { BadgeModal } from "./chat/BadgeModal";
 import { SecurityScanModal } from "./chat/SecurityScanModal";
 import { buildSecurityScanMessage } from "./chat/security-scan-message";
+import { StreamStatus } from "./chat/StreamStatus";
 
 const REPO_SUGGESTIONS = [
     "Show me the user flow chart",
@@ -333,6 +334,8 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
             reasoningSteps: [],
             relevantFiles: [],
             modelUsed: selectedModelPreference,
+            streamStatus: "Selecting relevant files...",
+            streamProgress: 5,
         }]);
         return modelMsgId;
     };
@@ -342,13 +345,18 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         combinedInputForServer: string,
         selectedModelPreference: ModelPreference
     ) => {
-        const filePaths = repoContext.fileTree
-            .map((file) => file.path)
+        const eligibleFiles = repoContext.fileTree
             .filter((path) =>
-                !REQUEST_FILE_PATH_SKIP_PATTERN.test(path) &&
-                !path.includes("node_modules/") &&
-                !path.includes(".git/")
+                !REQUEST_FILE_PATH_SKIP_PATTERN.test(path.path) &&
+                !path.path.includes("node_modules/") &&
+                !path.path.includes(".git/")
             );
+        const filePaths = eligibleFiles.map((file) => file.path);
+        const fileShas = Object.fromEntries(
+            eligibleFiles
+                .filter((file) => typeof file.sha === "string" && file.sha.length > 0)
+                .map((file) => [file.path, file.sha as string])
+        );
         const historyForServer = messages.slice(-8).map((message) => ({ role: message.role, content: message.content }));
         const response = await fetch("/api/chat/repo", {
             method: "POST",
@@ -357,6 +365,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 query: combinedInputForServer,
                 repoDetails: { owner: repoContext.owner, repo: repoContext.repo },
                 filePaths,
+                fileShas,
                 history: historyForServer,
                 profileData: ownerProfile,
                 modelPreference: selectedModelPreference,
@@ -405,7 +414,14 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 if (chunk.type === "status") {
                     accumulatedReasoning.push(chunk.message);
                     setMessages((prev) => prev.map((message) =>
-                        message.id === modelMsgId ? { ...message, reasoningSteps: [...accumulatedReasoning] } : message
+                        message.id === modelMsgId
+                            ? {
+                                ...message,
+                                reasoningSteps: [...accumulatedReasoning],
+                                streamStatus: chunk.message,
+                                streamProgress: chunk.progress,
+                            }
+                            : message
                     ));
                 } else if (chunk.type === "thought") {
                     accumulatedReasoning.push(chunk.text);
@@ -428,7 +444,14 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 } else if (chunk.type === "complete") {
                     finalRelevantFiles = chunk.relevantFiles ?? [];
                     setMessages((prev) => prev.map((message) =>
-                        message.id === modelMsgId ? { ...message, relevantFiles: finalRelevantFiles } : message
+                        message.id === modelMsgId
+                            ? {
+                                ...message,
+                                relevantFiles: finalRelevantFiles,
+                                streamStatus: "Completed",
+                                streamProgress: 100,
+                            }
+                            : message
                     ));
                 } else if (chunk.type === "error") {
                     throw new Error(chunk.message);
@@ -453,7 +476,9 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         }
 
         setMessages(prev => prev.map(m =>
-            m.id === modelMsgId ? { ...m, content: contentText } : m
+            m.id === modelMsgId
+                ? { ...m, content: contentText, streamStatus: "Completed", streamProgress: 100 }
+                : m
         ));
     };
 
@@ -785,6 +810,12 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                                     "flex flex-col gap-2",
                                     msg.role === "user" ? "items-end max-w-[85%] md:max-w-[80%]" : "items-start max-w-full md:max-w-full w-full min-w-0"
                                 )}>
+                                    {msg.role === "model" && (
+                                        <StreamStatus
+                                            message={msg.streamStatus}
+                                            isStreaming={loading && msg.id === messages[messages.length - 1]?.id}
+                                        />
+                                    )}
                                     {/* ── REASONING: outside bubble, no background ── */}
                                     {msg.role === "model" && msg.modelUsed === "thinking" && loading && msg.id === messages[messages.length - 1]?.id && (
                                         <ReasoningBlock
@@ -800,7 +831,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                                     )}
 
                                     {/* ── CONTENT BUBBLE: only when content exists OR flash model loading ── */}
-                                    {(msg.role === "user" || msg.content || (msg.modelUsed !== "thinking" && loading && msg.id === messages[messages.length - 1]?.id)) && (
+                                    {(msg.role === "user" || msg.content || isStreamingScanPlaceholder) && (
                                         <div className={cn(
                                             "relative px-4 py-2.5 rounded-2xl overflow-hidden w-full min-w-0",
                                             msg.role === "user"
@@ -824,21 +855,6 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                                                 </button>
                                             )}
                                             <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words overflow-hidden w-full min-w-0">
-                                                {/* Flash model loading dots */}
-                                                {msg.role === "model" && msg.modelUsed !== "thinking" && loading && msg.id === messages[messages.length - 1]?.id && !msg.content && !msg.scanStatus && (
-                                                    <div className="flex items-center gap-2 py-1">
-                                                        <span className="flex gap-1 items-center">
-                                                            {[0, 1, 2].map(i => (
-                                                                <span
-                                                                    key={i}
-                                                                    className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse"
-                                                                    style={{ animationDelay: `${i * 0.2}s` }}
-                                                                />
-                                                            ))}
-                                                        </span>
-                                                        <span className="text-xs text-zinc-500">Composing response...</span>
-                                                    </div>
-                                                )}
                                                 {isStreamingScanPlaceholder && (
                                                     <div className="not-prose flex items-center gap-2 py-1 text-sm font-medium text-zinc-300">
                                                         <span>{msg.scanStatus === "deep_running" ? "Deep Scan Running" : "Quick Scan Running"}</span>

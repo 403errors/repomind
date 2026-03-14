@@ -126,7 +126,7 @@ export function ChatInput({
                                 <Brain className="w-3.5 h-3.5 text-purple-400" />
                             )}
                             <span className="uppercase tracking-wider hidden xs:inline">
-                                {modelPreference === "flash" ? "Flash" : "Thinking"}
+                                {modelPreference === "flash" ? "Lite" : "Thinking"}
                             </span>
                             <ChevronDown className={cn("w-3 h-3 transition-transform duration-200", showModelDropdown && "rotate-180")} />
                         </button>
@@ -154,7 +154,7 @@ export function ChatInput({
                                             <Zap className="w-3.5 h-3.5 text-yellow-500" />
                                         </div>
                                         <div className="flex flex-col items-start">
-                                            <span className="font-semibold">Flash Mode</span>
+                                            <span className="font-semibold">Lite Mode</span>
                                             <span className="text-[10px] opacity-50">Standard performance</span>
                                         </div>
                                     </button>

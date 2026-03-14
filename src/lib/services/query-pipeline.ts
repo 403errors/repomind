@@ -13,7 +13,13 @@
 import { analyzeFileSelection, answerWithContextStream } from "@/lib/gemini";
 import { getFileContentBatch } from "@/lib/github";
 import { countTokens, MAX_TOKENS } from "@/lib/tokens";
-import { getCachedRepoQueryAnswer, cacheRepoQueryAnswer, getLatestRepoQueryAnswer } from "@/lib/cache";
+import {
+    getCachedRepoQueryAnswer,
+    cacheRepoQueryAnswer,
+    getLatestRepoQueryAnswer,
+    resolveAnonymousConsecutivePaths,
+} from "@/lib/cache";
+import type { FileCachePolicy } from "@/lib/cache";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import type { GitHubProfile } from "@/lib/github";
 import type { ModelPreference } from "@/lib/ai-client";
@@ -25,6 +31,8 @@ export interface RepoQueryParams {
     owner: string;
     repo: string;
     filePaths: string[];
+    fileShas?: Record<string, string>;
+    fileCachePolicy?: FileCachePolicy;
     history?: { role: "user" | "model"; content: string }[];
     profileData?: GitHubProfile;
     modelPreference?: ModelPreference;
@@ -43,14 +51,16 @@ export interface QueryPipelineDeps {
         owner: string,
         repo: string,
         modelPreference?: ModelPreference,
-        history?: { role: "user" | "model"; content: string }[]
+        history?: { role: "user" | "model"; content: string }[],
+        fileCachePolicy?: FileCachePolicy
     ) => Promise<string[]>;
 
     /** Fetches file content in batch — defaults to GitHub API */
     fetchFiles?: (
         owner: string,
         repo: string,
-        files: Array<{ path: string; sha?: string }>
+        files: Array<{ path: string; sha?: string }>,
+        fileCachePolicy?: FileCachePolicy
     ) => Promise<Array<{ path: string; content: string | null }>>;
 
     /** Streams AI response — defaults to Gemini */
@@ -79,6 +89,67 @@ export function pruneFilePaths(paths: string[]): string[] {
     );
 }
 
+interface FolderNode {
+    dirs: Map<string, FolderNode>;
+    files: string[];
+}
+
+function createFolderNode(): FolderNode {
+    return { dirs: new Map(), files: [] };
+}
+
+function buildRepoFolderStructure(paths: string[], maxPaths: number = 500, maxLines: number = 220): string {
+    const root = createFolderNode();
+    const limitedPaths = paths.slice(0, maxPaths);
+
+    for (const rawPath of limitedPaths) {
+        const parts = rawPath.split("/").filter(Boolean);
+        if (parts.length === 0) continue;
+
+        let node = root;
+        for (let i = 0; i < parts.length - 1; i += 1) {
+            const segment = parts[i];
+            let next = node.dirs.get(segment);
+            if (!next) {
+                next = createFolderNode();
+                node.dirs.set(segment, next);
+            }
+            node = next;
+        }
+        node.files.push(parts[parts.length - 1]);
+    }
+
+    const lines: string[] = [];
+    const render = (node: FolderNode, depth: number) => {
+        const indent = "  ".repeat(depth);
+        for (const dir of Array.from(node.dirs.keys()).sort()) {
+            lines.push(`${indent}- ${dir}/`);
+            if (lines.length >= maxLines) return;
+            const child = node.dirs.get(dir);
+            if (child) {
+                render(child, depth + 1);
+            }
+            if (lines.length >= maxLines) return;
+        }
+        for (const file of [...node.files].sort()) {
+            lines.push(`${indent}- ${file}`);
+            if (lines.length >= maxLines) return;
+        }
+    };
+
+    render(root, 0);
+
+    if (paths.length > maxPaths || lines.length >= maxLines) {
+        lines.push("- ... (folder structure truncated)");
+    }
+
+    if (lines.length === 0) {
+        return "- (No repository files available)";
+    }
+
+    return lines.join("\n");
+}
+
 // ─── Pipeline ──────────────────────────────────────────────────────────────────
 
 /**
@@ -92,21 +163,24 @@ export async function* executeRepoQueryStream(
 ): AsyncGenerator<StreamUpdate> {
     const {
         analyzeFiles = analyzeFileSelection,
-        fetchFiles = (owner, repo, files) => getFileContentBatch(owner, repo, files),
+        fetchFiles = (owner, repo, files, fileCachePolicy) => getFileContentBatch(owner, repo, files, fileCachePolicy),
         streamAnswer = answerWithContextStream,
     } = deps;
 
-    const { query, owner, repo, filePaths, history = [], profileData, modelPreference } = params;
+    const { query, owner, repo, filePaths, fileShas, fileCachePolicy, history = [], profileData, modelPreference } = params;
 
     try {
-        const isThinking = modelPreference === "thinking";
-
         // Step 0: Short-circuit check
         // Check if we have ANY recent answer for this exact query in this repo.
         // This bypasses file selection, fetching, and AI generation entirely (0.1s hit).
-        const shortCircuit = await getLatestRepoQueryAnswer(owner, repo, query);
+        const shortCircuit = await getLatestRepoQueryAnswer(owner, repo, query, fileCachePolicy);
         if (shortCircuit) {
             console.log(`🚀 Short-Circuit Cache Hit: ${owner}/${repo} -> ${query}`);
+            yield {
+                type: "status",
+                message: "Using cached answer...",
+                progress: 95,
+            };
             yield { type: "content", text: shortCircuit, append: true };
             yield { type: "complete", relevantFiles: [] }; // In short-circuit we don't know the files, or we could cache them too.
             return;
@@ -115,33 +189,55 @@ export async function* executeRepoQueryStream(
         // Step 1: Select relevant files
         yield {
             type: "status",
-            message: isThinking
-                ? `Reasoning: Identifying files relevant to "${query.slice(0, 60)}${query.length > 60 ? '...' : ''}"...`
-                : "Analyzing repository structure...",
-            progress: 15
+            message: "Selecting relevant files...",
+            progress: 15,
         };
 
         const prunedPaths = pruneFilePaths(filePaths);
-        const relevantFiles = await analyzeFiles(query, prunedPaths, owner, repo, modelPreference, history);
+        const relevantFiles = await analyzeFiles(query, prunedPaths, owner, repo, modelPreference, history, fileCachePolicy);
 
         yield { type: "files", files: relevantFiles };
         yield {
             type: "status",
-            message: isThinking
-                ? `Process: Loading ${relevantFiles.length} file${relevantFiles.length !== 1 ? 's' : ''} for context analysis...`
-                : "Reading selected files...",
-            progress: 40
+            message: `Reading ${relevantFiles.length} selected file${relevantFiles.length !== 1 ? "s" : ""}...`,
+            progress: 40,
         };
 
         // Step 2: Fetch file content with token budget
+        let effectiveFileCachePolicy = fileCachePolicy;
+        if (fileCachePolicy?.audience === "anonymous") {
+            const consecutivePaths = await resolveAnonymousConsecutivePaths(
+                owner,
+                repo,
+                relevantFiles,
+                fileCachePolicy
+            );
+            effectiveFileCachePolicy = {
+                ...fileCachePolicy,
+                consecutivePaths,
+            };
+        }
+
         const fileResults = await fetchFiles(
             owner,
             repo,
-            relevantFiles.map((path) => ({ path }))
+            relevantFiles.map((path) => {
+                const sha = fileShas?.[path];
+                return sha ? { path, sha } : { path };
+            }),
+            effectiveFileCachePolicy
         );
 
-        let context = "";
-        let tokenTotal = 0;
+        const selectedFilesList = relevantFiles.length > 0
+            ? relevantFiles.map((path) => `- ${path}`).join("\n")
+            : "- (No specific files selected)";
+        const folderStructure = buildRepoFolderStructure(prunedPaths);
+
+        let context =
+            `\n--- REPOSITORY FOLDER STRUCTURE ---\n${folderStructure}\n` +
+            `\n--- SELECTED FILES ---\n${selectedFilesList}\n`;
+
+        let tokenTotal = countTokens(context);
 
         for (const { path, content } of fileResults) {
             if (!content) continue;
@@ -161,10 +257,14 @@ export async function* executeRepoQueryStream(
         // Step 3: Stream AI response
         yield {
             type: "status",
-            message: isThinking
-                ? "Process: Formulating a detailed response based on the code context..."
-                : "Thinking...",
-            progress: 70
+            message: "Preparing answer from selected context...",
+            progress: 70,
+        };
+
+        yield {
+            type: "status",
+            message: "Preparing answer...",
+            progress: 85,
         };
 
         const stream = streamAnswer(
@@ -214,8 +314,22 @@ export async function executeRepoQuery(
     // Attempt cache hit first
     const { analyzeFiles = analyzeFileSelection } = deps;
     const prunedPaths = pruneFilePaths(params.filePaths);
-    const selectedFiles = await analyzeFiles(params.query, prunedPaths, params.owner, params.repo, params.modelPreference, params.history);
-    const cached = await getCachedRepoQueryAnswer(params.owner, params.repo, params.query, selectedFiles);
+    const selectedFiles = await analyzeFiles(
+        params.query,
+        prunedPaths,
+        params.owner,
+        params.repo,
+        params.modelPreference,
+        params.history,
+        params.fileCachePolicy
+    );
+    const cached = await getCachedRepoQueryAnswer(
+        params.owner,
+        params.repo,
+        params.query,
+        selectedFiles,
+        params.fileCachePolicy
+    );
 
     if (cached) {
         console.log(`🧠 AI Response Cache Hit for ${params.owner}/${params.repo}: ${params.query}`);
@@ -234,7 +348,14 @@ export async function executeRepoQuery(
 
     // Save to cache after complete response
     if (answer) {
-        await cacheRepoQueryAnswer(params.owner, params.repo, params.query, relevantFiles, answer);
+        await cacheRepoQueryAnswer(
+            params.owner,
+            params.repo,
+            params.query,
+            relevantFiles,
+            answer,
+            params.fileCachePolicy
+        );
     }
 
     return { answer, relevantFiles };

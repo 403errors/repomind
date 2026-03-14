@@ -9,6 +9,8 @@ export interface ChatMessageBase {
     role: ChatRole;
     content: string;
     relevantFiles?: string[];
+    streamStatus?: string;
+    streamProgress?: number;
 }
 
 export interface ThinkingChatMessage extends ChatMessageBase {

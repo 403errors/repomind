@@ -1,6 +1,13 @@
-import { getGenAI, DEFAULT_MODEL, type ModelPreference } from "./ai-client";
+import {
+  getGenAI,
+  DEFAULT_MODEL,
+  FILE_SELECTOR_MODEL,
+  getChatModelForPreference,
+  type ModelPreference,
+} from "./ai-client";
 import { buildRepoMindPrompt, formatHistoryText } from "./prompt-builder";
 import { cacheQuerySelection, getCachedQuerySelection } from "./cache";
+import type { FileCachePolicy } from "./cache";
 import type { GitHubProfile } from "./github";
 import { getRecentCommitsForUser, getUserReposByAge } from "./github";
 import type { GenerationConfig } from "@google/generative-ai";
@@ -41,8 +48,11 @@ export async function analyzeFileSelection(
   owner?: string,
   repo?: string,
   modelPreference: ModelPreference = "flash",
-  history: { role: "user" | "model"; content: string }[] = []
+  history: { role: "user" | "model"; content: string }[] = [],
+  cachePolicy?: FileCachePolicy
 ): Promise<string[]> {
+  const maxSelectedFiles = modelPreference === "thinking" ? 50 : 25;
+
   // 1. SMART BYPASS: Triggered only when the user explicitly mentions an exact filename
   // Uses word-boundary matching to avoid false positives (e.g. "contributing" hitting CONTRIBUTING.md)
   const mentionedFiles = fileTree.filter((path) => {
@@ -59,17 +69,18 @@ export async function analyzeFileSelection(
     const additionalContext = fileTree.filter(
       (f) => commonFiles.includes(f) && !mentionedFiles.includes(f)
     );
-    const cap = modelPreference === "thinking" ? 30 : 20;
-    const result = [...mentionedFiles, ...additionalContext].slice(0, cap);
+    const result = [...mentionedFiles, ...additionalContext].slice(0, maxSelectedFiles);
     console.log(`⚡ Smart Bypass: Found ${mentionedFiles.length} mentioned files (+ ${result.length - mentionedFiles.length} contextual).`);
     return result;
   }
 
   // 2. QUERY CACHING: Check if we've answered this exact query for this repo before
   if (owner && repo) {
-    const cachedSelection = await getCachedQuerySelection(owner, repo, question);
+    const cachedSelection = await getCachedQuerySelection(owner, repo, question, cachePolicy);
     if (cachedSelection) {
-      return cachedSelection;
+      return cachedSelection
+        .filter((path) => fileTree.includes(path))
+        .slice(0, maxSelectedFiles);
     }
   }
 
@@ -79,7 +90,7 @@ export async function analyzeFileSelection(
   let candidates = fileTree;
   if (fileTree.length > 1000) {
     const cacheKey = `pruned:${owner}/${repo}:${question.toLowerCase().trim()}`;
-    const cachedPruned = await getCachedQuerySelection(owner ?? "", repo ?? "", cacheKey);
+      const cachedPruned = await getCachedQuerySelection(owner ?? "", repo ?? "", cacheKey, cachePolicy);
     if (cachedPruned) {
       console.log(`🌳 Pruning Cache Hit for ${owner}/${repo}`);
       candidates = cachedPruned;
@@ -87,7 +98,7 @@ export async function analyzeFileSelection(
       console.log(`🌳 Repo too large (${fileTree.length} files), performing hierarchical pruning...`);
       candidates = await pruneFileTreeHierarchically(question, fileTree);
       if (owner && repo) {
-        await cacheQuerySelection(owner, repo, cacheKey, candidates);
+        await cacheQuerySelection(owner, repo, cacheKey, candidates, cachePolicy);
       }
     }
   }
@@ -123,7 +134,7 @@ ${isDeepThinking ?
   try {
     // For large/complex selections, we use the reasoning model with low thinking to keep it fast
     const model = getGenAI().getGenerativeModel({
-      model: DEFAULT_MODEL,
+      model: FILE_SELECTOR_MODEL,
       generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", modelPreference === "thinking" ? "HIGH" : "LOW"),
     });
 
@@ -131,12 +142,15 @@ ${isDeepThinking ?
     const response = result.response.text();
     const parsed = asObject(extractJson(response));
     const selectedFiles = getStringArray(parsed.files);
+    const normalizedSelection = Array.from(new Set(selectedFiles))
+      .filter((path) => fileTree.includes(path))
+      .slice(0, maxSelectedFiles);
 
-    if (owner && repo && selectedFiles.length > 0) {
-      await cacheQuerySelection(owner, repo, question, selectedFiles);
+    if (owner && repo && normalizedSelection.length > 0) {
+      await cacheQuerySelection(owner, repo, question, normalizedSelection, cachePolicy);
     }
 
-    return selectedFiles;
+    return normalizedSelection;
   } catch (e) {
     console.error("Failed to parse file selection", e);
     // Fallback to basic files if the pruning/selection fails
@@ -178,7 +192,7 @@ async function pruneFileTreeHierarchically(question: string, fileTree: string[])
 
   try {
     const model = getGenAI().getGenerativeModel({
-      model: DEFAULT_MODEL,
+      model: FILE_SELECTOR_MODEL,
       generationConfig: getThinkingGenerationConfig(false, "MINIMAL"),
     });
 
@@ -254,7 +268,7 @@ export async function answerWithContext(
   }
 
   const model = getGenAI().getGenerativeModel({
-    model: DEFAULT_MODEL,
+    model: getChatModelForPreference(modelPreference),
     tools,
     generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", modelPreference === "thinking" ? "HIGH" : "LOW"),
   });
@@ -347,7 +361,7 @@ export async function* answerWithContextStream(
   }
 
   const model = getGenAI().getGenerativeModel({
-    model: DEFAULT_MODEL,
+    model: getChatModelForPreference(modelPreference),
     tools,
     generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", modelPreference === "thinking" ? "HIGH" : "LOW"),
   });

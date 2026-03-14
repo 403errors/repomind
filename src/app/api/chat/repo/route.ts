@@ -46,7 +46,13 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
-        const { query, repoDetails, filePaths, history, profileData, modelPreference } = body;
+        const { query, repoDetails, filePaths, fileShas, history, profileData, modelPreference } = body;
+        let normalizedFileShas: Record<string, string> | undefined;
+        if (fileShas && typeof fileShas === "object") {
+            const normalizedEntries: Array<[string, string]> = Object.entries(fileShas as Record<string, unknown>)
+                .flatMap(([path, sha]) => (typeof sha === "string" && sha.length > 0 ? [[path, sha]] : []));
+            normalizedFileShas = Object.fromEntries(normalizedEntries);
+        }
         const owner = typeof repoDetails?.owner === "string" ? repoDetails.owner : undefined;
         const repo = typeof repoDetails?.repo === "string" ? repoDetails.repo : undefined;
         const queryPreview = typeof query === "string" ? query.slice(0, 160) : undefined;
@@ -58,6 +64,9 @@ export async function POST(req: NextRequest) {
                         query,
                         repoDetails,
                         filePaths,
+                        normalizedFileShas,
+                        "authenticated",
+                        userId ?? undefined,
                         history,
                         profileData,
                         modelPreference
