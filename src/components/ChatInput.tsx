@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Send, Zap, Brain, ChevronDown } from "lucide-react";
+import { Send, Zap, Brain, ChevronDown, Network } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import type { ModelPreference } from "@/lib/ai-client";
@@ -16,6 +16,10 @@ interface ChatInputProps {
     modelPreference?: ModelPreference;
     setModelPreference?: (pref: ModelPreference) => void;
     onRequireAuth?: () => void;
+    showCrossRepoToggle?: boolean;
+    crossRepoEnabled?: boolean;
+    setCrossRepoEnabled?: (enabled: boolean) => void;
+    onRequireCrossRepoAuth?: () => void;
 }
 
 export function ChatInput({
@@ -28,7 +32,11 @@ export function ChatInput({
     allowEmptySubmit,
     modelPreference = "flash",
     setModelPreference,
-    onRequireAuth
+    onRequireAuth,
+    showCrossRepoToggle = false,
+    crossRepoEnabled = false,
+    setCrossRepoEnabled,
+    onRequireCrossRepoAuth,
 }: ChatInputProps) {
     const { data: session } = useSession();
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -108,6 +116,29 @@ export function ChatInput({
                 />
 
                 <div className="flex items-center gap-1.5 pb-1 pr-2" ref={dropdownRef}>
+                    {showCrossRepoToggle && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (!crossRepoEnabled && !session) {
+                                    onRequireCrossRepoAuth?.();
+                                    return;
+                                }
+                                setCrossRepoEnabled?.(!crossRepoEnabled);
+                            }}
+                            className={cn(
+                                "flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold border transition-all",
+                                crossRepoEnabled
+                                    ? "bg-blue-900/20 border-blue-500/30 text-blue-300 hover:bg-blue-900/30"
+                                    : "bg-zinc-800/50 border-white/5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300",
+                                disabled && "opacity-50 cursor-not-allowed"
+                            )}
+                            title="Enable cross-repo context"
+                        >
+                            <Network className="w-3 h-3" />
+                            <span className="uppercase tracking-wider hidden xs:inline">Cross-Repo</span>
+                        </button>
+                    )}
                     <div className="relative">
                         <button
                             type="button"

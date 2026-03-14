@@ -18,10 +18,27 @@ describe("mapProfileStreamChunk", () => {
         });
     });
 
+    it("maps TOOL chunks to tool updates", () => {
+        expect(mapProfileStreamChunk("TOOL:{\"name\":\"fetch_recent_commits\",\"detail\":\"overall\",\"usageUnits\":1}")).toEqual({
+            type: "tool",
+            name: "fetch_recent_commits",
+            detail: "overall",
+            usageUnits: 1,
+        });
+    });
+
     it("maps non-prefixed chunks to content updates", () => {
         expect(mapProfileStreamChunk("Final answer chunk")).toEqual({
             type: "content",
             text: "Final answer chunk",
+            append: true,
+        });
+    });
+
+    it("falls back to content when TOOL payload is malformed", () => {
+        expect(mapProfileStreamChunk("TOOL:{not-json}")).toEqual({
+            type: "content",
+            text: "TOOL:{not-json}",
             append: true,
         });
     });

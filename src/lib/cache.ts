@@ -12,15 +12,19 @@ const TTL_FILE = 3600; // 1 hour
 const TTL_FILE_ANON = 1800; // 30 minutes
 const TTL_REPO = 900; // 15 minutes
 const TTL_PROFILE = 1800; // 30 minutes
+const TTL_COMMIT_SNAPSHOT = 900; // 15 minutes
 const TTL_SCAN = 604800; // 7 days
 const TTL_REPO_UNAVAILABLE = 1800; // 30 minutes
 const TTL_BUDGET_WINDOW = 86400; // 24 hours
 const FILE_CACHE_MAX_ANON_BYTES = 10 * 1024 * 1024; // 10MB/day
 const FILE_CACHE_MAX_AUTH_BYTES = 20 * 1024 * 1024; // 20MB/day
 const ANON_MAX_CACHEABLE_FILE_BYTES = 128 * 1024; // 128KB
+const TOOL_BUDGET_MAX_ANON = 10;
+const TOOL_BUDGET_MAX_AUTH = 30;
 
 export type CacheAudience = "anonymous" | "authenticated";
 export type RepoVisibility = "public" | "private";
+export type ToolBudgetScope = "profile" | "repo";
 
 export interface FileCachePolicy {
     audience: CacheAudience;
@@ -34,6 +38,11 @@ interface RepoFullContextCachePayload {
     languages: unknown;
     commits: unknown;
     readme: string | null;
+}
+
+interface CommitSnapshotCachePayload<T> {
+    data: T;
+    fetchedAt: number;
 }
 
 // Helper to handle KV errors gracefully
@@ -94,6 +103,23 @@ function getAnonConsecutiveNamespace(owner: string, repo: string, policy?: FileC
     return `public:${actor}:${owner}/${repo}`;
 }
 
+function getToolBudgetKey(scope: ToolBudgetScope, audience: CacheAudience, actorId?: string): string {
+    const actor = actorId?.trim() || "unknown";
+    return `tool_budget:${scope}:${audience}:${actor}`;
+}
+
+function getToolBudgetLimit(audience: CacheAudience): number {
+    return audience === "anonymous" ? TOOL_BUDGET_MAX_ANON : TOOL_BUDGET_MAX_AUTH;
+}
+
+function getProfileCommitSnapshotKey(username: string): string {
+    return `commit_snapshot:profile:${username.toLowerCase()}`;
+}
+
+function getRepoCommitSnapshotKey(owner: string, repo: string): string {
+    return `commit_snapshot:repo:${owner.toLowerCase()}/${repo.toLowerCase()}`;
+}
+
 export async function resolveAnonymousConsecutivePaths(
     owner: string,
     repo: string,
@@ -134,6 +160,99 @@ export async function resolveAnonymousConsecutivePaths(
     );
 
     return consecutive;
+}
+
+export async function getToolBudgetUsage(
+    scope: ToolBudgetScope,
+    audience: CacheAudience,
+    actorId?: string
+): Promise<{ used: number; limit: number; remaining: number }> {
+    const key = getToolBudgetKey(scope, audience, actorId);
+    const usedRaw = await safeKvOperation(() => kv.get<number>(key));
+    const used = typeof usedRaw === "number" ? usedRaw : 0;
+    const limit = getToolBudgetLimit(audience);
+    const remaining = Math.max(0, limit - used);
+    return { used, limit, remaining };
+}
+
+export async function consumeToolBudgetUsage(
+    scope: ToolBudgetScope,
+    audience: CacheAudience,
+    actorId: string | undefined,
+    units: number = 1
+): Promise<{ used: number; limit: number; remaining: number }> {
+    const key = getToolBudgetKey(scope, audience, actorId);
+    const normalizedUnits = Math.max(0, Math.floor(units));
+    if (normalizedUnits === 0) {
+        return getToolBudgetUsage(scope, audience, actorId);
+    }
+
+    const nextRaw = await safeKvOperation(() => kv.incrby(key, normalizedUnits));
+    const next = typeof nextRaw === "number" ? nextRaw : normalizedUnits;
+    if (next === normalizedUnits) {
+        await safeKvOperation(() => kv.expire(key, TTL_BUDGET_WINDOW));
+    }
+
+    const limit = getToolBudgetLimit(audience);
+    return {
+        used: next,
+        limit,
+        remaining: Math.max(0, limit - next),
+    };
+}
+
+export async function getCachedProfileCommitSnapshot<T>(
+    username: string
+): Promise<CommitSnapshotCachePayload<T> | null> {
+    const key = getProfileCommitSnapshotKey(username);
+    const cached = await safeKvOperation(() => kv.get<CommitSnapshotCachePayload<T>>(key));
+    if (!cached || typeof cached !== "object") {
+        return null;
+    }
+    if (typeof cached.fetchedAt !== "number") {
+        return null;
+    }
+    return cached;
+}
+
+export async function cacheProfileCommitSnapshot<T>(
+    username: string,
+    data: T
+): Promise<void> {
+    const key = getProfileCommitSnapshotKey(username);
+    const payload: CommitSnapshotCachePayload<T> = {
+        data,
+        fetchedAt: Date.now(),
+    };
+    await safeKvOperation(() => kv.setex(key, TTL_COMMIT_SNAPSHOT, payload));
+}
+
+export async function getCachedRepoCommitSnapshot<T>(
+    owner: string,
+    repo: string
+): Promise<CommitSnapshotCachePayload<T> | null> {
+    const key = getRepoCommitSnapshotKey(owner, repo);
+    const cached = await safeKvOperation(() => kv.get<CommitSnapshotCachePayload<T>>(key));
+    if (!cached || typeof cached !== "object") {
+        return null;
+    }
+    if (typeof cached.fetchedAt !== "number") {
+        return null;
+    }
+    return cached;
+}
+
+export async function cacheRepoCommitSnapshot<T>(
+    owner: string,
+    repo: string,
+    data: T
+): Promise<void> {
+    const key = getRepoCommitSnapshotKey(owner, repo);
+    const payload: CommitSnapshotCachePayload<T> = {
+        data,
+        fetchedAt: Date.now(),
+    };
+    await safeKvOperation(() => kv.setex(key, TTL_COMMIT_SNAPSHOT, payload));
 }
 
 async function isWithinFileCacheBudget(estimatedBytes: number, policy?: FileCachePolicy): Promise<boolean> {

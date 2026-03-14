@@ -8,6 +8,7 @@ interface ParsedChunk {
 
 const STREAM_UPDATE_TYPES = new Set([
     "status",
+    "tool",
     "thought",
     "content",
     "files",

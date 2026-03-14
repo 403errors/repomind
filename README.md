@@ -163,6 +163,61 @@ Repo chat now uses separate models for file selection and answer generation:
 - `GEMINI_LITE_MODEL` (default: `gemini-3.1-flash-lite-preview`)
 - `GEMINI_THINKING_MODEL` (default: `gemini-3-flash-preview`)
 
+### Realtime Chat Feedback
+
+Both repo chat and profile chat stream backend activity as live text status updates (no progress bar), including:
+
+- Selecting files
+- Reading repository context
+- Preparing answer
+- Tool activity (for example: fetching commits, fetching repos by age, Google search usage)
+
+### Repo Chat Commit Tooling
+
+- `fetch_recent_commits` is available in **both Lite and Thinking** modes.
+- When commit context is needed, repo chat fetches up to **latest 10 commits** for the current repository.
+- Assistant messages can include:
+  - `Commits checked: just now` or `cached N min ago`
+  - `Tools used: ...`
+
+### Profile Chat Tooling
+
+- Profile chat supports anonymous and logged-in usage.
+- Profile context preloads **latest 20 commits across repos**, cached for **15 minutes**.
+- If a repo is explicitly asked for, tooling can fetch **latest 10 commits for that repo**.
+- `fetch_repos_by_age` supports:
+  - `oldest` (10 repos)
+  - `newest` (10 repos)
+  - `journey` (up to 20 repos, evenly spaced over repo age timeline)
+- Cross-repo context is available via a chat-input toggle for logged-in users.
+
+### Auth Tiers, Limits, and Budgets
+
+- Anonymous users:
+  - Can use Lite mode in repo/profile chat
+  - Cannot use Thinking mode
+  - Cannot enable cross-repo profile context
+  - Tool budget: **10/day per scope** (`repo`, `profile`)
+  - File-cache write budget: **10MB/day**
+  - File cache TTL: **30 minutes**
+  - Max cacheable file size: **128KB**, except files used in two consecutive anonymous queries (can be cached up to 2MB)
+- Logged-in users:
+  - Can use Lite + Thinking
+  - Can enable cross-repo profile context
+  - Tool budget: **30/day per scope** (`repo`, `profile`)
+  - File-cache write budget: **20MB/day**
+  - File cache TTL: **1 hour**
+
+When anonymous usage limits are exceeded, UI prompts login with context-specific benefits.  
+When authenticated usage limits are exceeded, chat returns a contact message for extended limits.
+
+### Cache Isolation Rules
+
+- Public repo file cache is shared by repository namespace.
+- Private repo file cache is actor-scoped (non-shared).
+- Query-to-selected-files cache TTL: **24h**
+- Query answer cache TTL: **24h**
+
 ### Developer Commands
 
 ```bash

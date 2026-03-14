@@ -6,11 +6,21 @@ import type { ChatMessageBase } from "@/lib/chat-types";
 
 export type StreamUpdate =
     | { type: "status"; message: string; progress: number }
+    | { type: "tool"; name: string; detail?: string; usageUnits?: number }
     | { type: "thought"; text: string }
     | { type: "content"; text: string; append: boolean }
     | { type: "files"; files: string[] }
-    | { type: "complete"; relevantFiles: string[] }
-    | { type: "error"; message: string };
+    | {
+        type: "complete";
+        relevantFiles: string[];
+        metadata?: {
+            commitFreshnessLabel?: string;
+            toolsUsed?: string[];
+            processingSummary?: string[];
+            sourceScope?: string;
+        };
+    }
+    | { type: "error"; message: string; code?: string };
 
 export type StreamingMessage = ChatMessageBase;
 

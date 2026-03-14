@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateAnswerStream } from "@/app/actions";
 import { trackAuthenticatedQueryEvent, trackEvent } from "@/lib/analytics";
 import { auth } from "@/lib/auth";
+import { consumeToolBudgetUsage, getToolBudgetUsage, type CacheAudience } from "@/lib/cache";
+import { getAnonymousActorId } from "@/lib/actor-id";
 import { getInvalidSessionApiError, getSessionAuthState, getSessionUserId } from "@/lib/session-guard";
 import type { StreamUpdate } from "@/lib/streaming-types";
 
@@ -9,32 +11,58 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return error instanceof Error ? error.message : fallback;
 }
 
-async function requireAuthenticatedUser() {
-    const session = await auth();
-    const authState = getSessionAuthState(session);
-
-    if (authState === "unauthenticated") {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if (authState === "invalid") {
-        return NextResponse.json(getInvalidSessionApiError(), { status: 401 });
-    }
-    if (!getSessionUserId(session)) {
-        return NextResponse.json(getInvalidSessionApiError(), { status: 401 });
-    }
-
-    return session;
+function getErrorCode(error: unknown): string | undefined {
+    if (!error || typeof error !== "object") return undefined;
+    const maybeCode = (error as { code?: unknown }).code;
+    return typeof maybeCode === "string" ? maybeCode : undefined;
 }
 
 export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     try {
-        const session = await requireAuthenticatedUser();
-        if (session instanceof NextResponse) {
-            return session;
+        const session = await auth();
+        const authState = getSessionAuthState(session);
+        if (authState === "invalid") {
+            return NextResponse.json(getInvalidSessionApiError(), { status: 401 });
         }
 
         const userId = getSessionUserId(session);
+        const audience: CacheAudience = userId ? "authenticated" : "anonymous";
+        const actorId = userId ?? getAnonymousActorId(req.headers);
+
+        const body = await req.json();
+        const { query, repoDetails, filePaths, fileShas, history, profileData, modelPreference } = body;
+
+        if (modelPreference === "thinking" && !userId) {
+            return NextResponse.json(
+                {
+                    error: "Login required for Thinking mode.",
+                    code: "LOGIN_REQUIRED_THINKING_MODE",
+                },
+                { status: 401 }
+            );
+        }
+
+        const usage = await getToolBudgetUsage("repo", audience, actorId);
+        if (usage.remaining <= 0) {
+            if (audience === "anonymous") {
+                return NextResponse.json(
+                    {
+                        error: "Anonymous tool usage limit reached for repo chat.",
+                        code: "ANON_USAGE_LIMIT_EXCEEDED",
+                    },
+                    { status: 429 }
+                );
+            }
+            return NextResponse.json(
+                {
+                    error: "Repo chat usage limit reached. Please contact pieisnot22by7@gmail.com.",
+                    code: "AUTH_USAGE_LIMIT_EXCEEDED",
+                },
+                { status: 429 }
+            );
+        }
+
         if (userId) {
             const userAgent = req.headers.get("user-agent") ?? "";
             const country = req.headers.get("x-vercel-ip-country") ?? "Unknown";
@@ -45,8 +73,6 @@ export async function POST(req: NextRequest) {
             ]);
         }
 
-        const body = await req.json();
-        const { query, repoDetails, filePaths, fileShas, history, profileData, modelPreference } = body;
         let normalizedFileShas: Record<string, string> | undefined;
         if (fileShas && typeof fileShas === "object") {
             const normalizedEntries: Array<[string, string]> = Object.entries(fileShas as Record<string, unknown>)
@@ -60,22 +86,29 @@ export async function POST(req: NextRequest) {
         const stream = new ReadableStream({
             async start(controller) {
                 try {
+                    let toolUnitsConsumed = 0;
                     const generator = generateAnswerStream(
                         query,
                         repoDetails,
                         filePaths,
                         normalizedFileShas,
-                        "authenticated",
-                        userId ?? undefined,
+                        audience,
+                        actorId,
                         history,
                         profileData,
                         modelPreference
                     );
 
                     for await (const chunk of generator) {
+                        if (chunk.type === "tool") {
+                            toolUnitsConsumed += Math.max(1, chunk.usageUnits ?? 1);
+                        }
                         // Serialize chunk to JSON and add newline for framing
                         const data = JSON.stringify(chunk) + "\n";
                         controller.enqueue(encoder.encode(data));
+                    }
+                    if (toolUnitsConsumed > 0) {
+                        await consumeToolBudgetUsage("repo", audience, actorId, toolUnitsConsumed);
                     }
                     controller.close();
                 } catch (error: unknown) {
@@ -88,6 +121,7 @@ export async function POST(req: NextRequest) {
                     const errorObj: StreamUpdate = {
                         type: "error",
                         message: getErrorMessage(error, "An error occurred during streaming."),
+                        code: getErrorCode(error),
                     };
                     controller.enqueue(encoder.encode(JSON.stringify(errorObj) + "\n"));
                     controller.close();

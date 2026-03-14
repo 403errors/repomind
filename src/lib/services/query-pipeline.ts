@@ -11,7 +11,7 @@
  * implementations without mocking the environment or real API calls.
  */
 import { analyzeFileSelection, answerWithContextStream } from "@/lib/gemini";
-import { getFileContentBatch } from "@/lib/github";
+import { getFileContentBatch, getFileContentBatchWithStats, type FileBatchFetchStats } from "@/lib/github";
 import { countTokens, MAX_TOKENS } from "@/lib/tokens";
 import {
     getCachedRepoQueryAnswer,
@@ -62,6 +62,13 @@ export interface QueryPipelineDeps {
         files: Array<{ path: string; sha?: string }>,
         fileCachePolicy?: FileCachePolicy
     ) => Promise<Array<{ path: string; content: string | null }>>;
+
+    fetchFilesWithStats?: (
+        owner: string,
+        repo: string,
+        files: Array<{ path: string; sha?: string }>,
+        fileCachePolicy?: FileCachePolicy
+    ) => Promise<{ files: Array<{ path: string; content: string | null }>; stats: FileBatchFetchStats }>;
 
     /** Streams AI response — defaults to Gemini */
     streamAnswer?: (
@@ -164,12 +171,19 @@ export async function* executeRepoQueryStream(
     const {
         analyzeFiles = analyzeFileSelection,
         fetchFiles = (owner, repo, files, fileCachePolicy) => getFileContentBatch(owner, repo, files, fileCachePolicy),
+        fetchFilesWithStats,
         streamAnswer = answerWithContextStream,
     } = deps;
 
     const { query, owner, repo, filePaths, fileShas, fileCachePolicy, history = [], profileData, modelPreference } = params;
 
     try {
+        const pipelineStartMs = Date.now();
+        let selectionMs = 0;
+        let fileFetchMs = 0;
+        let contextBuildMs = 0;
+        let answerMs = 0;
+
         // Step 0: Short-circuit check
         // Check if we have ANY recent answer for this exact query in this repo.
         // This bypasses file selection, fetching, and AI generation entirely (0.1s hit).
@@ -194,7 +208,15 @@ export async function* executeRepoQueryStream(
         };
 
         const prunedPaths = pruneFilePaths(filePaths);
+        const selectionStartMs = Date.now();
         const relevantFiles = await analyzeFiles(query, prunedPaths, owner, repo, modelPreference, history, fileCachePolicy);
+        selectionMs = Date.now() - selectionStartMs;
+
+        yield {
+            type: "status",
+            message: `Selection complete: ${filePaths.length.toLocaleString()} paths -> ${prunedPaths.length.toLocaleString()} candidates -> ${relevantFiles.length} selected.`,
+            progress: 28,
+        };
 
         yield { type: "files", files: relevantFiles };
         yield {
@@ -218,36 +240,66 @@ export async function* executeRepoQueryStream(
             };
         }
 
-        const fileResults = await fetchFiles(
-            owner,
-            repo,
-            relevantFiles.map((path) => {
-                const sha = fileShas?.[path];
-                return sha ? { path, sha } : { path };
-            }),
-            effectiveFileCachePolicy
-        );
+        const fileTargets = relevantFiles.map((path) => {
+            const sha = fileShas?.[path];
+            return sha ? { path, sha } : { path };
+        });
+        const fetchStartMs = Date.now();
+        let fileResults: Array<{ path: string; content: string | null }> = [];
+        let fetchStats: FileBatchFetchStats | null = null;
+        if (fetchFilesWithStats) {
+            const fetched = await fetchFilesWithStats(owner, repo, fileTargets, effectiveFileCachePolicy);
+            fileResults = fetched.files;
+            fetchStats = fetched.stats;
+        } else if (!deps.fetchFiles) {
+            const fetched = await getFileContentBatchWithStats(owner, repo, fileTargets, effectiveFileCachePolicy);
+            fileResults = fetched.files;
+            fetchStats = fetched.stats;
+        } else {
+            fileResults = await fetchFiles(owner, repo, fileTargets, effectiveFileCachePolicy);
+        }
+        fileFetchMs = Date.now() - fetchStartMs;
+
+        if (fetchStats) {
+            yield {
+                type: "status",
+                message: `Cache hit ${fetchStats.cacheHits}/${fetchStats.requested}; fetched ${fetchStats.fetchedFromGitHub} from GitHub${fetchStats.failed > 0 ? ` (${fetchStats.failed} unavailable)` : ""}.`,
+                progress: 55,
+            };
+        }
 
         const selectedFilesList = relevantFiles.length > 0
             ? relevantFiles.map((path) => `- ${path}`).join("\n")
             : "- (No specific files selected)";
         const folderStructure = buildRepoFolderStructure(prunedPaths);
 
+        const contextBuildStartMs = Date.now();
         let context =
             `\n--- REPOSITORY FOLDER STRUCTURE ---\n${folderStructure}\n` +
             `\n--- SELECTED FILES ---\n${selectedFilesList}\n`;
 
         let tokenTotal = countTokens(context);
+        let contextTruncated = false;
 
         for (const { path, content } of fileResults) {
             if (!content) continue;
             const tokens = countTokens(content);
             if (tokenTotal + tokens > MAX_TOKENS) {
                 context += `\n--- NOTE: Context truncated at ${MAX_TOKENS.toLocaleString()} token limit ---\n`;
+                contextTruncated = true;
                 break;
             }
             context += `\n--- FILE: ${path} ---\n${content}\n`;
             tokenTotal += tokens;
+        }
+        contextBuildMs = Date.now() - contextBuildStartMs;
+
+        if (contextTruncated) {
+            yield {
+                type: "status",
+                message: `Context token budget reached (${MAX_TOKENS.toLocaleString()}); using highest-priority files only...`,
+                progress: 65,
+            };
         }
 
         if (!context) {
@@ -275,16 +327,75 @@ export async function* executeRepoQueryStream(
             history,
             modelPreference
         );
+        const toolsUsed = new Set<string>();
+        let commitFreshnessLabel: string | undefined;
+        const answerStartMs = Date.now();
 
         for await (const chunk of stream) {
             if (chunk.startsWith("THOUGHT:")) {
                 yield { type: "thought", text: chunk.replace("THOUGHT:", "") };
+            } else if (chunk.startsWith("STATUS:")) {
+                yield {
+                    type: "status",
+                    message: chunk.replace("STATUS:", "").trim(),
+                    progress: 85,
+                };
+            } else if (chunk.startsWith("TOOL:")) {
+                try {
+                    const parsed = JSON.parse(chunk.replace("TOOL:", "").trim()) as {
+                        name?: unknown;
+                        detail?: unknown;
+                        usageUnits?: unknown;
+                    };
+                    if (typeof parsed.name === "string") {
+                        toolsUsed.add(parsed.name);
+                        yield {
+                            type: "tool",
+                            name: parsed.name,
+                            detail: typeof parsed.detail === "string" ? parsed.detail : undefined,
+                            usageUnits: typeof parsed.usageUnits === "number" ? parsed.usageUnits : undefined,
+                        };
+                    }
+                } catch {
+                    // Ignore malformed TOOL payloads.
+                }
+            } else if (chunk.startsWith("META:")) {
+                try {
+                    const parsed = JSON.parse(chunk.replace("META:", "").trim()) as {
+                        commitFreshnessLabel?: unknown;
+                    };
+                    if (typeof parsed.commitFreshnessLabel === "string" && parsed.commitFreshnessLabel.trim().length > 0) {
+                        commitFreshnessLabel = parsed.commitFreshnessLabel;
+                    }
+                } catch {
+                    // Ignore malformed META payloads.
+                }
             } else {
                 yield { type: "content", text: chunk, append: true };
             }
         }
+        answerMs = Date.now() - answerStartMs;
+        const sourceScope = toolsUsed.has("googleSearch")
+            ? (toolsUsed.has("fetch_recent_commits") ? "Repository + commits + web snapshot" : "Repository + web snapshot")
+            : (toolsUsed.has("fetch_recent_commits") ? "Repository + commits" : "Repository only");
+        const processingSummary = [
+            `Selection: ${selectionMs}ms`,
+            `File fetch: ${fileFetchMs}ms`,
+            `Context build: ${contextBuildMs}ms`,
+            `Answer generation: ${answerMs}ms`,
+            `Total: ${Date.now() - pipelineStartMs}ms`,
+        ];
 
-        yield { type: "complete", relevantFiles };
+        yield {
+            type: "complete",
+            relevantFiles,
+            metadata: {
+                commitFreshnessLabel,
+                toolsUsed: toolsUsed.size > 0 ? Array.from(toolsUsed) : undefined,
+                processingSummary,
+                sourceScope,
+            },
+        };
     } catch (error: unknown) {
         console.error("Query pipeline error:", {
             owner,

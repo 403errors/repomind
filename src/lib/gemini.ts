@@ -9,16 +9,25 @@ import { buildRepoMindPrompt, formatHistoryText } from "./prompt-builder";
 import { cacheQuerySelection, getCachedQuerySelection } from "./cache";
 import type { FileCachePolicy } from "./cache";
 import type { GitHubProfile } from "./github";
-import { getRecentCommitsForUser, getUserReposByAge } from "./github";
+import {
+  getRecentProfileCommitsSnapshot,
+  getRecentRepoCommitsSnapshot,
+  getUserRepos,
+  getUserReposByAge,
+} from "./github";
 import type { GenerationConfig } from "@google/generative-ai";
 
 type JsonObject = Record<string, unknown>;
 type GeminiTool = Record<string, unknown>;
 type ChunkPart = { text?: string; thought?: boolean };
+type FunctionCallShape = { name?: string; args?: unknown };
 type StreamChunkShape = {
   candidates?: Array<{
     content?: {
       parts?: ChunkPart[];
+    };
+    groundingMetadata?: {
+      webSearchQueries?: string[];
     };
   }>;
 };
@@ -38,6 +47,38 @@ function getThinkingGenerationConfig(includeThoughts: boolean, thinkingLevel: "H
       thinking_level: thinkingLevel,
     },
   } as unknown as GenerationConfig;
+}
+
+const WEB_SEARCH_TRIGGER_PATTERN =
+  /(latest|most recent|today|news|competitor|competitors|trending|trend|announcement|release|changelog|cve|advisory|linkedin\.com|https?:\/\/)/i;
+
+function shouldUseWebSearch(question: string): boolean {
+  return WEB_SEARCH_TRIGGER_PATTERN.test(question);
+}
+
+async function fetchWebSearchSnapshot(
+  question: string,
+  modelPreference: ModelPreference
+): Promise<{ summary: string; queryHint: string }> {
+  const searchModel = getGenAI().getGenerativeModel({
+    model: getChatModelForPreference(modelPreference),
+    tools: [{ googleSearch: {} }],
+    generationConfig: getThinkingGenerationConfig(false, "LOW"),
+  });
+
+  const result = await searchModel.generateContent(
+    [
+      "Search the web for the user's question and produce a concise snapshot.",
+      "Return 4-8 bullets with specific facts and source links where possible.",
+      "Prefer recent updates and include dates when available.",
+      "If nothing useful is found, return exactly: No useful external updates found.",
+      `Question: ${question}`,
+    ].join("\n")
+  );
+
+  const summary = result.response.text().trim();
+  const queryHint = question.length > 120 ? `${question.slice(0, 117)}...` : question;
+  return { summary, queryHint };
 }
 
 // ─── File Selection ────────────────────────────────────────────────────────────
@@ -222,50 +263,36 @@ export async function answerWithContext(
   question: string,
   context: string,
   repoDetails: { owner: string; repo: string },
-  profileData?: GitHubProfile,
+  _profileData?: GitHubProfile,
   history: { role: "user" | "model"; content: string }[] = [],
   modelPreference: ModelPreference = "flash"
 ): Promise<string> {
   const historyText = formatHistoryText(history);
-  let prompt = buildRepoMindPrompt({ question, context, repoDetails, historyText });
-
-  if (modelPreference === "thinking" && repoDetails.repo === "profile") {
-    prompt += `\n\n[DEEP THINKING MODE]: You are analyzing a developer's profile. You have access to tools to fetch their recent commits or older repositories.
-    - If the user asks about coding style, habits, or real-world activity, use the \`fetch_recent_commits\` tool.
-    - If the user asks about the evolution of their tech stack over time, use the \`fetch_repos_by_age\` tool.
-    - Only use tools if the answer requires data not available in the provided context.`;
+  let enrichedContext = context;
+  if (shouldUseWebSearch(question)) {
+    try {
+      const snapshot = await fetchWebSearchSnapshot(question, modelPreference);
+      if (snapshot.summary && snapshot.summary !== "No useful external updates found.") {
+        enrichedContext += `\n--- WEB SEARCH SNAPSHOT ---\n${snapshot.summary}\n`;
+      }
+    } catch (error) {
+      console.warn("Web search snapshot failed (non-fatal):", error);
+    }
   }
 
-  const tools: GeminiTool[] = [];
-
-  if (modelPreference === "thinking" && repoDetails.repo === "profile" && profileData) {
-    tools.push({
-      functionDeclarations: [
-        {
-          name: "fetch_recent_commits",
-          description: "Fetch recent commits authored by the user to analyze coding style and real-world activity.",
-          parameters: {
-            type: "OBJECT",
-            properties: {
-              dummy: { type: "STRING", description: "Ignore this parameter" }
-            }
-          }
-        },
-        {
-          name: "fetch_repos_by_age",
-          description: "Fetch older repositories to analyze the evolution of their tech stack over time.",
-          parameters: {
-            type: "OBJECT",
-            properties: {
-              dummy: { type: "STRING", description: "Ignore this parameter" }
-            }
-          }
-        }
-      ]
-    });
+  let prompt = buildRepoMindPrompt({ question, context: enrichedContext, repoDetails, historyText });
+  const isProfileContext = repoDetails.repo === "profile";
+  if (isProfileContext) {
+    prompt += `\n\n[PROFILE TOOLS MODE]: You may use profile tools for both Lite and Thinking modes.
+    - Use \`fetch_recent_commits\` when the user asks about coding activity, commit quality, or recent work.
+    - Use \`fetch_repos_by_age\` when the user asks about oldest/newest repos or long-term journey.
+    - Prefer existing context first; call tools only when additional data is needed.`;
   } else {
-    tools.push({ googleSearch: {} });
+    prompt += `\n\n[REPO TOOLS MODE]: You may use \`fetch_recent_commits\` when commit history is needed for this repository.
+    - Use it only when the user asks for recency, evolution, blame-like activity, or commit intent.`;
   }
+
+  const tools = buildTools(repoDetails);
 
   const model = getGenAI().getGenerativeModel({
     model: getChatModelForPreference(modelPreference),
@@ -279,26 +306,12 @@ export async function answerWithContext(
   // Handle function calls if any
   const funcs = result.response.functionCalls?.();
   if (funcs && funcs.length > 0) {
-    const call = funcs[0];
-    let functionResponseData = {};
-
-    if (call.name === "fetch_recent_commits") {
-      // We do not have repository names directly in profileData, so fetch current repos first.
-      functionResponseData = { error: "This tool needs a list of repository names to fetch commits from. Please rely on the provided context or ask the user to provide specific repository names." };
-
-      // Let's implement a simplified fetcher that gets repos directly since we have the username
-      const { getUserRepos } = await import("./github");
-      const repos = await getUserRepos(repoDetails.owner);
-      const commits = await getRecentCommitsForUser(repoDetails.owner, repos.map(r => r.name), 30);
-      functionResponseData = { commits };
-    } else if (call.name === "fetch_repos_by_age") {
-      const oldestRepos = await getUserReposByAge(repoDetails.owner, 'oldest', 10);
-      functionResponseData = { oldestRepos };
-    }
+    const call = funcs[0] as FunctionCallShape;
+    const { functionResponseData } = await resolveToolCall(call, repoDetails);
 
     result = await chat.sendMessage([{
       functionResponse: {
-        name: call.name,
+        name: typeof call.name === "string" ? call.name : "unknown_tool",
         response: functionResponseData
       }
     }]);
@@ -315,50 +328,45 @@ export async function* answerWithContextStream(
   question: string,
   context: string,
   repoDetails: { owner: string; repo: string },
-  profileData?: GitHubProfile,
+  _profileData?: GitHubProfile,
   history: { role: "user" | "model"; content: string }[] = [],
   modelPreference: ModelPreference = "flash"
 ): AsyncGenerator<string> {
   const historyText = formatHistoryText(history);
-  let prompt = buildRepoMindPrompt({ question, context, repoDetails, historyText });
-
-  if (modelPreference === "thinking" && repoDetails.repo === "profile") {
-    prompt += `\n\n[DEEP THINKING MODE]: You are analyzing a developer's profile. You have access to tools to fetch their recent commits or older repositories.
-    - If the user asks about coding style, habits, or real-world activity, use the \`fetch_recent_commits\` tool.
-    - If the user asks about the evolution of their tech stack over time, use the \`fetch_repos_by_age\` tool.
-    - Only use tools if the answer requires data not available in the provided context.`;
+  let enrichedContext = context;
+  if (shouldUseWebSearch(question)) {
+    try {
+      yield "STATUS:Searching Google for external context...";
+      const snapshot = await fetchWebSearchSnapshot(question, modelPreference);
+      if (snapshot.summary && snapshot.summary !== "No useful external updates found.") {
+        enrichedContext += `\n--- WEB SEARCH SNAPSHOT ---\n${snapshot.summary}\n`;
+        yield `TOOL:${JSON.stringify({
+          name: "googleSearch",
+          detail: snapshot.queryHint,
+          usageUnits: 1,
+        })}`;
+        yield "STATUS:External context added. Preparing answer...";
+      } else {
+        yield "STATUS:No useful external updates found. Preparing answer...";
+      }
+    } catch (error) {
+      console.warn("Web search snapshot failed (non-fatal):", error);
+      yield "STATUS:Web search unavailable. Continuing with repository context...";
+    }
   }
 
-  const tools: GeminiTool[] = [];
-
-  if (modelPreference === "thinking" && repoDetails.repo === "profile" && profileData) {
-    tools.push({
-      functionDeclarations: [
-        {
-          name: "fetch_recent_commits",
-          description: "Fetch recent commits authored by the user to analyze coding style and real-world activity.",
-          parameters: {
-            type: "OBJECT",
-            properties: {
-              dummy: { type: "STRING", description: "Ignore this parameter" }
-            }
-          }
-        },
-        {
-          name: "fetch_repos_by_age",
-          description: "Fetch older repositories to analyze the evolution of their tech stack over time.",
-          parameters: {
-            type: "OBJECT",
-            properties: {
-              dummy: { type: "STRING", description: "Ignore this parameter" }
-            }
-          }
-        }
-      ]
-    });
+  let prompt = buildRepoMindPrompt({ question, context: enrichedContext, repoDetails, historyText });
+  const isProfileContext = repoDetails.repo === "profile";
+  if (isProfileContext) {
+    prompt += `\n\n[PROFILE TOOLS MODE]: You may use profile tools for both Lite and Thinking modes.
+    - Use \`fetch_recent_commits\` for coding activity/recency questions.
+    - Use \`fetch_repos_by_age\` for oldest/newest/journey timeline questions.
+    - Only use tools when context is insufficient.`;
   } else {
-    tools.push({ googleSearch: {} });
+    prompt += `\n\n[REPO TOOLS MODE]: Use \`fetch_recent_commits\` when commit history is needed for this repository.`;
   }
+
+  const tools = buildTools(repoDetails);
 
   const model = getGenAI().getGenerativeModel({
     model: getChatModelForPreference(modelPreference),
@@ -374,27 +382,30 @@ export async function* answerWithContextStream(
   const functionCalls = firstResponse.functionCalls?.();
 
   if (functionCalls && functionCalls.length > 0) {
-    const call = functionCalls[0];
-    let functionResponseData: Record<string, unknown> = {};
+    const call = functionCalls[0] as FunctionCallShape;
+    const {
+      functionResponseData,
+      statusMessage,
+      toolEvent,
+      commitFreshnessLabel,
+    } = await resolveToolCall(call, repoDetails);
 
-    if (call.name === "fetch_recent_commits") {
-      yield "STATUS:Analyzing recent commits for habits & style...";
-      const { getUserRepos } = await import("./github");
-      const repos = await getUserRepos(repoDetails.owner);
-      const commits = await getRecentCommitsForUser(repoDetails.owner, repos.map(r => r.name), 30);
-      functionResponseData = { commits };
-    } else if (call.name === "fetch_repos_by_age") {
-      yield "STATUS:Checking oldest repositories to see tech stack evolution...";
-      const oldestRepos = await getUserReposByAge(repoDetails.owner, 'oldest', 10);
-      functionResponseData = { oldestRepos };
+    if (statusMessage) {
+      yield `STATUS:${statusMessage}`;
+    }
+    if (toolEvent) {
+      yield `TOOL:${JSON.stringify(toolEvent)}`;
+    }
+    if (commitFreshnessLabel) {
+      yield `META:${JSON.stringify({ commitFreshnessLabel })}`;
     }
 
-    yield "STATUS:Generating answer from gathered data...";
+    yield "STATUS:Preparing answer...";
 
     // --- Phase 2: Send function response and stream the final answer ---
     const streamResult = await chat.sendMessageStream([{
       functionResponse: {
-        name: call.name,
+        name: typeof call.name === "string" ? call.name : "unknown_tool",
         response: functionResponseData
       }
     }]);
@@ -411,13 +422,154 @@ export async function* answerWithContextStream(
   for await (const chunk of streamResult.stream) {
     const parts = ((chunk as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
     for (const part of parts) {
-      if (part.thought) {
+      if (part.thought && modelPreference === "thinking") {
         yield `THOUGHT:${part.text}`;
       } else if (part.text) {
         yield part.text;
       }
     }
   }
+}
+
+function buildTools(repoDetails: { owner: string; repo: string }): GeminiTool[] {
+  const isProfileContext = repoDetails.repo === "profile";
+  if (isProfileContext) {
+    return [
+      {
+        functionDeclarations: [
+          {
+            name: "fetch_recent_commits",
+            description: "Fetch recent commits either overall or for a specific repository.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                repository: { type: "STRING", description: "Optional repository name for repo-specific commits." },
+                limit: { type: "NUMBER", description: "Optional commit limit." },
+              }
+            }
+          },
+          {
+            name: "fetch_repos_by_age",
+            description: "Fetch repositories by age mode: oldest, newest, or journey (even spacing).",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                mode: { type: "STRING", description: "oldest | newest | journey" },
+              }
+            }
+          }
+        ]
+      },
+    ];
+  }
+
+  return [
+    {
+      functionDeclarations: [
+        {
+          name: "fetch_recent_commits",
+          description: "Fetch the latest commits for the current repository.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              limit: { type: "NUMBER", description: "Optional commit limit." },
+            }
+          }
+        },
+      ]
+    },
+  ];
+}
+
+async function resolveToolCall(
+  call: FunctionCallShape,
+  repoDetails: { owner: string; repo: string }
+): Promise<{
+  functionResponseData: Record<string, unknown>;
+  statusMessage?: string;
+  toolEvent?: { name: string; detail?: string; usageUnits?: number };
+  commitFreshnessLabel?: string;
+}> {
+  const callName = typeof call.name === "string" ? call.name : "";
+  const args = asObject(call.args);
+
+  if (callName === "fetch_recent_commits") {
+    const rawLimit = Number(args.limit);
+    const requestedLimit = Number.isFinite(rawLimit) ? Math.max(1, Math.floor(rawLimit)) : undefined;
+    const limit = Math.min(requestedLimit ?? (repoDetails.repo === "profile" ? 20 : 10), repoDetails.repo === "profile" ? 20 : 10);
+
+    if (repoDetails.repo === "profile") {
+      const repository = typeof args.repository === "string" ? args.repository.trim() : "";
+      if (repository) {
+        const snapshot = await getRecentRepoCommitsSnapshot(repoDetails.owner, repository, Math.min(limit, 10));
+        return {
+          functionResponseData: { commits: snapshot.commits, scope: "repository", repository },
+          statusMessage: `Fetching latest 10 commits of ${repository}...`,
+          toolEvent: { name: "fetch_recent_commits", detail: repository, usageUnits: 1 },
+          commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
+        };
+      }
+
+      const snapshot = await getRecentProfileCommitsSnapshot(repoDetails.owner, Math.min(limit, 20));
+      return {
+        functionResponseData: { commits: snapshot.commits, scope: "overall" },
+        statusMessage: "Fetching latest commits across repositories...",
+        toolEvent: { name: "fetch_recent_commits", detail: "overall", usageUnits: 1 },
+        commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
+      };
+    }
+
+    const snapshot = await getRecentRepoCommitsSnapshot(repoDetails.owner, repoDetails.repo, Math.min(limit, 10));
+    return {
+      functionResponseData: { commits: snapshot.commits, scope: "repository", repository: repoDetails.repo },
+      statusMessage: `Fetching latest 10 commits of ${repoDetails.owner}/${repoDetails.repo}...`,
+      toolEvent: { name: "fetch_recent_commits", detail: `${repoDetails.owner}/${repoDetails.repo}`, usageUnits: 1 },
+      commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
+    };
+  }
+
+  if (callName === "fetch_repos_by_age") {
+    const modeRaw = typeof args.mode === "string" ? args.mode.toLowerCase() : "oldest";
+    const mode = modeRaw === "newest" || modeRaw === "journey" ? modeRaw : "oldest";
+
+    if (mode === "journey") {
+      const repos = await getUserRepos(repoDetails.owner);
+      const byCreated = repos
+        .slice()
+        .sort((a, b) => new Date(a.created_at ?? a.updated_at).getTime() - new Date(b.created_at ?? b.updated_at).getTime());
+      const target = Math.min(20, byCreated.length);
+      const picks = new Set<number>();
+      if (target > 0) {
+        for (let i = 0; i < target; i += 1) {
+          const idx = Math.round((i * (byCreated.length - 1)) / Math.max(1, target - 1));
+          picks.add(idx);
+        }
+      }
+      const journeyRepos = Array.from(picks).sort((a, b) => a - b).map((idx) => byCreated[idx]).filter(Boolean).map((repo) => ({
+        name: repo.name,
+        description: repo.description,
+        language: repo.language,
+        created_at: repo.created_at,
+        stargazers_count: repo.stargazers_count,
+      }));
+      return {
+        functionResponseData: { repos: journeyRepos, mode: "journey" },
+        statusMessage: "Fetching repository journey timeline...",
+        toolEvent: { name: "fetch_repos_by_age", detail: "journey", usageUnits: 1 },
+      };
+    }
+
+    const repos = await getUserReposByAge(repoDetails.owner, mode === "newest" ? "newest" : "oldest", 10);
+    return {
+      functionResponseData: { repos, mode },
+      statusMessage: mode === "newest" ? "Fetching newest repositories..." : "Fetching oldest repositories...",
+      toolEvent: { name: "fetch_repos_by_age", detail: mode, usageUnits: 1 },
+    };
+  }
+
+  return {
+    functionResponseData: { error: "Unsupported tool call." },
+  };
 }
 
 // ─── Utility Functions ─────────────────────────────────────────────────────────

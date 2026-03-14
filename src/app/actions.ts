@@ -21,9 +21,11 @@ import {
     getDefaultBranchHeadSha,
     getRepoFileTree,
     getFileContentBatch,
+    getFileContentBatchWithStats,
     getProfileReadme,
     getUserRepos,
     getRepoReadme,
+    getRecentProfileCommitsSnapshot,
 } from "@/lib/github";
 import {
     trackEvent,
@@ -68,7 +70,7 @@ import {
     buildRepoReadmeEntry,
     type RepoReadmeSummary,
 } from "@/lib/domain";
-import { answerWithContext, answerWithContextStream } from "@/lib/gemini";
+import { analyzeFileSelection, answerWithContext, answerWithContextStream } from "@/lib/gemini";
 import { mapProfileStreamChunk } from "@/lib/profile-stream";
 import { buildOutreachPack, findingFingerprint as buildFindingFingerprint } from "@/lib/services/report-service";
 import { getPublicSiteUrl } from "@/lib/site-url";
@@ -143,6 +145,13 @@ interface ProfileQueryInput {
     profile: GitHubProfile;
     profileReadme: string | null;
     repoReadmes: RepoReadmeSummary[];
+    recentCommits?: Array<{
+        repo: string;
+        message: string;
+        date: string | null;
+        sha: string;
+    }>;
+    recentCommitFreshnessLabel?: string;
 }
 
 async function buildFullProfileContext(
@@ -166,7 +175,171 @@ async function buildFullProfileContext(
 
     context += readmeResults.join("");
 
+    if (input.recentCommits && input.recentCommits.length > 0) {
+        const commitLines = input.recentCommits.slice(0, 20).map((commit) => {
+            const when = commit.date ?? "unknown-date";
+            return `- [${commit.repo}] ${commit.sha}: ${commit.message} (${when})`;
+        });
+        context += `\n--- RECENT COMMITS SNAPSHOT (${input.recentCommitFreshnessLabel ?? "just now"}) ---\n${commitLines.join("\n")}\n`;
+    }
+
     return context || `No profile data found for ${input.username}.`;
+}
+
+const PROFILE_PATH_SKIP_PATTERN =
+    /(\.(png|jpg|jpeg|gif|svg|ico|lock|pdf|zip|tar|gz|map|wasm|min\.js|min\.css|woff|woff2|ttf|otf|eot)|package-lock\.json|yarn\.lock)$/i;
+
+function pruneProfileRepoPaths(paths: string[]): string[] {
+    return paths.filter(
+        (path) =>
+            !PROFILE_PATH_SKIP_PATTERN.test(path) &&
+            !path.includes("node_modules/") &&
+            !path.includes(".git/")
+    );
+}
+
+function buildProfileFolderStructure(paths: string[], maxPaths: number = 300, maxLines: number = 160): string {
+    const limited = paths.slice(0, maxPaths);
+    const tree = new Map<string, Set<string>>();
+
+    for (const path of limited) {
+        const parts = path.split("/").filter(Boolean);
+        if (parts.length === 0) continue;
+        const dir = parts.slice(0, -1).join("/") || ".";
+        const file = parts[parts.length - 1];
+        if (!tree.has(dir)) {
+            tree.set(dir, new Set<string>());
+        }
+        tree.get(dir)?.add(file);
+    }
+
+    const lines: string[] = [];
+    for (const dir of Array.from(tree.keys()).sort()) {
+        lines.push(`- ${dir === "." ? "(root)" : `${dir}/`}`);
+        if (lines.length >= maxLines) break;
+        const files = Array.from(tree.get(dir) ?? []).sort().slice(0, 8);
+        for (const file of files) {
+            lines.push(`  - ${file}`);
+            if (lines.length >= maxLines) break;
+        }
+        if (lines.length >= maxLines) break;
+    }
+
+    if (paths.length > maxPaths || lines.length >= maxLines) {
+        lines.push("- ... (folder structure truncated)");
+    }
+
+    return lines.length > 0 ? lines.join("\n") : "- (No repository files available)";
+}
+
+async function buildCrossRepoContext(
+    input: ProfileQueryInput,
+    query: string,
+    modelPreference: ModelPreference,
+    fileCachePolicy: FileCachePolicy,
+    onProgress?: (msg: string) => void
+): Promise<{ context: string; selectedFiles: number; cacheHits: number; fetchedFromGitHub: number; failed: number }> {
+    const { countTokens, MAX_TOKENS } = await import("@/lib/tokens");
+    const maxSelectedFiles = modelPreference === "thinking" ? 50 : 25;
+    const maxTokenBudget = Math.floor(MAX_TOKENS * 0.5);
+    let selectedFilesCount = 0;
+    let tokenTotal = 0;
+    let cacheHits = 0;
+    let fetchedFromGitHub = 0;
+    let failed = 0;
+    let crossRepoContext = "\n--- CROSS-REPO CONTEXT ---\n";
+
+    const candidateRepos = input.repoReadmes
+        .slice()
+        .sort((a, b) => b.stars - a.stars)
+        .slice(0, 10);
+
+    for (const repoSummary of candidateRepos) {
+        if (selectedFilesCount >= maxSelectedFiles) break;
+
+        const repoName = repoSummary.repo;
+        onProgress?.(`Reading repository ${repoName}...`);
+
+        try {
+            const repoMeta = await getRepo(input.username, repoName);
+            const { tree } = await getRepoFileTree(
+                input.username,
+                repoName,
+                repoMeta.default_branch
+            );
+            const pathToSha = new Map<string, string>();
+            for (const node of tree) {
+                if (node.type !== "blob") continue;
+                if (typeof node.sha === "string" && node.sha.length > 0) {
+                    pathToSha.set(node.path, node.sha);
+                }
+            }
+            const prunedPaths = pruneProfileRepoPaths(Array.from(pathToSha.keys()));
+            const remainingBudget = maxSelectedFiles - selectedFilesCount;
+            if (remainingBudget <= 0 || prunedPaths.length === 0) {
+                continue;
+            }
+
+            onProgress?.(`Selecting files in ${repoName}...`);
+            const selectedFiles = (await analyzeFileSelection(
+                query,
+                prunedPaths,
+                input.username,
+                repoName,
+                modelPreference,
+                [],
+                fileCachePolicy
+            )).slice(0, remainingBudget);
+
+            if (selectedFiles.length === 0) {
+                continue;
+            }
+
+            onProgress?.(`Reading ${selectedFiles.length} files from ${repoName}...`);
+            const { files: fileResults, stats } = await getFileContentBatchWithStats(
+                input.username,
+                repoName,
+                selectedFiles.map((path) => ({ path, sha: pathToSha.get(path) })),
+                {
+                    ...fileCachePolicy,
+                    visibility: repoMeta.private ? "private" : "public",
+                }
+            );
+            cacheHits += stats.cacheHits;
+            fetchedFromGitHub += stats.fetchedFromGitHub;
+            failed += stats.failed;
+
+            const folderStructure = buildProfileFolderStructure(prunedPaths);
+            let repoSection =
+                `\n--- REPOSITORY: ${input.username}/${repoName} ---\n` +
+                `\n--- REPOSITORY FOLDER STRUCTURE ---\n${folderStructure}\n` +
+                `\n--- SELECTED FILES ---\n${selectedFiles.map((path) => `- ${path}`).join("\n")}\n`;
+
+            for (const file of fileResults) {
+                if (!file.content) continue;
+                const fileTokens = countTokens(file.content);
+                if (tokenTotal + fileTokens > maxTokenBudget) {
+                    repoSection += "\n--- NOTE: Cross-repo context truncated at token budget ---\n";
+                    break;
+                }
+                repoSection += `\n--- FILE: ${repoName}/${file.path} ---\n${file.content}\n`;
+                tokenTotal += fileTokens;
+            }
+
+            crossRepoContext += repoSection;
+            selectedFilesCount += selectedFiles.length;
+        } catch (error) {
+            console.warn(`Skipping cross-repo context for ${repoName}:`, error);
+        }
+    }
+
+    return {
+        context: crossRepoContext,
+        selectedFiles: selectedFilesCount,
+        cacheHits,
+        fetchedFromGitHub,
+        failed,
+    };
 }
 
 // ─── Public Actions — Data Fetching ──────────────────────────────────────────
@@ -208,6 +381,10 @@ export async function fetchGitHubData(input: string) {
 
 export async function fetchProfile(username: string) {
     return getProfile(username);
+}
+
+export async function fetchRecentProfileCommitSnapshot(username: string) {
+    return getRecentProfileCommitsSnapshot(username, 20);
 }
 
 export async function fetchPublicStats() {
@@ -400,9 +577,26 @@ export async function processProfileQuery(
 export async function* processProfileQueryStream(
     query: string,
     profileContext: ProfileQueryInput,
-    modelPreference: ModelPreference = "flash"
+    modelPreference: ModelPreference = "flash",
+    options: {
+        cacheAudience?: CacheAudience;
+        cacheActorId?: string;
+        crossRepoEnabled?: boolean;
+        history?: { role: "user" | "model"; content: string }[];
+    } = {}
 ): AsyncGenerator<StreamUpdate> {
     const isThinking = modelPreference === "thinking";
+    const cacheAudience = options.cacheAudience ?? "anonymous";
+    const cacheActorId = options.cacheActorId;
+    const history = options.history ?? [];
+    let commitFreshnessLabel = profileContext.recentCommitFreshnessLabel;
+    const toolsUsed = new Set<string>();
+    const pipelineStartMs = Date.now();
+    let contextBuildMs = 0;
+    let crossRepoMs = 0;
+    let answerMs = 0;
+    let crossRepoSelectedFiles = 0;
+
     try {
         yield {
             type: "status",
@@ -412,17 +606,71 @@ export async function* processProfileQueryStream(
             progress: 20
         };
 
-        const context = await buildFullProfileContext(
+        if (!profileContext.recentCommits || profileContext.recentCommits.length === 0) {
+            const snapshot = await getRecentProfileCommitsSnapshot(profileContext.username, 20);
+            profileContext = {
+                ...profileContext,
+                recentCommits: snapshot.commits,
+                recentCommitFreshnessLabel: snapshot.freshness.label,
+            };
+            commitFreshnessLabel = `Commits checked: ${snapshot.freshness.label}`;
+        } else if (profileContext.recentCommitFreshnessLabel) {
+            commitFreshnessLabel = `Commits checked: ${profileContext.recentCommitFreshnessLabel}`;
+        }
+
+        const contextStartMs = Date.now();
+        let context = await buildFullProfileContext(
             profileContext,
             query,
             () => { /* progress updates are fire-and-forget in this path */ }
         );
+        contextBuildMs = Date.now() - contextStartMs;
+        yield {
+            type: "status",
+            message: `Profile context prepared from ${profileContext.repoReadmes.length} repositories.`,
+            progress: 30,
+        };
+
+        if (options.crossRepoEnabled && cacheAudience === "authenticated") {
+            yield {
+                type: "status",
+                message: "Reading repositories for cross-repo context...",
+                progress: 35,
+            };
+
+            const fileCachePolicy: FileCachePolicy = {
+                audience: cacheAudience,
+                actorId: cacheActorId,
+                visibility: "public",
+            };
+            const crossRepoStartMs = Date.now();
+            const crossRepo = await buildCrossRepoContext(
+                profileContext,
+                query,
+                modelPreference,
+                fileCachePolicy,
+                () => { /* status updates are emitted at phase boundaries */ }
+            );
+            crossRepoMs = Date.now() - crossRepoStartMs;
+            context += `\n${crossRepo.context}`;
+            crossRepoSelectedFiles = crossRepo.selectedFiles;
+            yield {
+                type: "status",
+                message: `Cross-repo context prepared from ${crossRepo.selectedFiles} selected files in ${crossRepoMs}ms...`,
+                progress: 55,
+            };
+            yield {
+                type: "status",
+                message: `Cross-repo cache hit ${crossRepo.cacheHits}; fetched ${crossRepo.fetchedFromGitHub} from GitHub${crossRepo.failed > 0 ? ` (${crossRepo.failed} unavailable)` : ""}.`,
+                progress: 60,
+            };
+        }
 
         yield {
             type: "status",
             message: isThinking
                 ? `Process: Formulating insights based on profile, repositories, and your query — "${query.slice(0, 60)}${query.length > 60 ? '...' : ''}"...`
-                : "Thinking & checking real-time data...",
+                : "Checking real-time data and preparing response...",
             progress: 75
         };
 
@@ -431,15 +679,56 @@ export async function* processProfileQueryStream(
             context,
             { owner: profileContext.username, repo: "profile" },
             profileContext.profile,
-            [],
+            history,
             modelPreference
         );
+        const answerStartMs = Date.now();
 
         for await (const chunk of stream) {
-            yield mapProfileStreamChunk(chunk);
-        }
+            if (chunk.startsWith("META:")) {
+                try {
+                    const parsed = JSON.parse(chunk.replace("META:", "").trim()) as {
+                        commitFreshnessLabel?: unknown;
+                    };
+                    if (typeof parsed.commitFreshnessLabel === "string") {
+                        commitFreshnessLabel = parsed.commitFreshnessLabel;
+                    }
+                } catch {
+                    // Ignore malformed META payloads.
+                }
+                continue;
+            }
 
-        yield { type: "complete", relevantFiles: [] };
+            const mapped = mapProfileStreamChunk(chunk);
+            if (mapped.type === "tool") {
+                toolsUsed.add(mapped.name);
+            }
+            yield mapped;
+        }
+        answerMs = Date.now() - answerStartMs;
+        const hasTools = toolsUsed.size > 0;
+        const sourceScope = toolsUsed.has("googleSearch")
+            ? (crossRepoSelectedFiles > 0 ? "Profile + cross-repo + tools + web snapshot" : "Profile + tools + web snapshot")
+            : (crossRepoSelectedFiles > 0
+                ? (hasTools ? "Profile + cross-repo + tools" : "Profile + cross-repo")
+                : (hasTools ? "Profile + tools" : "Profile context only"));
+        const processingSummary = [
+            `Profile context: ${contextBuildMs}ms`,
+            ...(crossRepoSelectedFiles > 0 ? [`Cross-repo context: ${crossRepoMs}ms (${crossRepoSelectedFiles} files)`] : []),
+            `Answer generation: ${answerMs}ms`,
+            `Total: ${Date.now() - pipelineStartMs}ms`,
+        ];
+
+        yield {
+            type: "complete",
+            relevantFiles: [],
+            metadata: {
+                commitFreshnessLabel,
+                toolsUsed: toolsUsed.size > 0 ? Array.from(toolsUsed) : undefined,
+                processingSummary,
+                sourceScope,
+            },
+        };
     } catch (error: unknown) {
         console.error("Profile stream error:", error);
         yield { type: "error", message: getErrorMessage(error) || "An error occurred" };

@@ -11,6 +11,10 @@ import {
   cacheRepoFullContext,
   getCachedRepoFullContext,
   getCachedFilesBatch,
+  getCachedProfileCommitSnapshot,
+  cacheProfileCommitSnapshot,
+  getCachedRepoCommitSnapshot,
+  cacheRepoCommitSnapshot,
   type FileCachePolicy,
 } from "./cache";
 import { unstable_cache } from 'next/cache';
@@ -155,6 +159,7 @@ export interface GitHubRepo {
     login: string;
   };
   updated_at: string;
+  created_at?: string;
 }
 
 export interface RepoLanguage {
@@ -179,6 +184,20 @@ export interface RepoFullContext {
   languages: RepoLanguage[];
   commits: RepoCommit[];
   readme: string | null;
+}
+
+export interface RecentCommitSnapshot {
+  repo: string;
+  message: string;
+  date: string | null;
+  sha: string;
+}
+
+export interface CommitFreshness {
+  fetchedAt: number;
+  isCached: boolean;
+  ageMinutes: number;
+  label: string;
 }
 
 export interface FileNode {
@@ -580,6 +599,23 @@ export async function getFileContentBatch(
   files: Array<{ path: string; sha?: string }>,
   fileCachePolicy?: FileCachePolicy
 ): Promise<Array<{ path: string; content: string | null }>> {
+  const result = await getFileContentBatchWithStats(owner, repo, files, fileCachePolicy);
+  return result.files;
+}
+
+export interface FileBatchFetchStats {
+  requested: number;
+  cacheHits: number;
+  fetchedFromGitHub: number;
+  failed: number;
+}
+
+export async function getFileContentBatchWithStats(
+  owner: string,
+  repo: string,
+  files: Array<{ path: string; sha?: string }>,
+  fileCachePolicy?: FileCachePolicy
+): Promise<{ files: Array<{ path: string; content: string | null }>; stats: FileBatchFetchStats }> {
   // Step 1: Separate files that already have SHAs (eligible for batch cache hit)
   const filesWithSha = files.filter(f => !!f.sha) as Array<{ path: string; sha: string }>;
   const filesWithoutSha = files.filter(f => !f.sha);
@@ -615,7 +651,14 @@ export async function getFileContentBatch(
   });
 
   const remainingResults = await Promise.all(remainingPromises);
-  return [...results, ...remainingResults];
+  const allResults = [...results, ...remainingResults];
+  const stats: FileBatchFetchStats = {
+    requested: files.length,
+    cacheHits: results.length,
+    fetchedFromGitHub: remainingFiles.length,
+    failed: allResults.filter((entry) => !entry.content).length,
+  };
+  return { files: allResults, stats };
 }
 
 export async function getProfileReadme(username: string) {
@@ -753,6 +796,91 @@ export async function getRecentCommitsForUser(username: string, repos: string[],
   } catch (error) {
     console.error(`Failed to fetch recent commits for ${username}:`, error);
     return [];
+  }
+}
+
+function toFreshness(fetchedAt: number, isCached: boolean): CommitFreshness {
+  const ageMinutes = Math.max(0, Math.floor((Date.now() - fetchedAt) / 60000));
+  return {
+    fetchedAt,
+    isCached,
+    ageMinutes,
+    label: ageMinutes <= 0 ? "just now" : `cached ${ageMinutes} min ago`,
+  };
+}
+
+export async function getRecentProfileCommitsSnapshot(
+  username: string,
+  limit: number = 20
+): Promise<{ commits: RecentCommitSnapshot[]; freshness: CommitFreshness }> {
+  const cached = await getCachedProfileCommitSnapshot<RecentCommitSnapshot[]>(username);
+  if (cached) {
+    return {
+      commits: cached.data,
+      freshness: toFreshness(cached.fetchedAt, true),
+    };
+  }
+
+  const repos = await getUserRepos(username);
+  const commits = await getRecentCommitsForUser(
+    username,
+    repos.map((repo) => repo.name),
+    limit
+  );
+
+  const normalized: RecentCommitSnapshot[] = commits.slice(0, limit).map((commit) => ({
+    repo: String(commit.repo ?? ""),
+    message: String(commit.message ?? ""),
+    date: typeof commit.date === "string" ? commit.date : null,
+    sha: String(commit.sha ?? "").slice(0, 7),
+  }));
+
+  await cacheProfileCommitSnapshot(username, normalized);
+
+  return {
+    commits: normalized,
+    freshness: toFreshness(Date.now(), false),
+  };
+}
+
+export async function getRecentRepoCommitsSnapshot(
+  owner: string,
+  repo: string,
+  limit: number = 10
+): Promise<{ commits: RecentCommitSnapshot[]; freshness: CommitFreshness }> {
+  const cached = await getCachedRepoCommitSnapshot<RecentCommitSnapshot[]>(owner, repo);
+  if (cached) {
+    return {
+      commits: cached.data,
+      freshness: toFreshness(cached.fetchedAt, true),
+    };
+  }
+
+  try {
+    const { data } = await octokit.rest.repos.listCommits({
+      owner,
+      repo,
+      per_page: limit,
+    });
+
+    const commits: RecentCommitSnapshot[] = data.slice(0, limit).map((commit) => ({
+      repo,
+      message: commit.commit.message,
+      date: commit.commit.author?.date ?? null,
+      sha: commit.sha.slice(0, 7),
+    }));
+
+    await cacheRepoCommitSnapshot(owner, repo, commits);
+    return {
+      commits,
+      freshness: toFreshness(Date.now(), false),
+    };
+  } catch (error) {
+    console.error(`Failed to fetch recent commits for ${owner}/${repo}:`, error);
+    return {
+      commits: [],
+      freshness: toFreshness(Date.now(), false),
+    };
   }
 }
 

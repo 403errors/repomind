@@ -11,6 +11,10 @@ export interface ChatMessageBase {
     relevantFiles?: string[];
     streamStatus?: string;
     streamProgress?: number;
+    commitFreshnessLabel?: string;
+    toolsUsed?: string[];
+    processingSummary?: string[];
+    sourceScope?: string;
 }
 
 export interface ThinkingChatMessage extends ChatMessageBase {

@@ -35,4 +35,19 @@ describe("parseStreamChunk", () => {
         expect(parsed.updates).toHaveLength(0);
         expect(parsed.invalidLines).toEqual([JSON.stringify({ hello: "world" })]);
     });
+
+    it("accepts tool updates", () => {
+        const parsed = parseStreamChunk(
+            "",
+            `${JSON.stringify({ type: "tool", name: "fetch_recent_commits", detail: "overall", usageUnits: 1 })}\n`
+        );
+
+        expect(parsed.updates).toHaveLength(1);
+        expect(parsed.updates[0]).toMatchObject({
+            type: "tool",
+            name: "fetch_recent_commits",
+            detail: "overall",
+            usageUnits: 1,
+        });
+    });
 });

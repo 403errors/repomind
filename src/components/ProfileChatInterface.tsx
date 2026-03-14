@@ -30,6 +30,8 @@ interface ProfileChatInterfaceProps {
     profile: GitHubProfile;
     profileReadme: string | null;
     repoReadmes: { repo: string; content: string; updated_at: string; description: string | null; stars: number; forks: number; language: string | null }[];
+    recentCommits: { repo: string; message: string; date: string | null; sha: string }[];
+    recentCommitFreshnessLabel: string;
 }
 
 const PROFILE_SUGGESTIONS = [
@@ -39,23 +41,26 @@ const PROFILE_SUGGESTIONS = [
     "What programming languages does he/she use?",
 ];
 
-type HttpError = Error & { status?: number };
+type HttpError = Error & { status?: number; code?: string };
 
-function getResponseErrorMessage(rawResponseText: string, status: number): string {
+function parseResponseError(rawResponseText: string, status: number): { message: string; code?: string } {
     if (!rawResponseText.trim()) {
-        return `Failed to start analysis stream (HTTP ${status}).`;
+        return { message: `Failed to start analysis stream (HTTP ${status}).` };
     }
 
     try {
-        const parsed = JSON.parse(rawResponseText) as { error?: unknown };
+        const parsed = JSON.parse(rawResponseText) as { error?: unknown; code?: unknown };
         if (typeof parsed.error === "string" && parsed.error.trim()) {
-            return parsed.error;
+            return {
+                message: parsed.error,
+                code: typeof parsed.code === "string" ? parsed.code : undefined,
+            };
         }
     } catch {
         // Ignore parse failure and fall back to raw response text.
     }
 
-    return rawResponseText.trim();
+    return { message: rawResponseText.trim() };
 }
 
 function getErrorStatus(error: unknown): number | undefined {
@@ -64,7 +69,13 @@ function getErrorStatus(error: unknown): number | undefined {
     return typeof maybeStatus === "number" ? maybeStatus : undefined;
 }
 
-export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: ProfileChatInterfaceProps) {
+export function ProfileChatInterface({
+    profile,
+    profileReadme,
+    repoReadmes,
+    recentCommits,
+    recentCommitFreshnessLabel,
+}: ProfileChatInterfaceProps) {
     const { data: session } = useSession();
     const [messages, setMessages] = useState<ProfileChatMessage[]>([
         {
@@ -90,8 +101,16 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
     const [modelPreference, setModelPreference] = useState<ModelPreference>("flash");
+    const [crossRepoEnabled, setCrossRepoEnabled] = useState(false);
     const [showLoginModal, setShowLoginModal] = useState(false);
+    const [loginModalCopy, setLoginModalCopy] = useState<{ title?: string; description?: string }>({});
     const isSubmittingRef = useRef(false);
+
+    useEffect(() => {
+        if (!session && crossRepoEnabled) {
+            setCrossRepoEnabled(false);
+        }
+    }, [session, crossRepoEnabled]);
 
     // Load conversation on mount
     const toastShownRef = useRef(false);
@@ -162,6 +181,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
     };
 
     const runProfileStreamingFlow = async (modelMsgId: string, combinedInput: string) => {
+        const isThinkingStream = modelPreference === "thinking";
         const historyForServer = messages.slice(-8).map((message) => ({ role: message.role, content: message.content }));
         const response = await fetch("/api/chat/profile", {
             method: "POST",
@@ -173,17 +193,22 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                     profile,
                     profileReadme,
                     repoReadmes,
+                    recentCommits,
+                    recentCommitFreshnessLabel,
                 },
                 history: historyForServer,
                 modelPreference,
+                crossRepoEnabled,
             }),
         });
 
         if (!response.ok || !response.body) {
             const rawResponseText = await response.text().catch(() => "");
-            const message = getResponseErrorMessage(rawResponseText, response.status);
-            const httpError = new Error(message) as HttpError;
+            const parsedError = parseResponseError(rawResponseText, response.status);
+            const httpError = new Error(parsedError.message) as HttpError;
             httpError.status = response.status;
+            httpError.code = parsedError.code;
+            httpError.message = parsedError.message;
 
             console.error("Profile chat stream initialization failed", {
                 username: profile.login,
@@ -191,7 +216,8 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                 statusText: response.statusText,
                 historyMessageCount: historyForServer.length,
                 queryPreview: combinedInput.slice(0, 160),
-                errorMessage: message,
+                errorMessage: parsedError.message,
+                errorCode: parsedError.code,
             });
 
             throw httpError;
@@ -218,18 +244,37 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
 
             for (const chunk of parsedChunk.updates) {
                 if (chunk.type === "status") {
-                    accumulatedReasoning.push(chunk.message);
                     setMessages((prev) => prev.map((message) =>
                         message.id === modelMsgId
                             ? {
                                 ...message,
-                                reasoningSteps: [...accumulatedReasoning],
+                                reasoningSteps: isThinkingStream ? [...(accumulatedReasoning.concat(chunk.message))] : message.reasoningSteps,
                                 streamStatus: chunk.message,
                                 streamProgress: chunk.progress,
                             }
                             : message
                     ));
+                    if (isThinkingStream) {
+                        accumulatedReasoning.push(chunk.message);
+                    }
+                } else if (chunk.type === "tool") {
+                    const toolText = chunk.detail ? `${chunk.name}: ${chunk.detail}` : chunk.name;
+                    setMessages((prev) => prev.map((message) =>
+                        message.id === modelMsgId
+                            ? {
+                                ...message,
+                                reasoningSteps: isThinkingStream ? [...(accumulatedReasoning.concat(`Tool: ${toolText}`))] : message.reasoningSteps,
+                                streamStatus: `Using ${toolText}...`,
+                            }
+                            : message
+                    ));
+                    if (isThinkingStream) {
+                        accumulatedReasoning.push(`Tool: ${toolText}`);
+                    }
                 } else if (chunk.type === "thought") {
+                    if (!isThinkingStream) {
+                        continue;
+                    }
                     accumulatedReasoning.push(chunk.text);
                     setMessages((prev) => prev.map((message) =>
                         message.id === modelMsgId ? { ...message, reasoningSteps: [...accumulatedReasoning] } : message
@@ -244,7 +289,21 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                         message.id === modelMsgId ? { ...message, content: contentText } : message
                     ));
                 } else if (chunk.type === "error") {
-                    throw new Error(chunk.message);
+                    const streamError = new Error(chunk.message) as HttpError;
+                    streamError.code = chunk.code;
+                    throw streamError;
+                } else if (chunk.type === "complete") {
+                    setMessages((prev) => prev.map((message) =>
+                        message.id === modelMsgId
+                            ? {
+                                ...message,
+                                commitFreshnessLabel: chunk.metadata?.commitFreshnessLabel,
+                                toolsUsed: chunk.metadata?.toolsUsed,
+                                processingSummary: chunk.metadata?.processingSummary,
+                                sourceScope: chunk.metadata?.sourceScope,
+                            }
+                            : message
+                    ));
                 }
             }
         }
@@ -284,12 +343,6 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
             return;
         }
 
-        if (!session) {
-            setShowLoginModal(true);
-            isSubmittingRef.current = false;
-            return;
-        }
-
         // Check token limit
         if (totalTokens >= MAX_TOKENS) {
             toast.error("Conversation limit reached", {
@@ -321,13 +374,37 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
         } catch (error: unknown) {
             console.error(error);
             const errorStatus = getErrorStatus(error);
+            const errorCode = (error as HttpError | undefined)?.code;
             const isAuthError = errorStatus === 401 || errorStatus === 403;
             const isPayloadTooLarge = errorStatus === 413;
+            const isAnonUsageLimit = errorCode === "ANON_USAGE_LIMIT_EXCEEDED";
+            const isAuthUsageLimit = errorCode === "AUTH_USAGE_LIMIT_EXCEEDED";
 
-            if (isAuthError) {
+            if (isAnonUsageLimit) {
+                toast.error("Login required for more profile tooling", {
+                    description: "Anonymous profile-tool usage limit reached.",
+                    duration: 5000,
+                });
+                setLoginModalCopy({
+                    title: "Login To Continue Profile Analysis",
+                    description: "Unlock 3x tool budget, cross-repo analysis, Thinking Mode, and faster profile answers.",
+                });
+                setShowLoginModal(true);
+            } else if (isAuthUsageLimit) {
+                const limitMessage: ProfileChatMessage = {
+                    id: (Date.now() + 1).toString(),
+                    role: "model",
+                    content: "Usage limit reached for profile chat tools.\n\nPlease contact **pieisnot22by7@gmail.com** for extended limits.",
+                };
+                setMessages((prev) => [...prev, limitMessage]);
+            } else if (isAuthError) {
                 toast.error("Sign in required", {
                     description: "Your session has expired or is invalid. Please sign in and try again.",
                     duration: 5000,
+                });
+                setLoginModalCopy({
+                    title: "Sign In Required",
+                    description: "Please sign in with GitHub to continue profile analysis features.",
                 });
                 setShowLoginModal(true);
             } else if (isPayloadTooLarge) {
@@ -346,7 +423,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                 });
             }
 
-            if (!isAuthError) {
+            if (!isAuthError && !isAnonUsageLimit && !isAuthUsageLimit) {
                 const errorMsg: ProfileChatMessage = {
                     id: (Date.now() + 1).toString(),
                     role: "model",
@@ -477,11 +554,19 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
             <div
                 ref={chatScrollRef}
                 onMouseUp={handleSelection}
-                className="flex-1 overflow-y-auto p-4 space-y-6 relative"
+                className="flex-1 overflow-y-auto p-4 space-y-6 relative selection:bg-blue-500/50 selection:text-white [&_*::selection]:bg-blue-500/50 [&_*::selection]:text-white"
             >
                 {selectionAnchor && (
                     <button
                         onClick={handleAskFromSelection}
+                        onMouseDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }}
+                        onMouseUp={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }}
                         className="absolute z-20 -translate-y-full -mt-2 px-3 py-1 bg-white text-black text-xs rounded-full shadow-lg border border-black/10 transition-transform transition-shadow duration-150 ease-out hover:-translate-y-[110%] hover:scale-105 hover:shadow-xl"
                         style={{ left: selectionAnchor.x, top: selectionAnchor.y }}
                     >
@@ -518,7 +603,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                 "flex flex-col gap-2",
                                 msg.role === "user" ? "items-end max-w-[80%]" : "items-start w-full min-w-0"
                             )}>
-                                {msg.role === "model" && (
+                                {msg.role === "model" && msg.modelUsed !== "thinking" && (
                                     <StreamStatus
                                         message={msg.streamStatus}
                                         isStreaming={loading && isLatestMessage}
@@ -573,6 +658,22 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                                 />
                                             )}
                                         </div>
+                                    </div>
+                                )}
+                                {msg.role === "model" && !loading && (msg.commitFreshnessLabel || (msg.toolsUsed && msg.toolsUsed.length > 0) || msg.sourceScope || (msg.processingSummary && msg.processingSummary.length > 0)) && (
+                                    <div className="text-[11px] text-zinc-500 pl-1">
+                                        {msg.sourceScope && <span>Scope: {msg.sourceScope}</span>}
+                                        {msg.commitFreshnessLabel && <span>{msg.commitFreshnessLabel}</span>}
+                                        {msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                                            <span className={cn((msg.commitFreshnessLabel || msg.sourceScope) && "ml-2")}>
+                                                Tools used: {msg.toolsUsed.join(", ")}
+                                            </span>
+                                        )}
+                                        {msg.processingSummary && msg.processingSummary.length > 0 && (
+                                            <span className={cn((msg.commitFreshnessLabel || msg.toolsUsed?.length || msg.sourceScope) && "ml-2")}>
+                                                {msg.processingSummary.join(" | ")}
+                                            </span>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -638,7 +739,23 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                         allowEmptySubmit={Boolean(referenceText)}
                         modelPreference={modelPreference}
                         setModelPreference={setModelPreference}
-                        onRequireAuth={() => setShowLoginModal(true)}
+                        onRequireAuth={() => {
+                            setLoginModalCopy({
+                                title: "Login Required For Thinking Mode",
+                                description: "Sign in to use Thinking Mode, higher limits, and advanced profile tooling.",
+                            });
+                            setShowLoginModal(true);
+                        }}
+                        showCrossRepoToggle={true}
+                        crossRepoEnabled={crossRepoEnabled}
+                        setCrossRepoEnabled={setCrossRepoEnabled}
+                        onRequireCrossRepoAuth={() => {
+                            setLoginModalCopy({
+                                title: "Login Required For Cross-Repo",
+                                description: "Cross-repo profile analysis is available for logged-in users with higher tool limits.",
+                            });
+                            setShowLoginModal(true);
+                        }}
                     />
                 </form>
             </div>
@@ -657,6 +774,8 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
             <LoginModal
                 isOpen={showLoginModal}
                 onClose={() => setShowLoginModal(false)}
+                title={loginModalCopy.title}
+                description={loginModalCopy.description}
             />
         </div >
     );

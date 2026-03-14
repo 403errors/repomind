@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { Loader2, CheckCircle2, FileCode } from "lucide-react";
 import { UserIcon } from "@/components/icons/UserIcon";
 import { ProfileChatInterface } from "./ProfileChatInterface";
-import { fetchProfile, fetchProfileReadme, fetchUserRepos } from "@/app/actions";
+import { fetchProfile, fetchProfileReadme, fetchRecentProfileCommitSnapshot, fetchUserRepos } from "@/app/actions";
 import type { GitHubProfile } from "@/lib/github";
 
 interface LoadingStep {
@@ -31,6 +31,13 @@ interface ProfileLoaderData {
         forks: number;
         language: string | null;
     }[];
+    recentCommits: {
+        repo: string;
+        message: string;
+        date: string | null;
+        sha: string;
+    }[];
+    recentCommitFreshnessLabel: string;
 }
 
 const PROFILE_LOADER_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -50,7 +57,14 @@ function readCachedProfileLoaderData(username: string): ProfileLoaderData | null
             window.sessionStorage.removeItem(getProfileLoaderCacheKey(username));
             return null;
         }
-        return parsed.data;
+        return {
+            ...parsed.data,
+            recentCommits: Array.isArray(parsed.data.recentCommits) ? parsed.data.recentCommits : [],
+            recentCommitFreshnessLabel:
+                typeof parsed.data.recentCommitFreshnessLabel === "string"
+                    ? parsed.data.recentCommitFreshnessLabel
+                    : "just now",
+        };
     } catch {
         return null;
     }
@@ -129,8 +143,19 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
                 updateStep("repos-more", "complete", `+ ${repoReadmes.length - 5} more repositories`);
             }
 
+            // Step 4: Prefetch latest commits snapshot
+            updateStep("commits", "loading", "Fetching latest commits snapshot...");
+            const commitSnapshot = await fetchRecentProfileCommitSnapshot(username);
+            updateStep("commits", "complete", `Loaded ${commitSnapshot.commits.length} recent commits`);
+
             // All done
-            const nextData = { profile, profileReadme, repoReadmes };
+            const nextData = {
+                profile,
+                profileReadme,
+                repoReadmes,
+                recentCommits: commitSnapshot.commits,
+                recentCommitFreshnessLabel: commitSnapshot.freshness.label,
+            };
             setProfileData(nextData);
             writeCachedProfileLoaderData(username, nextData);
         } catch (err: unknown) {
@@ -213,6 +238,8 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
             profile={profileData.profile}
             profileReadme={profileData.profileReadme}
             repoReadmes={profileData.repoReadmes}
+            recentCommits={profileData.recentCommits}
+            recentCommitFreshnessLabel={profileData.recentCommitFreshnessLabel}
         />
     );
 }

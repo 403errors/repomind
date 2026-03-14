@@ -1,4 +1,4 @@
-import { useState, type RefObject } from "react";
+import { useRef, useState, type RefObject } from "react";
 
 interface SelectionAnchor {
     x: number;
@@ -19,10 +19,14 @@ export function useMessageSelection(
     const [selectionText, setSelectionText] = useState("");
     const [selectionAnchor, setSelectionAnchor] = useState<SelectionAnchor | null>(null);
     const [referenceText, setReferenceText] = useState("");
+    const selectedRangeRef = useRef<Range | null>(null);
+    const selectionTextRef = useRef("");
 
     const resetSelection = () => {
         setSelectionAnchor(null);
         setSelectionText("");
+        selectionTextRef.current = "";
+        selectedRangeRef.current = null;
     };
 
     const handleSelection = () => {
@@ -49,7 +53,7 @@ export function useMessageSelection(
             return;
         }
 
-        const range = selection.getRangeAt(0);
+        const range = selection.getRangeAt(0).cloneRange();
         const rect = range.getBoundingClientRect();
         const containerRect = scrollContainer.getBoundingClientRect();
 
@@ -64,14 +68,29 @@ export function useMessageSelection(
 
         setSelectionAnchor({ x, y });
         setSelectionText(text);
+        selectionTextRef.current = text;
+        selectedRangeRef.current = range;
+
+        requestAnimationFrame(() => {
+            const savedRange = selectedRangeRef.current;
+            const restoredSelection = window.getSelection();
+            if (!savedRange || !restoredSelection) return;
+            restoredSelection.removeAllRanges();
+            try {
+                restoredSelection.addRange(savedRange);
+            } catch {
+                // Ignore detached/stale range errors.
+            }
+        });
     };
 
     const handleAskFromSelection = () => {
-        if (!selectionText) {
+        const text = selectionTextRef.current || selectionText;
+        if (!text) {
             return;
         }
 
-        setReferenceText(selectionText);
+        setReferenceText(text);
         resetSelection();
         chatScrollRef.current?.scrollTo({
             top: chatScrollRef.current.scrollHeight,
