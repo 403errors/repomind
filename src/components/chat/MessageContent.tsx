@@ -17,6 +17,7 @@ interface MessageContentProps {
     messages?: MessageIdentity[];
     currentOwner?: string;
     currentRepo?: string;
+    isStreaming?: boolean;
 }
 
 interface MarkdownCodeProps extends HTMLAttributes<HTMLElement> {
@@ -35,9 +36,10 @@ export function MessageContent({
     messages = [],
     currentOwner,
     currentRepo,
+    isStreaming = false,
 }: MessageContentProps) {
     const repairedContent = useMemo(() => repairMarkdown(content), [content]);
-    const isStreamingMessage = messages[messages.length - 1]?.id === messageId;
+    const isStreamingMessage = isStreaming || messages[messages.length - 1]?.id === messageId;
 
     const components = {
         code: ({ className, children, inline, ...props }: MarkdownCodeProps) => {
@@ -59,7 +61,7 @@ export function MessageContent({
                 try {
                     const jsonContent = String(children).replace(/\n$/, "");
                     const chart = generateMermaidFromJSON(JSON.parse(jsonContent));
-                    return <Mermaid key={messageId} chart={chart} />;
+                    return <Mermaid key={messageId} chart={chart} isStreaming={isStreamingMessage} />;
                 } catch {
                     return (
                         <div className="flex items-center gap-2 p-4 bg-zinc-900/50 rounded-lg border border-white/10">

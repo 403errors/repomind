@@ -247,8 +247,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     const runSecurityScanFlow = async (
         isQuickScan: boolean,
         isDeepScan: boolean,
-        placeholderMessageId: string,
-        scanAiAssist: boolean
+        placeholderMessageId: string
     ) => {
         console.log(`🎯 Security scan triggered! (Type: ${isDeepScan ? "Deep" : "Quick"})`);
         setScanning(true);
@@ -260,7 +259,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 filesToScan,
                 {
                     analysisProfile: isDeepScan ? "deep" : "quick",
-                    aiAssist: scanAiAssist ? "on" : "off",
+                    aiAssist: "on",
                 }
             );
 
@@ -338,7 +337,11 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         return modelMsgId;
     };
 
-    const runRepoStreamingFlow = async (modelMsgId: string, combinedInputForServer: string) => {
+    const runRepoStreamingFlow = async (
+        modelMsgId: string,
+        combinedInputForServer: string,
+        selectedModelPreference: ModelPreference
+    ) => {
         const filePaths = repoContext.fileTree
             .map((file) => file.path)
             .filter((path) =>
@@ -356,7 +359,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 filePaths,
                 history: historyForServer,
                 profileData: ownerProfile,
-                modelPreference,
+                modelPreference: selectedModelPreference,
             }),
         });
 
@@ -457,8 +460,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     const handleSubmit = async (
         e?: React.FormEvent,
         overrideText?: string,
-        submitMode: SubmitMode = "normal",
-        scanAiAssist: boolean = false
+        submitMode: SubmitMode = "normal"
     ) => {
         if (e) e.preventDefault();
 
@@ -467,6 +469,17 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
 
         const trimmedInput = overrideText || input.trim();
         if ((!trimmedInput && !referenceText) || loading) {
+            isSubmittingRef.current = false;
+            return;
+        }
+
+        const isQuickScan = submitMode === "quick_scan" || isQuickSecurityScanPrompt(trimmedInput);
+        const isDeepScan = submitMode === "deep_scan" || isDeepSecurityScanPrompt(trimmedInput);
+        const isArchitecturePrompt = trimmedInput.toLowerCase() === ARCHITECTURE_PROMPT.toLowerCase();
+        const selectedModelPreference: ModelPreference = isArchitecturePrompt ? "thinking" : modelPreference;
+
+        if (!session) {
+            setShowLoginModal(true);
             isSubmittingRef.current = false;
             return;
         }
@@ -496,16 +509,6 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         clearReference();
         setLoading(true);
 
-        const isQuickScan = submitMode === "quick_scan" || isQuickSecurityScanPrompt(trimmedInput);
-        const isDeepScan = submitMode === "deep_scan" || isDeepSecurityScanPrompt(trimmedInput);
-
-        if (isDeepScan && !session) {
-            setShowLoginModal(true);
-            setLoading(false);
-            isSubmittingRef.current = false;
-            return;
-        }
-
         if (isQuickScan || isDeepScan) {
             const placeholderMessageId = `scan-${Date.now()}`;
             const placeholderMsg: RepoChatMessage = {
@@ -515,14 +518,14 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 scanStatus: isDeepScan ? "deep_running" : "quick_running",
             };
             setMessages((prev) => [...prev, placeholderMsg]);
-            await runSecurityScanFlow(isQuickScan, isDeepScan, placeholderMessageId, scanAiAssist);
+            await runSecurityScanFlow(isQuickScan, isDeepScan, placeholderMessageId);
             return;
         }
 
         try {
             const combinedInputForServer = getRepoQueryForServer(trimmedInput, combinedInput);
-            const modelMsgId = startRepoStreamMessage(modelPreference);
-            await runRepoStreamingFlow(modelMsgId, combinedInputForServer);
+            const modelMsgId = startRepoStreamMessage(selectedModelPreference);
+            await runRepoStreamingFlow(modelMsgId, combinedInputForServer, selectedModelPreference);
         } catch (error: unknown) {
 
             console.error(error);
@@ -552,17 +555,16 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 });
             }
 
-            // Show user-friendly error message
-            const errorMsg: RepoChatMessage = {
-                id: (Date.now() + 1).toString(),
-                role: "model",
-                content: isAuthError
-                    ? "Please sign in again to continue analyzing this repository."
-                    : isPayloadTooLarge
+            if (!isAuthError) {
+                const errorMsg: RepoChatMessage = {
+                    id: (Date.now() + 1).toString(),
+                    role: "model",
+                    content: isPayloadTooLarge
                         ? "This request was too large to process. Try a narrower question focused on a specific module or folder."
                         : "I encountered an error while analyzing the code. Please try again or rephrase your question.",
-            };
-            setMessages((prev) => [...prev, errorMsg]);
+                };
+                setMessages((prev) => [...prev, errorMsg]);
+            }
         } finally {
             setLoading(false);
             isSubmittingRef.current = false;
@@ -675,7 +677,13 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                                 <span className="hidden lg:inline">Architecture</span>
                             </button>
                             <button
-                                onClick={() => setShowSecurityModal(true)}
+                                onClick={() => {
+                                    if (!session) {
+                                        setShowLoginModal(true);
+                                        return;
+                                    }
+                                    setShowSecurityModal(true);
+                                }}
                                 disabled={loading || scanning}
                                 className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all disabled:opacity-50"
                             >
@@ -846,14 +854,15 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                                                     </div>
                                                 )}
                                                 {msg.content && (
-                                                    <MessageContent
-                                                        content={msg.content + (loading && isLatestMessage && !msg.scanStatus ? "▋" : "")}
-                                                        messageId={msg.id}
-                                                        messages={messages}
-                                                        currentOwner={repoContext.owner}
-                                                        currentRepo={repoContext.repo}
-                                                    />
-                                                )}
+                                                <MessageContent
+                                                    content={msg.content + (loading && isLatestMessage && !msg.scanStatus ? "▋" : "")}
+                                                    messageId={msg.id}
+                                                    messages={messages}
+                                                    currentOwner={repoContext.owner}
+                                                    currentRepo={repoContext.repo}
+                                                    isStreaming={loading && isLatestMessage && !msg.scanStatus}
+                                                />
+                                            )}
                                             </div>
                                             {msg.scanId && (
                                                 <div className="mt-4 pt-4 border-t border-white/10 flex items-center gap-3">

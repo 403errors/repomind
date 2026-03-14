@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Shield, Sparkles, X } from "lucide-react";
 
 import { DEEP_SCAN_FILE_LIMIT, QUICK_SCAN_FILE_LIMIT } from "@/lib/chat-constants";
@@ -29,7 +28,7 @@ export function SecurityScanModal({
     onRunQuickScan,
     onRunDeepScan,
 }: SecurityScanModalProps) {
-    const [scanAiAssist, setScanAiAssist] = useState(true);
+    const scanAiAssist = true;
 
     if (!isOpen) {
         return null;
@@ -40,7 +39,6 @@ export function SecurityScanModal({
             <div className="bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-md overflow-hidden flex flex-col relative shadow-2xl">
                 <button
                     onClick={() => {
-                        setScanAiAssist(true);
                         onClose();
                     }}
                     className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors z-10"
@@ -58,7 +56,6 @@ export function SecurityScanModal({
                         <button
                             onClick={() => {
                                 onRunQuickScan(scanAiAssist);
-                                setScanAiAssist(true);
                             }}
                             className="w-full bg-zinc-800 hover:bg-zinc-700 border border-white/5 rounded-xl p-4 text-left transition-all group"
                         >
@@ -74,7 +71,6 @@ export function SecurityScanModal({
                         <button
                             onClick={() => {
                                 onRunDeepScan(scanAiAssist);
-                                setScanAiAssist(true);
                             }}
                             className="w-full bg-zinc-800 hover:bg-zinc-700 border border-red-500/20 rounded-xl p-4 text-left transition-all group"
                         >
@@ -95,7 +91,7 @@ export function SecurityScanModal({
                                 </div>
                             </div>
                             <p className="text-xs text-zinc-400 leading-relaxed">
-                                Analyzes up to {DEEP_SCAN_FILE_LIMIT} files. Runs broader deterministic analysis and can optionally include AI assistance.
+                                Analyzes up to {DEEP_SCAN_FILE_LIMIT} files. Runs broader deterministic analysis with required thinking AI assistance.
                             </p>
                         </button>
 
@@ -120,19 +116,20 @@ export function SecurityScanModal({
                         <label className="flex items-start gap-3 p-3 rounded-xl border border-red-500/20 bg-zinc-950/60">
                             <input
                                 type="checkbox"
-                                checked={scanAiAssist}
-                                onChange={(event) => setScanAiAssist(event.target.checked)}
+                                checked={true}
+                                readOnly
+                                disabled
                                 className="mt-0.5 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-red-500 focus:ring-red-500/60"
                             />
                             <div className="min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-semibold text-zinc-200">Enable AI assist</span>
+                                    <span className="text-xs font-semibold text-zinc-200">Thinking AI assist enabled</span>
                                     <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">
-                                        Recommended
+                                        Required
                                     </span>
                                 </div>
                                 <span className="text-xs text-zinc-400 leading-relaxed">
-                                    Sends selected code snippets to third-party model APIs for additional review.
+                                    Security scans always run with AI assist enabled for deeper reasoning and verification quality.
                                 </span>
                             </div>
                         </label>

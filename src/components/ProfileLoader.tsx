@@ -33,6 +33,41 @@ interface ProfileLoaderData {
     }[];
 }
 
+const PROFILE_LOADER_CACHE_TTL_MS = 15 * 60 * 1000;
+
+function getProfileLoaderCacheKey(username: string): string {
+    return `repomind_profile_loader:${username.toLowerCase()}`;
+}
+
+function readCachedProfileLoaderData(username: string): ProfileLoaderData | null {
+    if (typeof window === "undefined") return null;
+    try {
+        const raw = window.sessionStorage.getItem(getProfileLoaderCacheKey(username));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { timestamp?: number; data?: ProfileLoaderData };
+        if (!parsed?.timestamp || !parsed?.data) return null;
+        if (Date.now() - parsed.timestamp > PROFILE_LOADER_CACHE_TTL_MS) {
+            window.sessionStorage.removeItem(getProfileLoaderCacheKey(username));
+            return null;
+        }
+        return parsed.data;
+    } catch {
+        return null;
+    }
+}
+
+function writeCachedProfileLoaderData(username: string, data: ProfileLoaderData): void {
+    if (typeof window === "undefined") return;
+    try {
+        window.sessionStorage.setItem(
+            getProfileLoaderCacheKey(username),
+            JSON.stringify({ timestamp: Date.now(), data })
+        );
+    } catch {
+        // Ignore storage errors to keep loading resilient.
+    }
+}
+
 function getErrorMessage(error: unknown): string {
     if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
         return (error as { message: string }).message;
@@ -59,6 +94,12 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
 
     const loadProfile = useCallback(async () => {
         try {
+            const cached = readCachedProfileLoaderData(username);
+            if (cached) {
+                setProfileData(cached);
+                return;
+            }
+
             // Step 1: Fetch profile
             updateStep("profile", "loading", `Fetching @${username}'s profile...`);
             const profile = await fetchProfile(username);
@@ -89,7 +130,9 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
             }
 
             // All done
-            setProfileData({ profile, profileReadme, repoReadmes });
+            const nextData = { profile, profileReadme, repoReadmes };
+            setProfileData(nextData);
+            writeCachedProfileLoaderData(username, nextData);
         } catch (err: unknown) {
             console.error(err);
             setError(getErrorMessage(err));

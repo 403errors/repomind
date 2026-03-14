@@ -272,6 +272,12 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
             return;
         }
 
+        if (!session) {
+            setShowLoginModal(true);
+            isSubmittingRef.current = false;
+            return;
+        }
+
         // Check token limit
         if (totalTokens >= MAX_TOKENS) {
             toast.error("Conversation limit reached", {
@@ -328,17 +334,16 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                 });
             }
 
-            // Show user-friendly error message
-            const errorMsg: ProfileChatMessage = {
-                id: (Date.now() + 1).toString(),
-                role: "model",
-                content: isAuthError
-                    ? "Please sign in again to continue analyzing this profile."
-                    : isPayloadTooLarge
+            if (!isAuthError) {
+                const errorMsg: ProfileChatMessage = {
+                    id: (Date.now() + 1).toString(),
+                    role: "model",
+                    content: isPayloadTooLarge
                         ? "This request was too large to process. Try a narrower question focused on a specific project or timeframe."
                         : "I encountered an error while analyzing the profile. Please try again or rephrase your question.",
-            };
-            setMessages((prev) => [...prev, errorMsg]);
+                };
+                setMessages((prev) => [...prev, errorMsg]);
+            }
         } finally {
             setLoading(false);
             isSubmittingRef.current = false;
@@ -472,7 +477,9 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                     </button>
                 )}
                 <AnimatePresence initial={false}>
-                    {messages.map((msg) => (
+                    {messages.map((msg) => {
+                        const isLatestMessage = msg.id === messages[messages.length - 1]?.id;
+                        return (
                         <motion.div
                             key={msg.id}
                             initial={{ opacity: 0, y: 10 }}
@@ -539,7 +546,7 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                         )}
                                         <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words overflow-hidden w-full min-w-0">
                                             {/* Flash model loading dots */}
-                                            {msg.role === "model" && msg.modelUsed !== "thinking" && loading && msg.id === messages[messages.length - 1]?.id && !msg.content && (
+                                            {msg.role === "model" && msg.modelUsed !== "thinking" && loading && isLatestMessage && !msg.content && (
                                                 <div className="flex items-center gap-2 py-1">
                                                     <span className="flex gap-1 items-center">
                                                         {[0, 1, 2].map(i => (
@@ -555,10 +562,11 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                             )}
                                             {msg.content && (
                                                 <MessageContent
-                                                    content={msg.content + (loading && msg.id === messages[messages.length - 1]?.id ? "▋" : "")}
+                                                    content={msg.content + (loading && isLatestMessage ? "▋" : "")}
                                                     messageId={msg.id}
                                                     messages={messages}
                                                     currentOwner={profile.login}
+                                                    isStreaming={loading && isLatestMessage}
                                                 />
                                             )}
                                         </div>
@@ -566,7 +574,8 @@ export function ProfileChatInterface({ profile, profileReadme, repoReadmes }: Pr
                                 )}
                             </div>
                         </motion.div>
-                    ))}
+                        );
+                    })}
                 </AnimatePresence>
 
                 {/* Old loading bubble removed - streaming now happens inline in the last message */}

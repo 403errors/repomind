@@ -1,5 +1,5 @@
 import { getGenAI, DEFAULT_MODEL } from "./ai-client";
-import type { FunctionDeclaration } from "@google/generative-ai";
+import type { FunctionDeclaration, GenerationConfig } from "@google/generative-ai";
 import type { SecurityFinding } from "./security-scanner";
 
 /**
@@ -153,6 +153,15 @@ function normalizeVerdict(value: unknown): SecurityAdjudicationVerdict | null {
     return null;
 }
 
+function getSecurityThinkingGenerationConfig(): GenerationConfig {
+    return {
+        thinkingConfig: {
+            include_thoughts: false,
+            thinking_level: "HIGH",
+        },
+    } as unknown as GenerationConfig;
+}
+
 function extractJsonPayload(text: string): string | null {
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
@@ -259,6 +268,7 @@ ${policySummary}
         const model = getGenAI().getGenerativeModel({
             model: DEFAULT_MODEL,
             tools: [{ googleSearchRetrieval: {} }],
+            generationConfig: getSecurityThinkingGenerationConfig(),
         });
 
         const response = await model.generateContent(prompt);
@@ -304,6 +314,7 @@ export async function analyzeCodeWithGemini(
         const model = getGenAI().getGenerativeModel({
             model: DEFAULT_MODEL,
             tools: [{ functionDeclarations: securityAnalysisFunctions as unknown as FunctionDeclaration[] }],
+            generationConfig: getSecurityThinkingGenerationConfig(),
         });
 
         const filesContext = files
@@ -423,6 +434,7 @@ export async function generateSecurityPatch(params: {
     try {
         const model = getGenAI().getGenerativeModel({
             model: DEFAULT_MODEL,
+            generationConfig: getSecurityThinkingGenerationConfig(),
         });
 
         const contextSnippet = params.snippet || "";

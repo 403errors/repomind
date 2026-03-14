@@ -30,6 +30,13 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
     const [isFixing, setIsFixing] = useState(false);
     const diagramRef = useRef<HTMLDivElement>(null);
     const modalRef = useRef<HTMLDivElement>(null);
+    const isGenerating = isFixing || isInternalStreaming || (isStreaming && !svg);
+
+    useEffect(() => {
+        if (isStreaming) {
+            setIsInternalStreaming(true);
+        }
+    }, [isStreaming]);
 
     // Use a stable ID based on chart content to prevent re-renders
     const id = useMemo(() => {
@@ -215,8 +222,12 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
     return (
         <>
             <div
-                className="my-4 group relative cursor-zoom-in"
-                onClick={() => setIsModalOpen(true)}
+                className={`my-4 group relative ${isGenerating ? "cursor-default" : "cursor-zoom-in"}`}
+                onClick={() => {
+                    if (!isGenerating && svg) {
+                        setIsModalOpen(true);
+                    }
+                }}
             >
                 <div
                     ref={diagramRef}
@@ -226,23 +237,25 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                 />
 
                 {/* Overlay controls */}
-                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                    <button
-                        onClick={exportToPNG}
-                        className="p-2 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg backdrop-blur-sm"
-                        title="Export as PNG"
-                    >
-                        <Download className="w-4 h-4" />
-                    </button>
-                    <button
-                        className="p-2 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg backdrop-blur-sm"
-                        title="View Fullscreen"
-                    >
-                        <Maximize2 className="w-4 h-4" />
-                    </button>
-                </div>
+                {!isGenerating && svg && (
+                    <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                        <button
+                            onClick={exportToPNG}
+                            className="p-2 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg backdrop-blur-sm"
+                            title="Export as PNG"
+                        >
+                            <Download className="w-4 h-4" />
+                        </button>
+                        <button
+                            className="p-2 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg backdrop-blur-sm"
+                            title="View Fullscreen"
+                        >
+                            <Maximize2 className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
 
-                {(isFixing || isInternalStreaming || (isStreaming && !svg)) && (
+                {isGenerating && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900/50 backdrop-blur-sm rounded-lg z-10">
                         <div className="flex items-center gap-2 text-zinc-400">
                             <Sparkles className="w-5 h-5 animate-pulse text-purple-400" />
@@ -294,13 +307,15 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                                     Diagram Preview
                                 </h3>
                                 <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={exportToPNG}
-                                        className="p-2 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"
-                                        title="Export as PNG"
-                                    >
-                                        <Download className="w-5 h-5" />
-                                    </button>
+                                    {!isGenerating && svg && (
+                                        <button
+                                            onClick={exportToPNG}
+                                            className="p-2 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                                            title="Export as PNG"
+                                        >
+                                            <Download className="w-5 h-5" />
+                                        </button>
+                                    )}
                                     <button
                                         onClick={() => setIsModalOpen(false)}
                                         className="p-2 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"

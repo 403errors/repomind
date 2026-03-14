@@ -25,6 +25,41 @@ interface RepoLoaderData {
     hiddenFiles: { path: string; reason: string }[];
 }
 
+const REPO_LOADER_CACHE_TTL_MS = 15 * 60 * 1000;
+
+function getRepoLoaderCacheKey(query: string): string {
+    return `repomind_repo_loader:${query.toLowerCase()}`;
+}
+
+function readCachedRepoLoaderData(query: string): RepoLoaderData | null {
+    if (typeof window === "undefined") return null;
+    try {
+        const raw = window.sessionStorage.getItem(getRepoLoaderCacheKey(query));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { timestamp?: number; data?: RepoLoaderData };
+        if (!parsed?.timestamp || !parsed?.data) return null;
+        if (Date.now() - parsed.timestamp > REPO_LOADER_CACHE_TTL_MS) {
+            window.sessionStorage.removeItem(getRepoLoaderCacheKey(query));
+            return null;
+        }
+        return parsed.data;
+    } catch {
+        return null;
+    }
+}
+
+function writeCachedRepoLoaderData(query: string, data: RepoLoaderData): void {
+    if (typeof window === "undefined") return;
+    try {
+        window.sessionStorage.setItem(
+            getRepoLoaderCacheKey(query),
+            JSON.stringify({ timestamp: Date.now(), data })
+        );
+    } catch {
+        // Ignore storage errors to keep loading resilient.
+    }
+}
+
 function getErrorMessage(error: unknown): string {
     if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
         return (error as { message: string }).message;
@@ -51,6 +86,12 @@ export function RepoLoader({ query, initialPrompt }: RepoLoaderProps) {
 
     const loadRepo = useCallback(async () => {
         try {
+            const cached = readCachedRepoLoaderData(query);
+            if (cached) {
+                setRepoData(cached);
+                return;
+            }
+
             // Step 1: Fetch repo data
             updateStep("fetch", "loading", `Fetching repository ${query}...`);
             const data = await fetchGitHubData(query);
@@ -71,18 +112,15 @@ export function RepoLoader({ query, initialPrompt }: RepoLoaderProps) {
 
             // Step 2: Analyze structure
             updateStep("analyze", "loading", `Analyzing ${fileTree.length} files...`);
-
-            // Simulate a brief delay for analysis visualization
-            await new Promise(resolve => setTimeout(resolve, 800));
-
             updateStep("analyze", "complete", "File structure analyzed");
 
             // Step 3: Prepare environment
             updateStep("env", "loading", "Preparing chat environment...");
-            await new Promise(resolve => setTimeout(resolve, 500));
             updateStep("env", "complete", "Ready to chat");
 
-            setRepoData({ repo, fileTree, hiddenFiles });
+            const nextData = { repo, fileTree, hiddenFiles };
+            setRepoData(nextData);
+            writeCachedRepoLoaderData(query, nextData);
 
         } catch (err: unknown) {
             console.error(err);
