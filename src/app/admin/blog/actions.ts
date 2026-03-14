@@ -14,7 +14,7 @@ async function checkAdmin() {
   }
 }
 
-export async function savePostAction(data: any) {
+export async function savePostAction(data: Partial<BlogPost>) {
   await checkAdmin();
   
   const result = await upsertPost(data);

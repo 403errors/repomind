@@ -5,7 +5,7 @@ import { BlogPost } from "@prisma/client";
 import { EnhancedMarkdown } from "@/components/EnhancedMarkdown";
 import { Save, Send, Eye, Edit3, ArrowLeft, Image as ImageIcon, Globe, Lock } from "lucide-react";
 import Link from "next/link";
-import { savePostAction } from "../actions";
+import { savePostAction } from "@/app/admin/blog/actions";
 import { useRouter } from "next/navigation";
 
 interface BlogEditorProps {
@@ -32,7 +32,7 @@ export default function BlogEditor({ initialPost }: BlogEditorProps) {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setPost(prev => ({ ...prev, [name]: value }));
+    setPost((prev: Partial<BlogPost>) => ({ ...prev, [name]: value }));
   };
 
   const handleSave = async (published: boolean) => {
