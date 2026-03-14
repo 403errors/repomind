@@ -32,6 +32,10 @@ type StreamChunkShape = {
   }>;
 };
 
+const MAX_REPO_COMMITS = 10;
+const MAX_PROFILE_COMMITS = 20;
+const SUPPORT_EMAIL = "pieisnot22by7@gmail.com";
+
 function asObject(value: unknown): JsonObject {
   return value && typeof value === "object" ? (value as JsonObject) : {};
 }
@@ -62,7 +66,7 @@ async function fetchWebSearchSnapshot(
 ): Promise<{ summary: string; queryHint: string }> {
   const searchModel = getGenAI().getGenerativeModel({
     model: getChatModelForPreference(modelPreference),
-    tools: [{ googleSearch: {} }],
+    tools: [{ googleSearch: {} }] as any,
     generationConfig: getThinkingGenerationConfig(false, "LOW"),
   });
 
@@ -283,13 +287,16 @@ export async function answerWithContext(
   let prompt = buildRepoMindPrompt({ question, context: enrichedContext, repoDetails, historyText });
   const isProfileContext = repoDetails.repo === "profile";
   if (isProfileContext) {
-    prompt += `\n\n[PROFILE TOOLS MODE]: You may use profile tools for both Lite and Thinking modes.
-    - Use \`fetch_recent_commits\` when the user asks about coding activity, commit quality, or recent work.
-    - Use \`fetch_repos_by_age\` when the user asks about oldest/newest repos or long-term journey.
-    - Prefer existing context first; call tools only when additional data is needed.`;
+    prompt += `\n\n[PROFILE TOOLS MODE]:
+    - Use \`fetch_recent_commits\` for coding activity. 
+    - Limit: 20 commits for overall profile, 10 for specific repo mentions.
+    - **STRICT GROUNDING**: If the user asks for more than these limits, you MUST fetch the maximum (20 or 10) and explicitly state: "Note: Currently, the limit for fetching commits is \${maxAllowed}. Please contact **${SUPPORT_EMAIL}** if you need more usage. I will provide the answer on the basis of the latest \${maxAllowed} commits."
+    - Do NOT summarize more than the tool returns. If only 10 are returned, you only describe 10.`;
   } else {
-    prompt += `\n\n[REPO TOOLS MODE]: You may use \`fetch_recent_commits\` when commit history is needed for this repository.
-    - Use it only when the user asks for recency, evolution, blame-like activity, or commit intent.`;
+    prompt += `\n\n[REPO TOOLS MODE]:
+    - Use \`fetch_recent_commits\` for history. Limit: 10 commits.
+    - **STRICT GROUNDING**: If the user asks for more than 10, you MUST fetch 10 and explicitly state: "Note: Currently, the limit for fetching commits is 10. Please contact **${SUPPORT_EMAIL}** if you need more usage. I will provide the answer on the basis of the latest 10 commits."
+    - Do NOT hallucinate commits. Only use what the tool provides.`;
   }
 
   const tools = buildTools(repoDetails);
@@ -358,18 +365,22 @@ export async function* answerWithContextStream(
   let prompt = buildRepoMindPrompt({ question, context: enrichedContext, repoDetails, historyText });
   const isProfileContext = repoDetails.repo === "profile";
   if (isProfileContext) {
-    prompt += `\n\n[PROFILE TOOLS MODE]: You may use profile tools for both Lite and Thinking modes.
-    - Use \`fetch_recent_commits\` for coding activity/recency questions.
-    - Use \`fetch_repos_by_age\` for oldest/newest/journey timeline questions.
-    - Only use tools when context is insufficient.`;
+    prompt += `\n\n[PROFILE TOOLS MODE]:
+    - Use \`fetch_recent_commits\` for coding activity. Limit: 20 (overall) or 10 (specific repo).
+    - If user asks for more, you MUST fetch the max allowed and say: "Note: Currently, the limit for fetching commits is \${maxAllowed}. Please contact **${SUPPORT_EMAIL}** if you need more usage. I will provide the answer on the basis of the latest \${maxAllowed} commits."`;
   } else {
-    prompt += `\n\n[REPO TOOLS MODE]: Use \`fetch_recent_commits\` when commit history is needed for this repository.`;
+    prompt += `\n\n[REPO TOOLS MODE]: 
+    - Use \`fetch_recent_commits\` for history. Limit: 10.
+    - If user asks for more, you MUST fetch 10 and say: "Note: Currently, the limit for fetching commits is 10. Please contact **${SUPPORT_EMAIL}** if you need more usage. I will provide the answer on the basis of the latest 10 commits."`;
   }
 
   const tools = buildTools(repoDetails);
+  const modelName = getChatModelForPreference(modelPreference);
+
+  console.log(`[answerWithContextStream] Initializing chat with model: ${modelName} (${tools.length} tools available)`);
 
   const model = getGenAI().getGenerativeModel({
-    model: getChatModelForPreference(modelPreference),
+    model: modelName,
     tools,
     generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", modelPreference === "thinking" ? "HIGH" : "LOW"),
   });
@@ -377,12 +388,25 @@ export async function* answerWithContextStream(
   const chat = model.startChat();
 
   // --- Phase 1: Send message (non-streaming) to detect if a tool call is needed ---
-  const firstResult = await chat.sendMessage(prompt);
-  const firstResponse = firstResult.response;
+  let firstResponse;
+  try {
+    console.log(`[answerWithContextStream] Sending Phase 1 request...`);
+    yield `STATUS:Analyzing context and reasoning with AI...`;
+    const firstResult = await chat.sendMessage(prompt);
+    firstResponse = firstResult.response;
+    console.log(`[answerWithContextStream] Phase 1 response received.`);
+  } catch (error) {
+    console.error(`[answerWithContextStream] Phase 1 sendMessage failed:`, error);
+    yield `STATUS:Error during AI reasoning phase. Please try again.`;
+    throw error;
+  }
+
   const functionCalls = firstResponse.functionCalls?.();
 
   if (functionCalls && functionCalls.length > 0) {
     const call = functionCalls[0] as FunctionCallShape;
+    console.log(`[answerWithContextStream] Tool call detected: ${call.name}`);
+
     const {
       functionResponseData,
       statusMessage,
@@ -391,6 +415,7 @@ export async function* answerWithContextStream(
     } = await resolveToolCall(call, repoDetails);
 
     if (statusMessage) {
+      console.log(`[answerWithContextStream] Tool progress: ${statusMessage}`);
       yield `STATUS:${statusMessage}`;
     }
     if (toolEvent) {
@@ -401,33 +426,44 @@ export async function* answerWithContextStream(
     }
 
     yield "STATUS:Preparing answer...";
+    console.log(`[answerWithContextStream] Sending Phase 2 (tool response) stream...`);
 
     // --- Phase 2: Send function response and stream the final answer ---
-    const streamResult = await chat.sendMessageStream([{
-      functionResponse: {
-        name: typeof call.name === "string" ? call.name : "unknown_tool",
-        response: functionResponseData
-      }
-    }]);
+    try {
+      const streamResult = await chat.sendMessageStream([{
+        functionResponse: {
+          name: typeof call.name === "string" ? call.name : "unknown_tool",
+          response: functionResponseData
+        }
+      }]);
 
-    for await (const chunk of streamResult.stream) {
-      const text = chunk.text();
-      if (text) yield text;
+      for await (const chunk of streamResult.stream) {
+        const parts = ((chunk as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
+        for (const part of parts) {
+          if (part.thought && modelPreference === "thinking") {
+            yield `THOUGHT:${part.text}`;
+          } else if (part.text) {
+            yield part.text;
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[answerWithContextStream] Phase 2 stream failed:`, error);
+      throw error;
     }
+    console.log(`[answerWithContextStream] Stream complete.`);
     return;
   }
 
-  // No function call — stream the direct answer
-  const streamResult = await chat.sendMessageStream(prompt);
-  for await (const chunk of streamResult.stream) {
-    const parts = ((chunk as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
-    for (const part of parts) {
-      if (part.thought && modelPreference === "thinking") {
-        yield `THOUGHT:${part.text}`;
-      } else if (part.text) {
-        yield part.text;
-      }
-    }
+  // No function call — we could stream the text from firstResponse,
+  // but to provide a consistent streaming experience for non-tool cases,
+  // we re-run the prompt as a stream. 
+  // NOTE: This adds some latency, but if no tools were called, firstResponse.text() is already here.
+  // We can yield it directly to save time!
+  console.log(`[answerWithContextStream] No tool call needed. Yielding direct answer.`);
+  const directText = firstResponse.text();
+  if (directText) {
+    yield directText;
   }
 }
 
@@ -439,12 +475,12 @@ function buildTools(repoDetails: { owner: string; repo: string }): GeminiTool[] 
         functionDeclarations: [
           {
             name: "fetch_recent_commits",
-            description: "Fetch recent commits either overall or for a specific repository.",
+            description: "Fetch recent commits. Provide a specific repository name, or leave empty (or use 'overall') for commits across all repositories.",
             parameters: {
               type: "OBJECT",
               properties: {
                 repository: { type: "STRING", description: "Optional repository name for repo-specific commits." },
-                limit: { type: "NUMBER", description: "Optional commit limit." },
+                limit: { type: "NUMBER", description: "Commit limit (MAX 20 for overall, 10 for specific repo)." },
               }
             }
           },
@@ -472,7 +508,7 @@ function buildTools(repoDetails: { owner: string; repo: string }): GeminiTool[] 
           parameters: {
             type: "OBJECT",
             properties: {
-              limit: { type: "NUMBER", description: "Optional commit limit." },
+              limit: { type: "NUMBER", description: "Commit limit (MAX 10)." },
             }
           }
         },
@@ -494,35 +530,60 @@ async function resolveToolCall(
   const args = asObject(call.args);
 
   if (callName === "fetch_recent_commits") {
-    const rawLimit = Number(args.limit);
-    const requestedLimit = Number.isFinite(rawLimit) ? Math.max(1, Math.floor(rawLimit)) : undefined;
-    const limit = Math.min(requestedLimit ?? (repoDetails.repo === "profile" ? 20 : 10), repoDetails.repo === "profile" ? 20 : 10);
+    const rawLimit = args.limit ? Number(args.limit) : undefined;
+    const requestedLimit = (typeof rawLimit === "number" && Number.isFinite(rawLimit)) ? Math.max(1, Math.floor(rawLimit)) : undefined;
 
     if (repoDetails.repo === "profile") {
       const repository = typeof args.repository === "string" ? args.repository.trim() : "";
-      if (repository) {
-        const snapshot = await getRecentRepoCommitsSnapshot(repoDetails.owner, repository, Math.min(limit, 10));
+      const isSpecficRepo = repository && repository.toLowerCase() !== "overall";
+      const maxAllowed = isSpecficRepo ? MAX_REPO_COMMITS : MAX_PROFILE_COMMITS;
+      const limit = Math.min(requestedLimit ?? maxAllowed, maxAllowed);
+      const limitExceeded = (requestedLimit !== undefined && requestedLimit > maxAllowed);
+
+      if (isSpecficRepo) {
+        const snapshot = await getRecentRepoCommitsSnapshot(repoDetails.owner, repository, limit);
         return {
-          functionResponseData: { commits: snapshot.commits, scope: "repository", repository },
-          statusMessage: `Fetching latest 10 commits of ${repository}...`,
+          functionResponseData: {
+            commits: snapshot.commits,
+            scope: "repository",
+            repository,
+            limitExceeded,
+            maxAllowed
+          },
+          statusMessage: `Fetching latest ${limit} commits of ${repository}...`,
           toolEvent: { name: "fetch_recent_commits", detail: repository, usageUnits: 1 },
           commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
         };
       }
 
-      const snapshot = await getRecentProfileCommitsSnapshot(repoDetails.owner, Math.min(limit, 20));
+      const snapshot = await getRecentProfileCommitsSnapshot(repoDetails.owner, limit);
       return {
-        functionResponseData: { commits: snapshot.commits, scope: "overall" },
+        functionResponseData: {
+          commits: snapshot.commits,
+          scope: "overall",
+          limitExceeded,
+          maxAllowed
+        },
         statusMessage: "Fetching latest commits across repositories...",
         toolEvent: { name: "fetch_recent_commits", detail: "overall", usageUnits: 1 },
         commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
       };
     }
 
-    const snapshot = await getRecentRepoCommitsSnapshot(repoDetails.owner, repoDetails.repo, Math.min(limit, 10));
+    const maxAllowed = MAX_REPO_COMMITS;
+    const limit = Math.min(requestedLimit ?? maxAllowed, maxAllowed);
+    const limitExceeded = (requestedLimit !== undefined && requestedLimit > maxAllowed);
+
+    const snapshot = await getRecentRepoCommitsSnapshot(repoDetails.owner, repoDetails.repo, limit);
     return {
-      functionResponseData: { commits: snapshot.commits, scope: "repository", repository: repoDetails.repo },
-      statusMessage: `Fetching latest 10 commits of ${repoDetails.owner}/${repoDetails.repo}...`,
+      functionResponseData: {
+        commits: snapshot.commits,
+        scope: "repository",
+        repository: repoDetails.repo,
+        limitExceeded,
+        maxAllowed
+      },
+      statusMessage: `Fetching latest ${limit} commits of ${repoDetails.owner}/${repoDetails.repo}...`,
       toolEvent: { name: "fetch_recent_commits", detail: `${repoDetails.owner}/${repoDetails.repo}`, usageUnits: 1 },
       commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
     };

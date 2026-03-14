@@ -598,6 +598,7 @@ export async function* processProfileQueryStream(
     let crossRepoSelectedFiles = 0;
 
     try {
+        console.log(`[processProfileQueryStream] Starting query: "${query}" for user: ${profileContext.username}`);
         yield {
             type: "status",
             message: isThinking
@@ -607,6 +608,7 @@ export async function* processProfileQueryStream(
         };
 
         if (!profileContext.recentCommits || profileContext.recentCommits.length === 0) {
+            console.log(`[processProfileQueryStream] No commits in context, fetching fresh for ${profileContext.username}...`);
             const snapshot = await getRecentProfileCommitsSnapshot(profileContext.username, 20);
             profileContext = {
                 ...profileContext,
@@ -614,6 +616,7 @@ export async function* processProfileQueryStream(
                 recentCommitFreshnessLabel: snapshot.freshness.label,
             };
             commitFreshnessLabel = `Commits checked: ${snapshot.freshness.label}`;
+            console.log(`[processProfileQueryStream] Fetched ${snapshot.commits.length} commits.`);
         } else if (profileContext.recentCommitFreshnessLabel) {
             commitFreshnessLabel = `Commits checked: ${profileContext.recentCommitFreshnessLabel}`;
         }
@@ -666,6 +669,7 @@ export async function* processProfileQueryStream(
             };
         }
 
+        console.log(`[processProfileQueryStream] Context built (${context.length} chars). Launching Gemini answer stream...`);
         yield {
             type: "status",
             message: isThinking

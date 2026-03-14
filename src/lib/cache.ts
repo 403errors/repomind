@@ -112,12 +112,12 @@ function getToolBudgetLimit(audience: CacheAudience): number {
     return audience === "anonymous" ? TOOL_BUDGET_MAX_ANON : TOOL_BUDGET_MAX_AUTH;
 }
 
-function getProfileCommitSnapshotKey(username: string): string {
-    return `commit_snapshot:profile:${username.toLowerCase()}`;
+function getProfileCommitSnapshotKey(username: string, limit: number): string {
+    return `commit_snapshot:profile:${username.toLowerCase()}:${limit}`;
 }
 
-function getRepoCommitSnapshotKey(owner: string, repo: string): string {
-    return `commit_snapshot:repo:${owner.toLowerCase()}/${repo.toLowerCase()}`;
+function getRepoCommitSnapshotKey(owner: string, repo: string, limit: number): string {
+    return `commit_snapshot:repo:${owner.toLowerCase()}/${repo.toLowerCase()}:${limit}`;
 }
 
 export async function resolveAnonymousConsecutivePaths(
@@ -202,9 +202,10 @@ export async function consumeToolBudgetUsage(
 }
 
 export async function getCachedProfileCommitSnapshot<T>(
-    username: string
+    username: string,
+    limit: number
 ): Promise<CommitSnapshotCachePayload<T> | null> {
-    const key = getProfileCommitSnapshotKey(username);
+    const key = getProfileCommitSnapshotKey(username, limit);
     const cached = await safeKvOperation(() => kv.get<CommitSnapshotCachePayload<T>>(key));
     if (!cached || typeof cached !== "object") {
         return null;
@@ -217,9 +218,10 @@ export async function getCachedProfileCommitSnapshot<T>(
 
 export async function cacheProfileCommitSnapshot<T>(
     username: string,
+    limit: number,
     data: T
 ): Promise<void> {
-    const key = getProfileCommitSnapshotKey(username);
+    const key = getProfileCommitSnapshotKey(username, limit);
     const payload: CommitSnapshotCachePayload<T> = {
         data,
         fetchedAt: Date.now(),
@@ -229,9 +231,10 @@ export async function cacheProfileCommitSnapshot<T>(
 
 export async function getCachedRepoCommitSnapshot<T>(
     owner: string,
-    repo: string
+    repo: string,
+    limit: number
 ): Promise<CommitSnapshotCachePayload<T> | null> {
-    const key = getRepoCommitSnapshotKey(owner, repo);
+    const key = getRepoCommitSnapshotKey(owner, repo, limit);
     const cached = await safeKvOperation(() => kv.get<CommitSnapshotCachePayload<T>>(key));
     if (!cached || typeof cached !== "object") {
         return null;
@@ -245,9 +248,10 @@ export async function getCachedRepoCommitSnapshot<T>(
 export async function cacheRepoCommitSnapshot<T>(
     owner: string,
     repo: string,
+    limit: number,
     data: T
 ): Promise<void> {
-    const key = getRepoCommitSnapshotKey(owner, repo);
+    const key = getRepoCommitSnapshotKey(owner, repo, limit);
     const payload: CommitSnapshotCachePayload<T> = {
         data,
         fetchedAt: Date.now(),

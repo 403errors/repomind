@@ -773,7 +773,6 @@ export async function getRecentCommitsForUser(username: string, repos: string[],
         const { data } = await octokit.rest.repos.listCommits({
           owner: username,
           repo,
-          author: username,
           per_page: 5,
         });
         return data.map(commit => ({
@@ -813,7 +812,7 @@ export async function getRecentProfileCommitsSnapshot(
   username: string,
   limit: number = 20
 ): Promise<{ commits: RecentCommitSnapshot[]; freshness: CommitFreshness }> {
-  const cached = await getCachedProfileCommitSnapshot<RecentCommitSnapshot[]>(username);
+  const cached = await getCachedProfileCommitSnapshot<RecentCommitSnapshot[]>(username, limit);
   if (cached) {
     return {
       commits: cached.data,
@@ -822,11 +821,13 @@ export async function getRecentProfileCommitsSnapshot(
   }
 
   const repos = await getUserRepos(username);
+  console.log(`[getRecentProfileCommitsSnapshot] Fetching commits for ${repos.length} repos (limit ${limit})...`);
   const commits = await getRecentCommitsForUser(
     username,
     repos.map((repo) => repo.name),
     limit
   );
+  console.log(`[getRecentProfileCommitsSnapshot] Found ${commits.length} total commits.`);
 
   const normalized: RecentCommitSnapshot[] = commits.slice(0, limit).map((commit) => ({
     repo: String(commit.repo ?? ""),
@@ -835,7 +836,7 @@ export async function getRecentProfileCommitsSnapshot(
     sha: String(commit.sha ?? "").slice(0, 7),
   }));
 
-  await cacheProfileCommitSnapshot(username, normalized);
+  await cacheProfileCommitSnapshot(username, limit, normalized);
 
   return {
     commits: normalized,
@@ -848,7 +849,7 @@ export async function getRecentRepoCommitsSnapshot(
   repo: string,
   limit: number = 10
 ): Promise<{ commits: RecentCommitSnapshot[]; freshness: CommitFreshness }> {
-  const cached = await getCachedRepoCommitSnapshot<RecentCommitSnapshot[]>(owner, repo);
+  const cached = await getCachedRepoCommitSnapshot<RecentCommitSnapshot[]>(owner, repo, limit);
   if (cached) {
     return {
       commits: cached.data,
@@ -870,7 +871,7 @@ export async function getRecentRepoCommitsSnapshot(
       sha: commit.sha.slice(0, 7),
     }));
 
-    await cacheRepoCommitSnapshot(owner, repo, commits);
+    await cacheRepoCommitSnapshot(owner, repo, limit, commits);
     return {
       commits,
       freshness: toFreshness(Date.now(), false),
