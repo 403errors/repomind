@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
@@ -22,8 +23,9 @@ import AuthButton from "@/components/AuthButton";
 import Footer from "@/components/Footer";
 import type { SearchHistoryItem } from "@/lib/services/history-service";
 import { INVALID_SESSION_ERROR_PARAM } from "@/lib/session-guard";
+import { BlogPost } from "@prisma/client";
 
-export default function HomeClient() {
+export default function HomeClient({ initialPosts = [] }: { initialPosts?: BlogPost[] }) {
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
@@ -193,6 +195,66 @@ export default function HomeClient() {
             <div className="relative z-10 w-full bg-zinc-950 border-t border-zinc-900">
                 <WallOfLove />
             </div>
+
+            {initialPosts.length > 0 && (
+                <section className="relative z-10 w-full bg-black py-24 px-6 border-t border-white/5">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
+                            <div>
+                                <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-4">
+                                    Engineering <span className="bg-gradient-to-r from-purple-400 to-blue-500 bg-clip-text text-transparent">Insights</span>
+                                </h2>
+                                <p className="text-zinc-400 text-lg max-w-2xl">
+                                    Latest updates from the lab on AI-driven code intelligence and security.
+                                </p>
+                            </div>
+                            <Link 
+                                href="/blog" 
+                                className="inline-flex items-center gap-2 text-sm font-bold text-purple-400 hover:text-purple-300 transition-colors group px-4 py-2 rounded-xl bg-purple-500/5 border border-purple-500/10"
+                            >
+                                View all insights <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                            </Link>
+                        </div>
+
+                        <div className="grid md:grid-cols-3 gap-8">
+                            {initialPosts.map((post) => (
+                                <Link 
+                                    key={post.slug} 
+                                    href={`/blog/${post.slug}`}
+                                    className="group flex flex-col h-full bg-zinc-900/40 border border-white/5 rounded-3xl p-5 hover:bg-zinc-900/60 hover:border-white/10 transition-all"
+                                >
+                                    <div className="relative aspect-video rounded-2xl overflow-hidden mb-5 border border-white/5">
+                                        <Image 
+                                            src={post.image} 
+                                            alt={post.title}
+                                            fill
+                                            className="object-cover group-hover:scale-105 transition-transform duration-500"
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 text-[10px] font-bold border border-purple-500/20 uppercase">
+                                            {post.category}
+                                        </span>
+                                        <span className="text-zinc-600 text-[10px] uppercase font-bold tracking-tighter">
+                                            {post.date}
+                                        </span>
+                                    </div>
+                                    <h3 className="text-xl font-bold mb-3 group-hover:text-purple-400 transition-colors line-clamp-2">
+                                        {post.title}
+                                    </h3>
+                                    <p className="text-zinc-400 text-sm italic opacity-80 line-clamp-2 mb-6">
+                                        {post.excerpt}
+                                    </p>
+                                    <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
+                                        <span className="text-xs font-bold text-zinc-300">Read insight</span>
+                                        <ArrowRight size={14} className="text-zinc-500 group-hover:text-purple-400 group-hover:translate-x-1 transition-all" />
+                                    </div>
+                                </Link>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+            )}
 
             <Footer />
 

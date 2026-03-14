@@ -9,26 +9,26 @@ datasource db {
 }
 
 model User {
-  id             String         @id @default(cuid())
-  name           String?
-  email          String?        @unique
-  emailVerified  DateTime?
-  image          String?
-  githubLogin    String?        @unique
-  queryCount     Int            @default(0)
-  lastQueryAt    DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  accounts       Account[]
-  sessions       Session[]
-  repoScans      RepoScan[]
-  createdShareLinks RepoScanShareLink[] @relation("UserCreatedScanShareLinks")
-  submittedFalsePositives ReportFalsePositive[] @relation("UserSubmittedFalsePositives")
-  reviewedFalsePositives  ReportFalsePositive[] @relation("UserReviewedFalsePositives")
-  requestedFixVerificationRuns FixVerificationRun[] @relation("UserRequestedFixVerificationRuns")
-  recentSearches RecentSearch[]
-  conversations  ChatConversation[]
-  emailDeliveries TransactionalEmailDelivery[]
+  id                           String                       @id @default(cuid())
+  name                         String?
+  email                        String?                      @unique
+  emailVerified                DateTime?
+  image                        String?
+  githubLogin                  String?                      @unique
+  createdAt                    DateTime                     @default(now())
+  updatedAt                    DateTime                     @updatedAt
+  lastQueryAt                  DateTime?
+  queryCount                   Int                          @default(0)
+  accounts                     Account[]
+  conversations                ChatConversation[]
+  requestedFixVerificationRuns FixVerificationRun[]         @relation("UserRequestedFixVerificationRuns")
+  recentSearches               RecentSearch[]
+  repoScans                    RepoScan[]
+  createdShareLinks            RepoScanShareLink[]          @relation("UserCreatedScanShareLinks")
+  reviewedFalsePositives       ReportFalsePositive[]        @relation("UserReviewedFalsePositives")
+  submittedFalsePositives      ReportFalsePositive[]        @relation("UserSubmittedFalsePositives")
+  sessions                     Session[]
+  emailDeliveries              TransactionalEmailDelivery[]
 }
 
 model Account {
@@ -36,14 +36,14 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String?  @db.Text
-  access_token      String?  @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String?  @db.Text
+  id_token          String?
   session_state     String?
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([provider, providerAccountId])
 }
@@ -64,24 +64,205 @@ model VerificationToken {
 }
 
 model RepoScan {
-  id        String   @id
-  owner     String
-  repo      String
-  timestamp BigInt
-  expiresAt DateTime
-  depth     String
-  summary   Json
-  findings  Json
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  shareLinks RepoScanShareLink[]
+  id                       String                    @id
+  owner                    String
+  repo                     String
+  timestamp                BigInt
+  depth                    String
+  summary                  Json
+  findings                 Json
+  userId                   String?
+  createdAt                DateTime                  @default(now())
+  expiresAt                DateTime
+  fixVerificationRuns      FixVerificationRun[]
+  user                     User?                     @relation(fields: [userId], references: [id])
+  shareLinks               RepoScanShareLink?
   falsePositiveSubmissions ReportFalsePositive[]
-  findingVerifications ScanFindingVerification[]
-  fixVerificationRuns FixVerificationRun[]
-  createdAt DateTime @default(now())
+  findingVerifications     ScanFindingVerification[]
 
   @@index([owner, repo, timestamp(sort: Desc)])
   @@index([userId, timestamp(sort: Desc)])
+}
+
+model ScanFindingVerification {
+  id                    String                 @id @default(cuid())
+  scanId                String
+  owner                 String
+  repo                  String
+  findingFingerprint    String
+  findingIndex          Int
+  ruleId                String?
+  title                 String
+  severity              String
+  type                  String
+  file                  String
+  line                  Int?
+  confidence            String?
+  verificationStatus    FindingLifecycleStatus
+  lifecycleStatus       FindingLifecycleStatus
+  gateDecision          FindingGateDecision
+  verificationScore     Float?
+  verificationSignals   Json?
+  verificationRationale String?
+  exploitabilityTag     String?
+  closedAt              DateTime?
+  reopenedAt            DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  scan                  RepoScan               @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, findingFingerprint, findingIndex])
+  @@index([scanId, createdAt(sort: Desc)])
+  @@index([owner, repo, findingFingerprint, createdAt(sort: Desc)])
+  @@index([lifecycleStatus, createdAt(sort: Desc)])
+}
+
+model FixVerificationRun {
+  id                     String                   @id @default(cuid())
+  scanId                 String
+  findingFingerprint     String
+  owner                  String
+  repo                   String
+  changedFiles           Json
+  status                 FixVerificationRunStatus @default(PENDING)
+  regressionTestsPassed  Boolean?
+  regressionSummary      String?
+  targetedRescanPassed   Boolean?
+  targetedRescanFindings Int?
+  fullRescanTriggered    Boolean                  @default(false)
+  fullRescanPassed       Boolean?
+  closeReasons           Json?
+  finalizedAt            DateTime?
+  autoSignedOffAt        DateTime?
+  requestedByUserId      String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  requestedByUser        User?                    @relation("UserRequestedFixVerificationRuns", fields: [requestedByUserId], references: [id])
+  scan                   RepoScan                 @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId, createdAt(sort: Desc)])
+  @@index([owner, repo, findingFingerprint, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model RepoScanShareLink {
+  id              String    @id @default(cuid())
+  scanId          String    @unique
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  lastAccessedAt  DateTime?
+  accessCount     Int       @default(0)
+  createdByUser   User?     @relation("UserCreatedScanShareLinks", fields: [createdByUserId], references: [id])
+  scan            RepoScan  @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId, createdAt(sort: Desc)])
+  @@index([createdByUserId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+model ReportFalsePositive {
+  id                 String                    @id @default(cuid())
+  scanId             String
+  owner              String
+  repo               String
+  findingFingerprint String
+  findingIndex       Int
+  title              String
+  severity           String
+  type               String
+  file               String
+  line               Int?
+  confidence         String?
+  isSharedView       Boolean                   @default(false)
+  submittedByUserId  String?
+  status             ReportFalsePositiveStatus @default(PENDING)
+  reviewedByUserId   String?
+  reviewedAt         DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  reason             ReportFalsePositiveReason
+  details            String
+  reviewedByUser     User?                     @relation("UserReviewedFalsePositives", fields: [reviewedByUserId], references: [id])
+  scan               RepoScan                  @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  submittedByUser    User?                     @relation("UserSubmittedFalsePositives", fields: [submittedByUserId], references: [id])
+
+  @@index([scanId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([submittedByUserId, createdAt(sort: Desc)])
+}
+
+model RecentSearch {
+  id        String @id @default(cuid())
+  userId    String
+  query     String
+  type      String
+  timestamp BigInt
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, query])
+  @@index([userId, timestamp(sort: Desc)])
+}
+
+model ChatConversation {
+  id              String   @id @default(cuid())
+  userId          String
+  conversationKey String
+  scope           String
+  owner           String?
+  repo            String?
+  username        String?
+  messages        Json
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, conversationKey])
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+model TransactionalEmailDelivery {
+  id                String                     @id @default(cuid())
+  userId            String
+  template          TransactionalEmailTemplate
+  status            TransactionalEmailStatus   @default(PENDING)
+  toEmail           String
+  templateData      Json?
+  attempts          Int                        @default(0)
+  lastError         String?
+  providerMessageId String?
+  providerEventType String?
+  providerPayload   Json?
+  lastAttemptAt     DateTime?
+  nextRetryAt       DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  user              User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, template])
+  @@index([status, nextRetryAt])
+  @@index([providerMessageId])
+}
+
+model BlogPost {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  title     String
+  excerpt   String
+  content   String
+  date      String?
+  author    String
+  category  String
+  image     String
+  published Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([published, createdAt(sort: Desc)])
+  @@index([slug])
 }
 
 enum FindingLifecycleStatus {
@@ -105,85 +286,6 @@ enum FixVerificationRunStatus {
   FAILED
 }
 
-model ScanFindingVerification {
-  id                 String               @id @default(cuid())
-  scanId             String
-  owner              String
-  repo               String
-  findingFingerprint String
-  findingIndex       Int
-  ruleId             String?
-  title              String
-  severity           String
-  type               String
-  file               String
-  line               Int?
-  confidence         String?
-  verificationStatus FindingLifecycleStatus
-  lifecycleStatus    FindingLifecycleStatus
-  gateDecision       FindingGateDecision
-  verificationScore  Float?
-  verificationSignals Json?
-  verificationRationale String?
-  exploitabilityTag  String?
-  closedAt           DateTime?
-  reopenedAt         DateTime?
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
-  scan               RepoScan             @relation(fields: [scanId], references: [id], onDelete: Cascade)
-
-  @@index([scanId, createdAt(sort: Desc)])
-  @@index([owner, repo, findingFingerprint, createdAt(sort: Desc)])
-  @@index([lifecycleStatus, createdAt(sort: Desc)])
-  @@unique([scanId, findingFingerprint, findingIndex])
-}
-
-model FixVerificationRun {
-  id                      String                 @id @default(cuid())
-  scanId                  String
-  findingFingerprint      String
-  owner                   String
-  repo                    String
-  changedFiles            Json
-  status                  FixVerificationRunStatus @default(PENDING)
-  regressionTestsPassed   Boolean?
-  regressionSummary       String?
-  targetedRescanPassed    Boolean?
-  targetedRescanFindings  Int?
-  fullRescanTriggered     Boolean                @default(false)
-  fullRescanPassed        Boolean?
-  closeReasons            Json?
-  finalizedAt             DateTime?
-  autoSignedOffAt         DateTime?
-  requestedByUserId       String?
-  createdAt               DateTime               @default(now())
-  updatedAt               DateTime               @updatedAt
-  scan                    RepoScan               @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  requestedByUser         User?                  @relation("UserRequestedFixVerificationRuns", fields: [requestedByUserId], references: [id], onDelete: SetNull)
-
-  @@index([scanId, createdAt(sort: Desc)])
-  @@index([owner, repo, findingFingerprint, createdAt(sort: Desc)])
-  @@index([status, createdAt(sort: Desc)])
-}
-
-model RepoScanShareLink {
-  id              String   @id @default(cuid())
-  scanId           String   @unique
-  tokenHash        String   @unique
-  expiresAt        DateTime
-  revokedAt        DateTime?
-  createdByUserId  String?
-  createdByUser    User?    @relation("UserCreatedScanShareLinks", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  createdAt        DateTime @default(now())
-  lastAccessedAt   DateTime?
-  accessCount      Int      @default(0)
-  scan             RepoScan @relation(fields: [scanId], references: [id], onDelete: Cascade)
-
-  @@index([scanId, createdAt(sort: Desc)])
-  @@index([createdByUserId, createdAt(sort: Desc)])
-  @@index([expiresAt])
-}
-
 enum ReportFalsePositiveStatus {
   PENDING
   CONFIRMED_FALSE_POSITIVE
@@ -198,66 +300,6 @@ enum ReportFalsePositiveReason {
   OTHER
 }
 
-model ReportFalsePositive {
-  id                String                    @id @default(cuid())
-  scanId             String
-  owner              String
-  repo               String
-  findingFingerprint String
-  findingIndex       Int
-  title              String
-  severity           String
-  type               String
-  file               String
-  line               Int?
-  confidence         String?
-  reason             ReportFalsePositiveReason
-  details            String                   @db.Text
-  isSharedView       Boolean                   @default(false)
-  submittedByUserId  String?
-  status             ReportFalsePositiveStatus @default(PENDING)
-  reviewedByUserId   String?
-  reviewedAt         DateTime?
-  createdAt          DateTime                  @default(now())
-  updatedAt          DateTime                  @updatedAt
-  scan               RepoScan                  @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  submittedByUser    User?                     @relation("UserSubmittedFalsePositives", fields: [submittedByUserId], references: [id], onDelete: SetNull)
-  reviewedByUser     User?                     @relation("UserReviewedFalsePositives", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
-
-  @@index([scanId, createdAt(sort: Desc)])
-  @@index([status, createdAt(sort: Desc)])
-  @@index([submittedByUserId, createdAt(sort: Desc)])
-}
-
-model RecentSearch {
-  id        String   @id @default(cuid())
-  userId    String
-  query     String
-  type      String
-  timestamp BigInt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, query])
-  @@index([userId, timestamp(sort: Desc)])
-}
-
-model ChatConversation {
-  id              String   @id @default(cuid())
-  userId          String
-  conversationKey String
-  scope           String
-  owner           String?
-  repo            String?
-  username        String?
-  messages        Json
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, conversationKey])
-  @@index([userId, updatedAt(sort: Desc)])
-}
-
 enum TransactionalEmailTemplate {
   WELCOME
 }
@@ -266,46 +308,4 @@ enum TransactionalEmailStatus {
   PENDING
   SENT
   FAILED
-}
-
-model TransactionalEmailDelivery {
-  id                String                    @id @default(cuid())
-  userId            String
-  template          TransactionalEmailTemplate
-  status            TransactionalEmailStatus  @default(PENDING)
-  toEmail           String
-  templateData      Json?
-  attempts          Int                       @default(0)
-  lastError         String?
-  providerMessageId String?
-  providerEventType String?
-  providerPayload   Json?
-  lastAttemptAt     DateTime?
-  nextRetryAt       DateTime?
-  sentAt            DateTime?
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
-  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, template])
-  @@index([status, nextRetryAt])
-  @@index([providerMessageId])
-}
-
-model BlogPost {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  title       String
-  excerpt     String   @db.Text
-  content     String   @db.Text
-  date        String?
-  author      String
-  category    String
-  image       String
-  published   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([published, createdAt(sort: Desc)])
-  @@index([slug])
 }
