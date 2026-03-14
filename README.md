@@ -85,8 +85,8 @@ graph TD
     G -->|No| I[Skip cache write]
     H --> J[Return full context]
     I --> J
-    J --> K[Cache query -> selected files (24h)]
-    J --> L[Cache query answer (24h)]
+    J --> K[Cache query -> selected files - 24h]
+    J --> L[Cache query answer - 24h]
 ```
 
 ### 3) Security Scan + Verification Flow
