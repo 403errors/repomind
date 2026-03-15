@@ -36,9 +36,10 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
     const isInternalStreamingRef = useRef(isInternalStreaming);
     isInternalStreamingRef.current = isInternalStreaming;
     const isGenerating = isFixing || isInternalStreaming || (isStreaming && !svg);
-    // Only show the overlay when there is no SVG yet — if we have a prior render,
-    // keep it visible while the new diagram renders in the background (no flash).
-    const showOverlay = !svg && isGenerating;
+    // During streaming, we don't want to show the full-screen blurring overlay because it makes it
+    // look like the UI is blocked. Only show it if we are fixing the diagram or if we have no SVG at all
+    // and are NOT in the middle of a stream (i.e. first render or explicit generation).
+    const showOverlay = !svg && (isFixing || (!isStreaming && isGenerating));
 
     useEffect(() => {
         if (isStreaming) {
@@ -105,6 +106,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                 } catch (renderError: unknown) {
                     // If we are streaming, don't show error yet — diagram is still being built
                     if (isStreaming || isInternalStreamingRef.current) {
+                        // In streaming mode, we expect partial syntax errors. Skip console error noise.
                         return;
                     }
 

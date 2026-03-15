@@ -137,6 +137,7 @@ export function MessageContent({
                 components={components}
                 currentOwner={currentOwner}
                 currentRepo={currentRepo}
+                isStreaming={isStreaming}
             />
         </div>
     );

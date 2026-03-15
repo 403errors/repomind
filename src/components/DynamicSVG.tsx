@@ -176,7 +176,7 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
             >
                 <div
                     ref={containerRef}
-                    className={`overflow-hidden bg-zinc-950/40 p-4 md:p-8 rounded-2xl border border-white/5 hover:border-white/10 transition-all flex justify-center items-center ${isStreaming ? "opacity-70 animate-pulse" : ""}`}
+                    className={`overflow-hidden bg-zinc-950/40 p-4 md:p-8 rounded-2xl border border-white/5 hover:border-white/10 transition-all flex justify-center items-center ${isStreaming ? "opacity-90" : ""}`}
                     dangerouslySetInnerHTML={{ __html: cleanSvg }}
                 />
 

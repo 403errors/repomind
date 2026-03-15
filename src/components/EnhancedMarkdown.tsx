@@ -64,9 +64,10 @@ interface EnhancedMarkdownProps {
     components?: Components;
     currentOwner?: string;
     currentRepo?: string;
+    isStreaming?: boolean;
 }
 
-export function EnhancedMarkdown({ content, components, currentOwner, currentRepo }: EnhancedMarkdownProps) {
+export function EnhancedMarkdown({ content, components, currentOwner, currentRepo, isStreaming = false }: EnhancedMarkdownProps) {
     const parts = useMemo(() => parseCardContent(content), [content]);
     
     const mergedComponents = useMemo(() => ({
@@ -90,12 +91,13 @@ export function EnhancedMarkdown({ content, components, currentOwner, currentRep
             const { children, className, node, ...rest } = props;
             const match = /language-(\w+)/.exec(className || "");
             const isMermaid = match && match[1] === "mermaid";
+            const childrenStr = String(children).replace(/\n$/, "");
             
             if (isMermaid) {
                 return (
                     <Mermaid 
-                        chart={String(children).replace(/\n$/, "")} 
-                        isStreaming={false} 
+                        chart={childrenStr} 
+                        isStreaming={isStreaming} 
                     />
                 );
             }
@@ -103,8 +105,8 @@ export function EnhancedMarkdown({ content, components, currentOwner, currentRep
             if (match && match[1] === "svg") {
                 return (
                     <DynamicSVG 
-                        svg={String(children).replace(/\n$/, "")} 
-                        isStreaming={false} 
+                        svg={childrenStr} 
+                        isStreaming={isStreaming} 
                     />
                 );
             }

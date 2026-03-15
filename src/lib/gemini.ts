@@ -387,26 +387,41 @@ export async function* answerWithContextStream(
 
   const chat = model.startChat();
 
-  // --- Phase 1: Send message (non-streaming) to detect if a tool call is needed ---
-  let firstResponse;
+  // --- Phase 1: Send message and stream to detect tool call or yield direct response ---
+  let call: FunctionCallShape | undefined;
+
   try {
-    console.log(`[answerWithContextStream] Sending Phase 1 request...`);
+    console.log(`[answerWithContextStream] Sending Phase 1 request stream...`);
     yield `STATUS:Analyzing context and reasoning with AI...`;
-    const firstResult = await chat.sendMessage(prompt);
-    firstResponse = firstResult.response;
-    console.log(`[answerWithContextStream] Phase 1 response received.`);
+    const firstResult = await chat.sendMessageStream(prompt);
+
+    for await (const chunk of firstResult.stream) {
+      const funcs = chunk.functionCalls?.();
+      if (funcs && funcs.length > 0) {
+        call = funcs[0] as unknown as FunctionCallShape;
+        console.log(`[answerWithContextStream] Tool call detected in stream: ${call.name}`);
+        break; // Stop Phase 1 streaming, need to resolve tool
+      }
+
+      // Yield streamed text/thoughts if no function call
+      const parts = ((chunk as unknown as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
+      for (const part of parts) {
+        if (part.thought && modelPreference === "thinking") {
+          yield `THOUGHT:${part.text}`;
+        } else if (part.text) {
+          yield part.text;
+        }
+      }
+    }
+    console.log(`[answerWithContextStream] Phase 1 stream complete.`);
   } catch (error) {
-    console.error(`[answerWithContextStream] Phase 1 sendMessage failed:`, error);
+    console.error(`[answerWithContextStream] Phase 1 sendMessageStream failed:`, error);
     yield `STATUS:Error during AI reasoning phase. Please try again.`;
     throw error;
   }
 
-  const functionCalls = firstResponse.functionCalls?.();
-
-  if (functionCalls && functionCalls.length > 0) {
-    const call = functionCalls[0] as FunctionCallShape;
-    console.log(`[answerWithContextStream] Tool call detected: ${call.name}`);
-
+  // --- Phase 2: Resolve tool call (if any) and stream the rest ---
+  if (call) {
     const {
       functionResponseData,
       statusMessage,
@@ -428,7 +443,6 @@ export async function* answerWithContextStream(
     yield "STATUS:Preparing answer...";
     console.log(`[answerWithContextStream] Sending Phase 2 (tool response) stream...`);
 
-    // --- Phase 2: Send function response and stream the final answer ---
     try {
       const streamResult = await chat.sendMessageStream([{
         functionResponse: {
@@ -438,7 +452,7 @@ export async function* answerWithContextStream(
       }]);
 
       for await (const chunk of streamResult.stream) {
-        const parts = ((chunk as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
+        const parts = ((chunk as unknown as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
         for (const part of parts) {
           if (part.thought && modelPreference === "thinking") {
             yield `THOUGHT:${part.text}`;
@@ -451,19 +465,7 @@ export async function* answerWithContextStream(
       console.error(`[answerWithContextStream] Phase 2 stream failed:`, error);
       throw error;
     }
-    console.log(`[answerWithContextStream] Stream complete.`);
-    return;
-  }
-
-  // No function call — we could stream the text from firstResponse,
-  // but to provide a consistent streaming experience for non-tool cases,
-  // we re-run the prompt as a stream. 
-  // NOTE: This adds some latency, but if no tools were called, firstResponse.text() is already here.
-  // We can yield it directly to save time!
-  console.log(`[answerWithContextStream] No tool call needed. Yielding direct answer.`);
-  const directText = firstResponse.text();
-  if (directText) {
-    yield directText;
+    console.log(`[answerWithContextStream] Phase 2 stream complete.`);
   }
 }
 
