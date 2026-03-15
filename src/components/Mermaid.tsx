@@ -346,8 +346,8 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
             });
 
             // Animate nodes
-            const nodes = svgElement.querySelectorAll(".node, .actor, .state, .class-name");
-            nodes.forEach((node: SVGElement, i) => {
+            const nodes = svgElement.querySelectorAll<SVGElement>(".node, .actor, .state, .class-name");
+            nodes.forEach((node, i) => {
                 const stagger = Math.min(i * 18, 180);
                 const animation = node.animate([
                     { opacity: 0 },

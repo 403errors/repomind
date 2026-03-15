@@ -99,8 +99,8 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
         if (!svgElement) return;
 
         // Animate paths (drawing effect)
-        const paths = svgElement.querySelectorAll("path");
-        paths.forEach((path: any, i) => {
+        const paths = svgElement.querySelectorAll<SVGPathElement>("path");
+        paths.forEach((path, i) => {
             try {
                 const length = path.getTotalLength();
                 if (length < 2) return;
@@ -130,8 +130,8 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
         });
 
         // Animate other shapes (fade + scale)
-        const shapes = svgElement.querySelectorAll("circle, rect, ellipse, polygon, polyline");
-        shapes.forEach((shape: any, i) => {
+        const shapes = svgElement.querySelectorAll<SVGElement>("circle, rect, ellipse, polygon, polyline");
+        shapes.forEach((shape, i) => {
             if (shape.tagName.toLowerCase() === "path") return;
             shape.style.opacity = "0";
             shape.style.transformOrigin = "center";
@@ -151,8 +151,8 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
         });
 
         // Animate text
-        const texts = svgElement.querySelectorAll("text");
-        texts.forEach((text: any, i) => {
+        const texts = svgElement.querySelectorAll<SVGTextElement>("text");
+        texts.forEach((text, i) => {
             text.style.opacity = "0";
             text.animate([
                 { opacity: 0, transform: "translateY(5px)" },
