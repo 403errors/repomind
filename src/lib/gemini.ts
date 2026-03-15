@@ -44,6 +44,27 @@ function getStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? "undefined";
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function dedupeFunctionCalls(calls: FunctionCallShape[]): FunctionCallShape[] {
+  const seen = new Set<string>();
+  const unique: FunctionCallShape[] = [];
+  for (const call of calls) {
+    const name = typeof call.name === "string" ? call.name : "unknown_tool";
+    const key = `${name}:${safeJsonStringify(call.args)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(call);
+  }
+  return unique;
+}
+
 function getThinkingGenerationConfig(includeThoughts: boolean, thinkingLevel: "HIGH" | "LOW" | "MINIMAL"): GenerationConfig {
   return {
     thinkingConfig: {
@@ -390,7 +411,8 @@ export async function* answerWithContextStream(
   const chat = model.startChat();
 
   // --- Phase 1: Send message and stream to detect tool call or yield direct response ---
-  const calls: FunctionCallShape[] = [];
+  const streamedCalls: FunctionCallShape[] = [];
+  let calls: FunctionCallShape[] = [];
 
   try {
     console.log(`[answerWithContextStream] Sending Phase 1 request stream...`);
@@ -401,7 +423,7 @@ export async function* answerWithContextStream(
       const funcs = chunk.functionCalls?.();
       if (funcs && funcs.length > 0) {
         for (const f of funcs) {
-          calls.push(f as unknown as FunctionCallShape);
+          streamedCalls.push(f as unknown as FunctionCallShape);
           console.log(`[answerWithContextStream] Tool call detected in stream: ${f.name}`);
         }
       }
@@ -416,8 +438,12 @@ export async function* answerWithContextStream(
         }
       }
     }
-    // Finalize the history for Phase 1 before moving to Phase 2
-    await firstResult.response;
+    // Finalize history and only trust calls from the finalized response.
+    const firstResponse = await firstResult.response;
+    calls = dedupeFunctionCalls((firstResponse.functionCalls?.() as unknown as FunctionCallShape[] | undefined) ?? []);
+    if (streamedCalls.length > 0 && calls.length === 0) {
+      console.warn(`[answerWithContextStream] Ignoring ${streamedCalls.length} transient stream tool call(s); finalized response had no tool calls.`);
+    }
     console.log(`[answerWithContextStream] Phase 1 stream complete and history finalized.`);
   } catch (error) {
     console.error(`[answerWithContextStream] Phase 1 sendMessageStream failed:`, error);
@@ -690,19 +716,99 @@ Return ONLY the corrected Mermaid code in a markdown code block. Do NOT use HTML
  * Handles markdown blocks, leading/trailing reasoning text, and thinking tokens.
  */
 function extractJson(text: string): unknown {
-  try {
-    // 1. Try cleaning basic markdown first
-    const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+  const tryParse = (candidate: string): unknown | undefined => {
     try {
-      return JSON.parse(cleaned);
-    } catch (e) {
-      // 2. Extract first matching block
-      const match = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-      if (match) {
-        return JSON.parse(match[0]);
-      }
-      throw e;
+      return JSON.parse(candidate);
+    } catch {
+      return undefined;
     }
+  };
+
+  const parseFirstEmbeddedJson = (source: string): unknown | undefined => {
+    for (let start = 0; start < source.length; start += 1) {
+      const opening = source[start];
+      if (opening !== "{" && opening !== "[") continue;
+
+      const stack: string[] = [opening];
+      let inString = false;
+      let escaped = false;
+
+      for (let end = start + 1; end < source.length; end += 1) {
+        const char = source[end];
+
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          if (char === "\\") {
+            escaped = true;
+            continue;
+          }
+          if (char === "\"") {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (char === "\"") {
+          inString = true;
+          continue;
+        }
+
+        if (char === "{" || char === "[") {
+          stack.push(char);
+          continue;
+        }
+
+        if (char === "}" || char === "]") {
+          const expected = char === "}" ? "{" : "[";
+          const actual = stack.pop();
+          if (actual !== expected) {
+            break;
+          }
+          if (stack.length === 0) {
+            const parsed = tryParse(source.slice(start, end + 1));
+            if (parsed !== undefined) return parsed;
+            break;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+
+  try {
+    const trimmed = text.trim();
+
+    // 1) Attempt direct JSON parse.
+    const directParsed = tryParse(trimmed);
+    if (directParsed !== undefined) return directParsed;
+
+    // 2) Try fenced code blocks.
+    const fencedMatches = Array.from(trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi));
+    for (const match of fencedMatches) {
+      const block = match[1]?.trim();
+      if (!block) continue;
+      const parsedBlock = tryParse(block);
+      if (parsedBlock !== undefined) return parsedBlock;
+      const embeddedFromBlock = parseFirstEmbeddedJson(block);
+      if (embeddedFromBlock !== undefined) return embeddedFromBlock;
+    }
+
+    // 3) Parse first embedded balanced JSON object/array in mixed prose.
+    const embedded = parseFirstEmbeddedJson(trimmed);
+    if (embedded !== undefined) return embedded;
+
+    // 4) Last-resort cleanup for raw markdown fences.
+    const cleaned = trimmed.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const cleanedParsed = tryParse(cleaned);
+    if (cleanedParsed !== undefined) return cleanedParsed;
+
+    const embeddedFromCleaned = parseFirstEmbeddedJson(cleaned);
+    if (embeddedFromCleaned !== undefined) return embeddedFromCleaned;
+
+    throw new Error("No valid JSON object or array found in model output.");
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn("JSON extraction failed:", message, "Original text snippet:", text.slice(0, 100));
