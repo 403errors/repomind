@@ -167,19 +167,41 @@ export function buildRepoMindPrompt(params: RepoMindPromptParams): string {
          - **IMAGES & VISUAL EXPLANATIONS (STRICT)**:
            - Use **SVG** inside a ${"```svg"} block for high-fidelity or animated visuals.
            - All SVG blocks now feature **premium drawing animations** and **full-screen preview**.
-           - **ELITE SVG DESIGN SYSTEM**:
-             - **Colors**: Zinc-900 Background (#18181b), Indigo-500 Accents (#6366f1), Emerald-500 Success (#10b981), Rose-500 Error (#f43f5e).
-             - **Typography**: Text should be clear, concise, and Zinc-300 (#d4d4d8).
-             - **Responsiveness**: Always use \`viewBox="0 0 800 400"\` (or similar aspect ratio).
-           - **ANIMATION METAPHORS (Use SMIL for internal motion)**:
-             - **Data Flow**: A small circle moving along a path using \`<animateMotion>\`.
-             - **Processing**: A circle or rect with a pulsing stroke using \`<animate attributeName="stroke-width" values="1;3;1" dur="2s" repeatCount="indefinite" />\`.
-             - **Success/Completion**: An Emerald checkmark that draws itself.
-           - **VISUAL DECISION LOGIC**:
-             1. If user asks for an **"Image"** (e.g., "draw", "picture") -> Output high-fidelity **SVG (Static)**. **DO NOT** add animations unless specifically requested.
-             2. If user asks for a **"Flowchart/Diagram"** -> Use **Mermaid**.
-             3. If user asks to **"Animate"**, **"Explain the flow"**, or describes **dynamics** (e.g., "how it moves") -> Output an **Animated SVG**. 
-             *Note: If both "image" and "explain" are used together without flow keywords, default to STATIC SVG.*
+           - **PRODUCTION-GRADE SVG DESIGN SYSTEM**:
+              - **Aesthetics**: Use \`rx="12"\` for main containers, \`rx="6"\` for buttons/items. Use \`stroke-width="1.5"\`.
+              - **Colors**: Zinc-900 Background (#18181b), Zinc-800 Surface (#27272a), Indigo-500 Accents (#6366f1), Emerald-500 Success (#10b981), Rose-500 Error (#f43f5e), Amber-400 Warning (#fbbf24).
+              - **Typography**: Clear, concise, Zinc-300 (#d4d4d8). Use \`font-family="Inter, system-ui, sans-serif"\`.
+              - **Effects**: Use the standard \`premium-shadow\` filter and gradients (\`indigo-grad\`, \`emerald-grad\`, \`zinc-grad\`).
+              - **Responsiveness**: Always use \`viewBox="0 0 800 450"\`. Ensure logical padding (min 40px).
+
+            - **ELITE ANIMATION METAPHORS (SMIL)**:
+              - **Easing**: ALWAYS use \`calcMode="spline" keySplines="0.4 0 0.2 1"\` for smooth transitions.
+              - **Flows**: Small glowing circles moving along paths: \`<animateMotion path="..." dur="3s" repeatCount="indefinite" />\`.
+              - **Pulsing**: \`<animate attributeName="opacity" values="0.4;1;0.4" dur="2s" repeatCount="indefinite" />\` for heartbeat effects.
+              - **Glow**: Animate \`stdDeviation\` inside a filter for breathing elements.
+              - **Entrance**: Use the internal auto-drawing engine (already active), but you can add custom SMIL for persistent dynamics.
+
+            - **SVG STRUCTURE TEMPLATE**:
+              \`\`\`svg
+              <svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <filter id="premium-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.25"/>
+                  </filter>
+                  <linearGradient id="indigo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#6366f1" />
+                    <stop offset="100%" style="stop-color:#4338ca" />
+                  </linearGradient>
+                </defs>
+                <!-- Your elite content here -->
+              </svg>
+              \`\`\`
+
+            - **VISUAL DECISION LOGIC**:
+              1. If user asks for an **"Image"** (e.g., "draw", "picture") -> Output high-fidelity **SVG (Static)**.
+              2. If user asks for a **"Flowchart/Diagram"** -> Use **Mermaid**.
+              3. If user asks to **"Animate"**, **"Explain the flow"**, or describes **dynamics** (e.g., "how it moves") -> Output an **Animated SVG**. 
+
 
          - **COMBINATIONS**: You can and SHOULD combine elements.
            - *Example*: "Here is the architecture (Mermaid) and the updated config (Code Block)."

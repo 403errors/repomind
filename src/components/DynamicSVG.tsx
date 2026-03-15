@@ -11,6 +11,26 @@ interface DynamicSVGProps {
     isStreaming?: boolean;
 }
 
+const DEFAULT_DEFS = `
+<defs>
+  <filter id="premium-shadow" x="-20%" y="-20%" width="140%" height="140%">
+    <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.25"/>
+  </filter>
+  <linearGradient id="indigo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" style="stop-color:#6366f1" />
+    <stop offset="100%" style="stop-color:#4338ca" />
+  </linearGradient>
+  <linearGradient id="emerald-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" style="stop-color:#10b981" />
+    <stop offset="100%" style="stop-color:#059669" />
+  </linearGradient>
+  <linearGradient id="zinc-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" style="stop-color:#3f3f46" />
+    <stop offset="100%" style="stop-color:#18181b" />
+  </linearGradient>
+</defs>
+`;
+
 export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -54,7 +74,12 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
 
             // Ensure it has a viewBox if it's missing (fallback)
             if (!cleaned.includes("viewBox")) {
-                cleaned = cleaned.replace("<svg", '<svg viewBox="0 0 800 400"');
+                cleaned = cleaned.replace("<svg", '<svg viewBox="0 0 800 450"');
+            }
+
+            // Inject default defs if none are found
+            if (!cleaned.includes("<defs>")) {
+                cleaned = cleaned.replace("</svg>", `${DEFAULT_DEFS}</svg>`);
             }
         }
         return cleaned;
@@ -80,14 +105,18 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
                     delay: i * 150,
                     fill: "forwards",
                     easing: "cubic-bezier(0.4, 0, 0.2, 1)"
-                });
+                }).onfinish = () => {
+                    // Reset to original state once finished to avoid "stuck" partial states
+                    path.style.strokeDasharray = "";
+                    path.style.strokeDashoffset = "";
+                };
             } catch (e) {
                 path.style.opacity = "0";
                 path.animate([{ opacity: 0 }, { opacity: 1 }], {
                     duration: 500,
                     delay: i * 100,
                     fill: "forwards"
-                });
+                }).onfinish = () => { path.style.opacity = ""; };
             }
         });
 
@@ -106,7 +135,10 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
                 delay: i * 80 + 200,
                 fill: "forwards",
                 easing: "cubic-bezier(0.34, 1.56, 0.64, 1)"
-            });
+            }).onfinish = () => {
+                shape.style.opacity = "";
+                shape.style.transform = "";
+            };
         });
 
         // Animate text
@@ -121,7 +153,9 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
                 delay: i * 50 + 500,
                 fill: "forwards",
                 easing: "ease-out"
-            });
+            }).onfinish = () => {
+                text.style.opacity = "";
+            };
         });
     };
 
@@ -130,6 +164,13 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
         animateSvg(containerRef.current);
         setHasAnimated(true);
     }, [cleanSvg, isStreaming, hasAnimated]);
+
+    // Reset hasAnimated if the SVG content changes significantly after being idle
+    useEffect(() => {
+        if (!isStreaming) {
+            setHasAnimated(false);
+        }
+    }, [svg]);
 
     // Animate when modal opens
     useEffect(() => {
@@ -176,7 +217,7 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
             >
                 <div
                     ref={containerRef}
-                    className={`overflow-hidden bg-zinc-950/40 p-4 md:p-8 rounded-2xl border border-white/5 hover:border-white/10 transition-all flex justify-center items-center ${isStreaming ? "opacity-90" : ""}`}
+                    className={`bg-zinc-950/40 p-4 md:p-8 rounded-2xl border border-white/5 hover:border-white/10 transition-all flex justify-center items-center ${isStreaming ? "opacity-90" : ""}`}
                     dangerouslySetInnerHTML={{ __html: cleanSvg }}
                 />
 

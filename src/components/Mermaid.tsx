@@ -24,6 +24,68 @@ function extractErrorMessage(error: unknown): string {
     return "Failed to process diagram";
 }
 
+/**
+ * Normalizes a Mermaid-generated SVG string to be fully responsive.
+ *
+ * Mermaid bakes absolute pixel dimensions (e.g. width="1200" height="850") into
+ * every SVG it generates. When this is rendered inline in a chat container, the
+ * fixed width overflows the container and the diagram looks visually broken.
+ *
+ * We use DOMParser — NOT regex — to manipulate the SVG safely. Regex was tried
+ * multiple times and caused regressions (invalid attributes, double-replacement,
+ * broken child elements). DOMParser gives us the actual DOM so we can:
+ * 1. Read and remove the fixed width/height attributes cleanly.
+ * 2. Synthesize a viewBox from them so the aspect ratio is preserved.
+ * 3. Inject responsive CSS via the style property.
+ *
+ * This runs synchronously BEFORE the svg string is committed to React state,
+ * meaning the very first browser paint is already correct — no rAF delay needed.
+ */
+function normalizeMermaidSvg(svgString: string): string {
+    if (!svgString || typeof window === 'undefined') return svgString;
+
+    try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(svgString, 'image/svg+xml');
+
+        // If parsing failed, DOMParser returns a parseerror document
+        const parseError = doc.querySelector('parsererror');
+        if (parseError) return svgString;
+
+        const svgEl = doc.querySelector('svg');
+        if (!svgEl) return svgString;
+
+        const rawW = svgEl.getAttribute('width');
+        const rawH = svgEl.getAttribute('height');
+        const hasViewBox = svgEl.hasAttribute('viewBox');
+
+        // Synthesize viewBox from the pixel dimensions before removing them
+        if (!hasViewBox && rawW && rawH) {
+            const w = parseFloat(rawW);
+            const h = parseFloat(rawH);
+            if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
+                svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
+            }
+        }
+
+        // Remove fixed dimensions — SVG will scale via CSS instead
+        svgEl.removeAttribute('width');
+        svgEl.removeAttribute('height');
+
+        // Set responsive CSS. `height: auto` is valid in CSS (not as SVG attr).
+        svgEl.style.width = '100%';
+        svgEl.style.height = 'auto';
+        svgEl.style.overflow = 'visible';
+        svgEl.style.maxHeight = '70vh';
+
+        return new XMLSerializer().serializeToString(doc.documentElement);
+    } catch {
+        // If anything goes wrong, return the original unchanged to avoid blank diagrams
+        return svgString;
+    }
+}
+
+
 export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
     const [svg, setSvg] = useState<string>("");
     const [error, setError] = useState<string | null>(null);
@@ -97,7 +159,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                 try {
                     const { svg: newSvg } = await mermaid.render(id, sanitized);
                     if (mounted) {
-                        setSvg(newSvg);
+                        setSvg(normalizeMermaidSvg(newSvg));
                         setError(null);
                         setIsFixing(false);
                         setIsInternalStreaming(false);
@@ -130,7 +192,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                                     console.log('✅ AI Fix received, retrying render...');
                                     const { svg: fixedSvg } = await mermaid.render(id + '-autofixed', fixed);
                                     if (mounted) {
-                                        setSvg(fixedSvg);
+                                        setSvg(normalizeMermaidSvg(fixedSvg));
                                         setError(null);
                                         setIsFixing(false);
                                         setIsInternalStreaming(false);
@@ -198,7 +260,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                 const { fixed } = await response.json();
                 if (fixed) {
                     const { svg } = await mermaid.render(id + '-manualfixed', fixed);
-                    setSvg(svg);
+                    setSvg(normalizeMermaidSvg(svg));
                     setError(null);
                     console.log('✅ Layer 3 successful: Manual AI fix worked');
                     return;
@@ -212,55 +274,103 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
         }
     };
 
-    // Add drawing animation to the SVG paths
+    // Apply responsive sizing and entrance animations after the SVG is in the DOM.
+    // IMPORTANT: We use requestAnimationFrame to ensure React's batch update has
+    // fully committed the new svg state before we query the DOM. Without rAF,
+    // React may still be reconciling when this effect fires, causing the svgElement
+    // to still have stale inline styles (opacity:0) from a previous animation cycle.
     useEffect(() => {
-        if (!svg || isGenerating || !diagramRef.current) return;
+        if (!svg || !diagramRef.current) return;
 
-        const container = diagramRef.current;
-        const svgElement = container.querySelector("svg");
-        if (!svgElement) return;
+        let raf: number;
+        raf = requestAnimationFrame(() => {
+            const container = diagramRef.current;
+            if (!container) return;
+            const svgElement = container.querySelector("svg");
+            if (!svgElement) return;
 
-        // Force overflow visible for animations
-        svgElement.style.overflow = "visible";
+            // ① Make the SVG fully responsive — override Mermaid's baked-in
+            //    absolute px dimensions with CSS. This is the authoritative place
+            //    to do this because we have a real DOM element, not a string.
+            const rawW = svgElement.getAttribute('width');
+            const rawH = svgElement.getAttribute('height');
+            const hasViewBox = svgElement.hasAttribute('viewBox');
 
-        // Animate paths (drawing effect)
-        const paths = svgElement.querySelectorAll("path.edgePath path, path.flowchart-link, .sequence-diagram path");
-        paths.forEach((path: any, i) => {
-            try {
-                const length = path.getTotalLength();
-                if (length < 5) return; // Skip tiny paths
-
-                path.style.strokeDasharray = `${length}`;
-                path.style.strokeDashoffset = `${length}`;
-                path.animate([
-                    { strokeDashoffset: length },
-                    { strokeDashoffset: 0 }
-                ], {
-                    duration: 800 + (length / 2),
-                    delay: i * 50,
-                    fill: "forwards",
-                    easing: "ease-out"
-                });
-            } catch (e) {
-                // Ignore errors for paths that don't support getTotalLength
+            if (!hasViewBox && rawW && rawH) {
+                svgElement.setAttribute('viewBox', `0 0 ${rawW} ${rawH}`);
             }
-        });
+            // Always remove absolute dimensions and rely on CSS
+            svgElement.removeAttribute('width');
+            svgElement.removeAttribute('height');
+            svgElement.style.width = '100%';
+            svgElement.style.height = 'auto';
+            svgElement.style.overflow = 'visible';
+            svgElement.style.maxHeight = '70vh';
 
-        // Animate nodes
-        const nodes = svgElement.querySelectorAll(".node, .actor, .state, .class-name");
-        nodes.forEach((node: any, i) => {
-            node.style.opacity = "0";
-            node.style.transformOrigin = "center";
-            node.animate([
-                { opacity: 0, transform: "scale(0.9)" },
-                { opacity: 1, transform: "scale(1)" }
-            ], {
-                duration: 500,
-                delay: i * 30 + 200,
-                fill: "forwards",
-                easing: "cubic-bezier(0.34, 1.56, 0.64, 1)"
+            // ② Clear ANY stale inline styles left by previous animation cycles.
+            //    This is the root cause of the "broken after streaming" bug:
+            //    the previous render's animation left nodes with opacity:0.
+            const allNodes = svgElement.querySelectorAll(".node, .actor, .state, .class-name");
+            allNodes.forEach((node: any) => {
+                node.style.opacity = '';
+                node.style.transform = '';
+            });
+            const allPaths = svgElement.querySelectorAll("path");
+            allPaths.forEach((path: any) => {
+                path.style.strokeDasharray = '';
+                path.style.strokeDashoffset = '';
+            });
+
+            // ③ Skip entrance animations if still generating to avoid setting
+            //    opacity:0 prematurely. Animations only run on the final stable state.
+            if (isGenerating) return;
+
+            // Animate edge paths (drawing effect)
+            const paths = svgElement.querySelectorAll("path.edgePath path, path.flowchart-link, .sequence-diagram path");
+            paths.forEach((path: any, i) => {
+                try {
+                    const length = path.getTotalLength();
+                    if (length < 5) return;
+                    path.style.strokeDasharray = `${length}`;
+                    path.style.strokeDashoffset = `${length}`;
+                    path.animate([
+                        { strokeDashoffset: length },
+                        { strokeDashoffset: 0 }
+                    ], {
+                        duration: 800 + (length / 2),
+                        delay: i * 50,
+                        fill: "forwards",
+                        easing: "ease-out"
+                    }).onfinish = () => {
+                        path.style.strokeDasharray = '';
+                        path.style.strokeDashoffset = '';
+                    };
+                } catch (e) {
+                    // Ignore paths that don't support getTotalLength
+                }
+            });
+
+            // Animate nodes
+            const nodes = svgElement.querySelectorAll(".node, .actor, .state, .class-name");
+            nodes.forEach((node: any, i) => {
+                node.style.opacity = "0";
+                node.style.transformOrigin = "center";
+                node.animate([
+                    { opacity: 0, transform: "scale(0.9)" },
+                    { opacity: 1, transform: "scale(1)" }
+                ], {
+                    duration: 500,
+                    delay: i * 30 + 200,
+                    fill: "forwards",
+                    easing: "cubic-bezier(0.34, 1.56, 0.64, 1)"
+                }).onfinish = () => {
+                    node.style.opacity = '';
+                    node.style.transform = '';
+                };
             });
         });
+
+        return () => cancelAnimationFrame(raf);
     }, [svg, isGenerating]);
 
     const exportToPNG = async (e?: React.MouseEvent) => {
@@ -298,7 +408,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
             >
                 <div
                     ref={diagramRef}
-                    className="overflow-x-auto bg-zinc-950/50 p-4 rounded-lg border border-white/5 hover:border-white/10 transition-colors flex justify-center min-w-0"
+                    className="overflow-x-auto bg-zinc-950/50 p-4 md:p-8 rounded-lg border border-white/5 hover:border-white/10 transition-colors flex justify-center min-w-0"
                     dangerouslySetInnerHTML={{ __html: svg }}
                     style={{ minHeight: svg ? 'auto' : '200px' }}
                 />
