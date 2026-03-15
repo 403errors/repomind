@@ -416,7 +416,9 @@ export async function* answerWithContextStream(
         }
       }
     }
-    console.log(`[answerWithContextStream] Phase 1 stream complete.`);
+    // Finalize the history for Phase 1 before moving to Phase 2
+    await firstResult.response;
+    console.log(`[answerWithContextStream] Phase 1 stream complete and history finalized.`);
   } catch (error) {
     console.error(`[answerWithContextStream] Phase 1 sendMessageStream failed:`, error);
     yield `STATUS:Error during AI reasoning phase. Please try again.`;
@@ -463,6 +465,7 @@ export async function* answerWithContextStream(
           }
         }
       }
+      await streamResult.response;
     } catch (error) {
       console.error(`[answerWithContextStream] Phase 2 stream failed:`, error);
       throw error;
