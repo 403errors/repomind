@@ -313,15 +313,17 @@ export async function answerWithContext(
   // Handle function calls if any
   const funcs = result.response.functionCalls?.();
   if (funcs && funcs.length > 0) {
-    const call = funcs[0] as FunctionCallShape;
-    const { functionResponseData } = await resolveToolCall(call, repoDetails);
+    const calls = funcs as unknown as FunctionCallShape[];
+    const responses = await Promise.all(calls.map(c => resolveToolCall(c, repoDetails)));
 
-    result = await chat.sendMessage([{
+    const toolResponseParts = calls.map((c, i) => ({
       functionResponse: {
-        name: typeof call.name === "string" ? call.name : "unknown_tool",
-        response: functionResponseData
+        name: typeof c.name === "string" ? c.name : "unknown_tool",
+        response: responses[i].functionResponseData
       }
-    }]);
+    }));
+
+    result = await chat.sendMessage(toolResponseParts);
   }
 
   return result.response.text();
@@ -388,7 +390,7 @@ export async function* answerWithContextStream(
   const chat = model.startChat();
 
   // --- Phase 1: Send message and stream to detect tool call or yield direct response ---
-  let call: FunctionCallShape | undefined;
+  const calls: FunctionCallShape[] = [];
 
   try {
     console.log(`[answerWithContextStream] Sending Phase 1 request stream...`);
@@ -398,12 +400,13 @@ export async function* answerWithContextStream(
     for await (const chunk of firstResult.stream) {
       const funcs = chunk.functionCalls?.();
       if (funcs && funcs.length > 0) {
-        call = funcs[0] as unknown as FunctionCallShape;
-        console.log(`[answerWithContextStream] Tool call detected in stream: ${call.name}`);
-        break; // Stop Phase 1 streaming, need to resolve tool
+        for (const f of funcs) {
+          calls.push(f as unknown as FunctionCallShape);
+          console.log(`[answerWithContextStream] Tool call detected in stream: ${f.name}`);
+        }
       }
 
-      // Yield streamed text/thoughts if no function call
+      // Yield streamed text/thoughts
       const parts = ((chunk as unknown as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
       for (const part of parts) {
         if (part.thought && modelPreference === "thinking") {
@@ -420,36 +423,35 @@ export async function* answerWithContextStream(
     throw error;
   }
 
-  // --- Phase 2: Resolve tool call (if any) and stream the rest ---
-  if (call) {
-    const {
-      functionResponseData,
-      statusMessage,
-      toolEvent,
-      commitFreshnessLabel,
-    } = await resolveToolCall(call, repoDetails);
+  // --- Phase 2: Resolve tool call(s) (if any) and stream the rest ---
+  if (calls.length > 0) {
+    const responses = await Promise.all(calls.map(c => resolveToolCall(c, repoDetails)));
 
-    if (statusMessage) {
-      console.log(`[answerWithContextStream] Tool progress: ${statusMessage}`);
-      yield `STATUS:${statusMessage}`;
-    }
-    if (toolEvent) {
-      yield `TOOL:${JSON.stringify(toolEvent)}`;
-    }
-    if (commitFreshnessLabel) {
-      yield `META:${JSON.stringify({ commitFreshnessLabel })}`;
+    for (const res of responses) {
+      if (res.statusMessage) {
+        console.log(`[answerWithContextStream] Tool progress: ${res.statusMessage}`);
+        yield `STATUS:${res.statusMessage}`;
+      }
+      if (res.toolEvent) {
+        yield `TOOL:${JSON.stringify(res.toolEvent)}`;
+      }
+      if (res.commitFreshnessLabel) {
+        yield `META:${JSON.stringify({ commitFreshnessLabel: res.commitFreshnessLabel })}`;
+      }
     }
 
     yield "STATUS:Preparing answer...";
     console.log(`[answerWithContextStream] Sending Phase 2 (tool response) stream...`);
 
     try {
-      const streamResult = await chat.sendMessageStream([{
+      const toolResponseParts = calls.map((c, i) => ({
         functionResponse: {
-          name: typeof call.name === "string" ? call.name : "unknown_tool",
-          response: functionResponseData
+          name: typeof c.name === "string" ? c.name : "unknown_tool",
+          response: responses[i].functionResponseData
         }
-      }]);
+      }));
+
+      const streamResult = await chat.sendMessageStream(toolResponseParts);
 
       for await (const chunk of streamResult.stream) {
         const parts = ((chunk as unknown as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);

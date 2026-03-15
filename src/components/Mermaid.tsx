@@ -85,29 +85,60 @@ function normalizeMermaidSvg(svgString: string): string {
     }
 }
 
+function applyResponsiveSvgSizing(svgElement: SVGSVGElement): void {
+    const rawW = svgElement.getAttribute('width');
+    const rawH = svgElement.getAttribute('height');
+    const hasViewBox = svgElement.hasAttribute('viewBox');
+
+    if (!hasViewBox && rawW && rawH) {
+        const w = parseFloat(rawW);
+        const h = parseFloat(rawH);
+        if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
+            svgElement.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        }
+    }
+
+    svgElement.removeAttribute('width');
+    svgElement.removeAttribute('height');
+    svgElement.style.width = '100%';
+    svgElement.style.height = 'auto';
+    svgElement.style.overflow = 'visible';
+    svgElement.style.maxHeight = '70vh';
+}
+
+function resetAnimatedSvgStyles(svgElement: SVGSVGElement): void {
+    const animatedElements = svgElement.querySelectorAll<SVGElement>(".node, .actor, .state, .class-name, path");
+    animatedElements.forEach((element) => {
+        element.getAnimations?.().forEach((animation) => animation.cancel());
+    });
+
+    const allNodes = svgElement.querySelectorAll<SVGElement>(".node, .actor, .state, .class-name");
+    allNodes.forEach((node) => {
+        node.style.removeProperty('opacity');
+        node.style.removeProperty('transform');
+        node.style.removeProperty('transform-origin');
+    });
+
+    const allPaths = svgElement.querySelectorAll<SVGElement>("path");
+    allPaths.forEach((path) => {
+        path.style.removeProperty('stroke-dasharray');
+        path.style.removeProperty('stroke-dashoffset');
+    });
+}
+
 
 export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
     const [svg, setSvg] = useState<string>("");
     const [error, setError] = useState<string | null>(null);
-    const [isInternalStreaming, setIsInternalStreaming] = useState(isStreaming);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isFixing, setIsFixing] = useState(false);
     const diagramRef = useRef<HTMLDivElement>(null);
     const modalRef = useRef<HTMLDivElement>(null);
-    // Use a ref so the effect can read the latest streaming state without being a dependency
-    const isInternalStreamingRef = useRef(isInternalStreaming);
-    isInternalStreamingRef.current = isInternalStreaming;
-    const isGenerating = isFixing || isInternalStreaming || (isStreaming && !svg);
+    const isGenerating = isFixing || isStreaming;
     // During streaming, we don't want to show the full-screen blurring overlay because it makes it
     // look like the UI is blocked. Only show it if we are fixing the diagram or if we have no SVG at all
     // and are NOT in the middle of a stream (i.e. first render or explicit generation).
     const showOverlay = !svg && (isFixing || isGenerating);
-
-    useEffect(() => {
-        if (isStreaming) {
-            setIsInternalStreaming(true);
-        }
-    }, [isStreaming]);
 
     // Use a stable ID based on chart content to prevent re-renders
     const id = useMemo(() => {
@@ -162,12 +193,11 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                         setSvg(normalizeMermaidSvg(newSvg));
                         setError(null);
                         setIsFixing(false);
-                        setIsInternalStreaming(false);
                     }
                     return; // Success!
                 } catch (renderError: unknown) {
                     // If we are streaming, don't show error yet — diagram is still being built
-                    if (isStreaming || isInternalStreamingRef.current) {
+                    if (isStreaming) {
                         // In streaming mode, we expect partial syntax errors. Skip console error noise.
                         return;
                     }
@@ -195,7 +225,6 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                                         setSvg(normalizeMermaidSvg(fixedSvg));
                                         setError(null);
                                         setIsFixing(false);
-                                        setIsInternalStreaming(false);
                                     }
                                     return;
                                 }
@@ -217,7 +246,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                     }
                 }
             } catch (error: unknown) {
-                if (!isStreaming && !isInternalStreamingRef.current) {
+                if (!isStreaming) {
                     console.error('Complete render failure:', error);
                     if (mounted) {
                         setIsFixing(false);
@@ -234,10 +263,6 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
             mounted = false;
             clearTimeout(timer);
         };
-        // NOTE: isInternalStreaming is intentionally excluded from deps — we read it
-        // via isInternalStreamingRef so the effect doesn't re-trigger when it flips
-        // to false after a successful render (which was the source of the flicker).
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [chart, id, isStreaming]);
 
     const handleRetry = async () => {
@@ -282,95 +307,65 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
     useEffect(() => {
         if (!svg || !diagramRef.current) return;
 
-        let raf: number;
-        raf = requestAnimationFrame(() => {
+        const runningAnimations: Animation[] = [];
+
+        const raf = requestAnimationFrame(() => {
             const container = diagramRef.current;
             if (!container) return;
             const svgElement = container.querySelector("svg");
             if (!svgElement) return;
 
-            // ① Make the SVG fully responsive — override Mermaid's baked-in
-            //    absolute px dimensions with CSS. This is the authoritative place
-            //    to do this because we have a real DOM element, not a string.
-            const rawW = svgElement.getAttribute('width');
-            const rawH = svgElement.getAttribute('height');
-            const hasViewBox = svgElement.hasAttribute('viewBox');
-
-            if (!hasViewBox && rawW && rawH) {
-                svgElement.setAttribute('viewBox', `0 0 ${rawW} ${rawH}`);
-            }
-            // Always remove absolute dimensions and rely on CSS
-            svgElement.removeAttribute('width');
-            svgElement.removeAttribute('height');
-            svgElement.style.width = '100%';
-            svgElement.style.height = 'auto';
-            svgElement.style.overflow = 'visible';
-            svgElement.style.maxHeight = '70vh';
-
-            // ② Clear ANY stale inline styles left by previous animation cycles.
-            //    This is the root cause of the "broken after streaming" bug:
-            //    the previous render's animation left nodes with opacity:0.
-            const allNodes = svgElement.querySelectorAll(".node, .actor, .state, .class-name");
-            allNodes.forEach((node: any) => {
-                node.style.opacity = '';
-                node.style.transform = '';
-            });
-            const allPaths = svgElement.querySelectorAll("path");
-            allPaths.forEach((path: any) => {
-                path.style.strokeDasharray = '';
-                path.style.strokeDashoffset = '';
-            });
+            // ① Normalize size and ② clear stale animation styles every pass.
+            applyResponsiveSvgSizing(svgElement);
+            resetAnimatedSvgStyles(svgElement);
 
             // ③ Skip entrance animations if still generating to avoid setting
             //    opacity:0 prematurely. Animations only run on the final stable state.
             if (isGenerating) return;
 
             // Animate edge paths (drawing effect)
-            const paths = svgElement.querySelectorAll("path.edgePath path, path.flowchart-link, .sequence-diagram path");
-            paths.forEach((path: any, i) => {
+            const paths = svgElement.querySelectorAll<SVGPathElement>("path.edgePath path, path.flowchart-link, .sequence-diagram path");
+            paths.forEach((path, i) => {
                 try {
                     const length = path.getTotalLength();
                     if (length < 5) return;
-                    path.style.strokeDasharray = `${length}`;
-                    path.style.strokeDashoffset = `${length}`;
-                    path.animate([
-                        { strokeDashoffset: length },
-                        { strokeDashoffset: 0 }
+                    const stagger = Math.min(i * 20, 240);
+                    const animation = path.animate([
+                        { strokeDasharray: `${length}`, strokeDashoffset: length },
+                        { strokeDasharray: `${length}`, strokeDashoffset: 0 }
                     ], {
                         duration: 800 + (length / 2),
-                        delay: i * 50,
-                        fill: "forwards",
+                        delay: stagger,
+                        fill: "none",
                         easing: "ease-out"
-                    }).onfinish = () => {
-                        path.style.strokeDasharray = '';
-                        path.style.strokeDashoffset = '';
-                    };
-                } catch (e) {
+                    });
+                    runningAnimations.push(animation);
+                } catch {
                     // Ignore paths that don't support getTotalLength
                 }
             });
 
             // Animate nodes
             const nodes = svgElement.querySelectorAll(".node, .actor, .state, .class-name");
-            nodes.forEach((node: any, i) => {
-                node.style.opacity = "0";
-                node.style.transformOrigin = "center";
-                node.animate([
-                    { opacity: 0, transform: "scale(0.9)" },
-                    { opacity: 1, transform: "scale(1)" }
+            nodes.forEach((node: SVGElement, i) => {
+                const stagger = Math.min(i * 18, 180);
+                const animation = node.animate([
+                    { opacity: 0 },
+                    { opacity: 1 }
                 ], {
-                    duration: 500,
-                    delay: i * 30 + 200,
-                    fill: "forwards",
-                    easing: "cubic-bezier(0.34, 1.56, 0.64, 1)"
-                }).onfinish = () => {
-                    node.style.opacity = '';
-                    node.style.transform = '';
-                };
+                    duration: 420,
+                    delay: stagger,
+                    fill: "none",
+                    easing: "ease-out"
+                });
+                runningAnimations.push(animation);
             });
         });
 
-        return () => cancelAnimationFrame(raf);
+        return () => {
+            cancelAnimationFrame(raf);
+            runningAnimations.forEach((animation) => animation.cancel());
+        };
     }, [svg, isGenerating]);
 
     const exportToPNG = async (e?: React.MouseEvent) => {

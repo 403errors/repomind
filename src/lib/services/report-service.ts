@@ -502,29 +502,73 @@ export function buildOutreachPack(scan: StoredScan, shareUrl: string): OutreachP
     const repoHook = inferInterestingAreaFromFinding(strongestFinding);
     const repoProfileUrl = buildAbsoluteUrlFromOrigin(shareUrl, buildRepoProfileHref(scan.owner, scan.repo));
 
-    const maintainerNote = [
-        `Hi ${scan.owner} maintainers,`,
-        "",
-        `I came across ${scan.owner}/${scan.repo} and found ${repoHook} particularly interesting, so I spent some time reviewing it more closely.`,
-        `I also ran a security scan and found ${scan.summary.total} issue${scan.summary.total === 1 ? "" : "s"} (${scan.summary.high} high / ${scan.summary.critical} critical). Sharing this privately first so you can triage it safely before any public disclosure.`,
-    ].join("\n");
+    const { critical, high, medium, low, total } = scan.summary;
+    const isClean = total === 0;
+    const isHighRisk = (critical ?? 0) > 0 || (high ?? 0) > 0;
 
-    const outreachMessage = [
-        maintainerNote,
-        "",
-        strongestFinding
-            ? `One finding that stood out most was ${strongestFinding.finding.title} in ${strongestFinding.finding.file}${strongestFinding.finding.line ? `:${strongestFinding.finding.line}` : ""}.`
-            : "No strongest finding available.",
-        `Impact: ${strongestImpact}`,
-        "",
-        `Private report link (expires automatically): ${shareUrl}`,
-        `Repo profile: ${repoProfileUrl}`,
-        "",
-        "You can review the full findings and supporting detail in the private report link above.",
-    ].join("\n");
+    let outreachMessage = "";
+
+    if (isClean) {
+        outreachMessage = [
+            `Hello ${scan.owner} Team,`,
+            "",
+            `I recently spent some time exploring ${scan.owner}/${scan.repo} and was particularly impressed by ${repoHook}. The implementation is impressively clean and well-structured.`,
+            "",
+            `I ran a security health check through RepoMind and it returned zero vulnerabilities. It's rare to see a repository this well-hardened, and I wanted to share the clean report with you.`,
+            "",
+            "RESOURCES",
+            "",
+            `Repo Profile: ${repoProfileUrl}`,
+            `Security Report: ${shareUrl}`,
+            "",
+            `You might want to add a RepoMind verified badge to your README to show off the codebase quality!`,
+            "",
+            `Best regards,`,
+        ].join("\n");
+    } else if (!isHighRisk) {
+        outreachMessage = [
+            `Hello ${scan.owner} Team,`,
+            "",
+            `I've been following ${scan.owner}/${scan.repo} and really appreciated ${repoHook}. It's a great example of modern engineering in this area.`,
+            "",
+            `I ran a quick hygiene scan with RepoMind and noticed ${total} minor areas where the security posture could be polished (${medium} medium / ${low} low). Nothing critical, just a few maintenance improvements to keep things airtight.`,
+            "",
+            "RESOURCES",
+            "",
+            `Repo Profile: ${repoProfileUrl}`,
+            `Security Report: ${shareUrl}`,
+            "",
+            `I've prepared a full report with AI-ready patches to help you resolve them in minutes.`,
+            "",
+            `Keep up the great work!`,
+        ].join("\n");
+    } else {
+        outreachMessage = [
+            `Hello ${scan.owner} Team,`,
+            "",
+            `I'm a big fan of ${scan.owner}/${scan.repo}, specifically how you've handled ${repoHook}.`,
+            "",
+            `While doing a deep dive, I ran a RepoMind security scan and identified ${total} findings that require your attention (${high} high / ${critical} critical). Sharing this privately first so you can triage safely before any public disclosure.`,
+            "",
+            strongestFinding
+                ? `One finding that stood out was ${strongestFinding.finding.title} in ${strongestFinding.finding.file}.`
+                : "A few high-confidence vulnerabilities were detected.",
+            "",
+            `Impact: ${strongestImpact}`,
+            "",
+            "RESOURCES",
+            "",
+            `Repo Profile: ${repoProfileUrl}`,
+            `Private Disclosure Report: ${shareUrl}`,
+            "",
+            `I've mapped out the full impact and generated suggested fixes in the private report link above.`,
+            "",
+            `Best regards,`,
+        ].join("\n");
+    }
 
     return {
-        maintainerNote,
+        maintainerNote: outreachMessage.split("RESOURCES")[0].trim(),
         strongestFinding,
         impactStatement: strongestImpact,
         shareUrl,
