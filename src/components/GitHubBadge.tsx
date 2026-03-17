@@ -46,12 +46,12 @@ export function GitHubBadge() {
                 <Github className="w-5 h-5 md:w-4 md:h-4 text-purple-400" />
                 <span className="hidden md:inline text-sm font-medium text-purple-200">Star on GitHub</span>
                 {stars !== null ? (
-                    <div className="hidden md:flex items-center gap-1.5 pl-2 border-l border-purple-600/30 ml-1 text-zinc-400">
+                    <div className="flex items-center gap-1.5 pl-2 border-l border-purple-600/30 ml-1 text-zinc-400">
                         <span className="text-xs font-mono text-purple-300">{stars.toLocaleString()}</span>
                         <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
                     </div>
                 ) : (
-                    <div className="hidden md:flex items-center gap-1.5 pl-2 border-l border-purple-600/30 ml-1 animate-pulse">
+                    <div className="flex items-center gap-1.5 pl-2 border-l border-purple-600/30 ml-1 animate-pulse">
                         <div className="w-8 h-3 bg-purple-900/40 rounded mx-1" />
                         <Star className="w-3 h-3 text-purple-700 fill-purple-700" />
                     </div>
