@@ -2,15 +2,25 @@ name: Refresh Tiered Repo Catalog
 
 on:
   workflow_dispatch:
+    inputs:
+      force_all_time:
+        description: 'Force refresh all-time tier'
+        required: false
+        type: boolean
+        default: false
   schedule:
-    - cron: "0 3 * * 1" # Weekly refresh on Mondays
+    # Weekly refresh (weekly, monthly, 6-month, yearly tiers)
+    - cron: "0 3 * * 1" # Every Monday at 3 AM UTC
+    # All-time refresh (every 5 years - manual trigger recommended)
+    # Note: For practical purposes, all-time tier can be triggered manually
+    # or updated once per year if needed
 
 permissions:
   contents: write
 
 jobs:
   refresh:
-    name: Refresh & Validate Catalog (7.6k Tiered Repos)
+    name: Refresh Catalog with Trending Algorithm
     runs-on: ubuntu-latest
 
     steps:
@@ -26,17 +36,42 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Refresh tiered repository dataset
+      - name: Check if all-time tier needs refresh
+        id: check_alltime
+        run: |
+          # Check last all-time refresh date from git log
+          LAST_ALLTIME=$(git log --all --grep="all-time tier" --date=format:'%Y-%m-%d' --pretty=format:'%ad' -1 2>/dev/null || echo "1970-01-01")
+          DAYS_SINCE=$(( ($(date +%s) - $(date -d "$LAST_ALLTIME" +%s)) / 86400 ))
+
+          # Refresh all-time tier every 1825 days (5 years) or if forced
+          if [ "${{ github.event.inputs.force_all_time }}" == "true" ] || [ $DAYS_SINCE -gt 1825 ]; then
+            echo "refresh_alltime=true" >> $GITHUB_OUTPUT
+            echo "All-time tier will be refreshed (last refresh: $DAYS_SINCE days ago)"
+          else
+            echo "refresh_alltime=false" >> $GITHUB_OUTPUT
+            echo "All-time tier skipped (last refresh: $DAYS_SINCE days ago, next in $((1825 - DAYS_SINCE)) days)"
+          fi
+
+      - name: Refresh trending tiers (weekly, monthly, 6-month, yearly)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run data:refresh:repos
+          SKIP_ALL_TIME: ${{ steps.check_alltime.outputs.refresh_alltime == 'false' }}
+        run: |
+          if [ "$SKIP_ALL_TIME" == "true" ]; then
+            echo "⏭️  Skipping all-time tier (not due for refresh)"
+            # Run script with all-time tier disabled
+            node scripts/fetch-trending-repos.mjs --skip-all-time
+          else
+            echo "🔄 Refreshing all tiers including all-time"
+            npm run data:refresh:repos
+          fi
 
       - name: Validate data integrity
         run: |
           REPO_COUNT=$(grep -c '"owner"' public/data/top-repos.json)
           echo "Found $REPO_COUNT repositories."
-          if [ "$REPO_COUNT" -lt 4000 ]; then
-            echo "Error: Catalog size ($REPO_COUNT) is below the minimum threshold (4000)."
+          if [ "$REPO_COUNT" -lt 3000 ]; then
+            echo "Error: Catalog size ($REPO_COUNT) is below the minimum threshold (3000)."
             exit 1
           fi
 
@@ -50,6 +85,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/data/top-repos.json
-          git commit -m "chore(data): refresh tiered repo catalog (7.6k target)"
+
+          # Create commit message based on what was refreshed
+          if [ "${{ steps.check_alltime.outputs.refresh_alltime }}" == "true" ]; then
+            git commit -m "chore(data): refresh all tiers including all-time tier (trending algorithm)"
+          else
+            git commit -m "chore(data): refresh trending tiers (weekly, monthly, 6-month, yearly)"
+          fi
+
           git push
         # NOTE: Sitemap is refreshed automatically on the next Vercel deployment after this commit.

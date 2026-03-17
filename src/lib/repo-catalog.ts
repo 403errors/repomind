@@ -18,6 +18,7 @@ export interface CatalogRepoEntry {
   language: string | null;
   tier?: RepoTier;
   rank?: number;
+  trendingScore?: number;
 }
 
 interface CatalogData {
@@ -50,6 +51,7 @@ function normalizeRepo(entry: CatalogRepoEntry): CatalogRepoEntry {
     language: entry.language,
     tier: entry.tier,
     rank: entry.rank,
+    trendingScore: entry.trendingScore,
   };
 }
 
@@ -100,7 +102,7 @@ function buildCatalogData(repos: CatalogRepoEntry[]): CatalogData {
 
   // Topic Strategy: 1500 Trending + 500 Stable
   const eligibleTopics = Object.entries(topicBuckets)
-    .filter(([_, reposForTopic]) => reposForTopic.length >= TOPIC_MIN_REPO_COUNT)
+    .filter(([, reposForTopic]) => reposForTopic.length >= TOPIC_MIN_REPO_COUNT)
     .map(([topic]) => topic);
 
   const stableTopics = [...eligibleTopics]
