@@ -69,6 +69,25 @@ function getErrorStatus(error: unknown): number | undefined {
     return typeof maybeStatus === "number" ? maybeStatus : undefined;
 }
 
+function getUserFacingAnalysisError(error: unknown, code?: string): string {
+    if (code === "AI_FUNCTION_TURN_ORDER") {
+        return "AI tool handoff failed during streaming. Please retry.";
+    }
+
+    const raw = error instanceof Error ? error.message : "";
+    const cleaned = raw.replace(/^\[GoogleGenerativeAI Error\]:\s*/i, "").trim();
+
+    if (!cleaned) {
+        return "An unexpected error occurred while analyzing the profile.";
+    }
+
+    if (/function response turn comes immediately after a function call turn/i.test(cleaned)) {
+        return "AI tool handoff failed during streaming. Please retry.";
+    }
+
+    return cleaned.length > 220 ? `${cleaned.slice(0, 217)}...` : cleaned;
+}
+
 export function ProfileChatInterface({
     profile,
     profileReadme,
@@ -379,6 +398,7 @@ export function ProfileChatInterface({
             const isPayloadTooLarge = errorStatus === 413;
             const isAnonUsageLimit = errorCode === "ANON_USAGE_LIMIT_EXCEEDED";
             const isAuthUsageLimit = errorCode === "AUTH_USAGE_LIMIT_EXCEEDED";
+            const userFacingError = getUserFacingAnalysisError(error, errorCode);
 
             if (isAnonUsageLimit) {
                 toast.error("Login required for more profile tooling", {
@@ -419,7 +439,7 @@ export function ProfileChatInterface({
                 });
             } else {
                 toast.error("Failed to analyze profile", {
-                    description: "An unexpected error occurred. Please try again.",
+                    description: userFacingError,
                 });
             }
 
@@ -429,7 +449,7 @@ export function ProfileChatInterface({
                     role: "model",
                     content: isPayloadTooLarge
                         ? "This request was too large to process. Try a narrower question focused on a specific project or timeframe."
-                        : "I encountered an error while analyzing the profile. Please try again or rephrase your question.",
+                        : `I encountered an error while analyzing the profile.\n\n${userFacingError}`,
                 };
                 setMessages((prev) => [...prev, errorMsg]);
             }

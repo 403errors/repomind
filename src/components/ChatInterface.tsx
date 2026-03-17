@@ -92,6 +92,25 @@ function getErrorStatus(error: unknown): number | undefined {
     return typeof maybeStatus === "number" ? maybeStatus : undefined;
 }
 
+function getUserFacingAnalysisError(error: unknown, code?: string): string {
+    if (code === "AI_FUNCTION_TURN_ORDER") {
+        return "AI tool handoff failed during streaming. Please retry.";
+    }
+
+    const raw = error instanceof Error ? error.message : "";
+    const cleaned = raw.replace(/^\[GoogleGenerativeAI Error\]:\s*/i, "").trim();
+
+    if (!cleaned) {
+        return "An unexpected error occurred while analyzing the code.";
+    }
+
+    if (/function response turn comes immediately after a function call turn/i.test(cleaned)) {
+        return "AI tool handoff failed during streaming. Please retry.";
+    }
+
+    return cleaned.length > 220 ? `${cleaned.slice(0, 217)}...` : cleaned;
+}
+
 export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: ChatInterfaceProps) {
     const { data: session } = useSession();
     const [messages, setMessages] = useState<RepoChatMessage[]>([
@@ -586,6 +605,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
             const isPayloadTooLarge = errorStatus === 413;
             const isAnonUsageLimit = errorCode === "ANON_USAGE_LIMIT_EXCEEDED";
             const isAuthUsageLimit = errorCode === "AUTH_USAGE_LIMIT_EXCEEDED";
+            const userFacingError = getUserFacingAnalysisError(error, errorCode);
 
             if (isAnonUsageLimit) {
                 toast.error("Login required for more repo tooling", {
@@ -626,7 +646,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 });
             } else {
                 toast.error("Failed to analyze code", {
-                    description: "An unexpected error occurred. Please try again.",
+                    description: userFacingError,
                 });
             }
 
@@ -636,7 +656,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                     role: "model",
                     content: isPayloadTooLarge
                         ? "This request was too large to process. Try a narrower question focused on a specific module or folder."
-                        : "I encountered an error while analyzing the code. Please try again or rephrase your question.",
+                        : `I encountered an error while analyzing the code.\n\n${userFacingError}`,
                 };
                 setMessages((prev) => [...prev, errorMsg]);
             }

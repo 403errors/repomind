@@ -110,6 +110,88 @@ describe("answerWithContextStream", () => {
         expect(sendMessageStreamMock).toHaveBeenCalledTimes(1);
         expect(chunks).toContain("Interim reasoning...");
     });
+
+    it("uses explicit follow-up history and canonical function-response payload when a tool call is finalized", async () => {
+        getRecentRepoCommitsSnapshotMock.mockResolvedValue({
+            commits: [{ sha: "abc123", message: "feat: test", date: "2026-03-17T00:00:00Z" }],
+            freshness: { label: "just now" },
+        });
+
+        const phaseOneSendMessageStreamMock = vi.fn().mockResolvedValue({
+            stream: toAsyncStream([
+                {
+                    functionCalls: () => [{ name: "fetch_recent_commits", args: { limit: 1 } }],
+                    candidates: [{ content: { parts: [] } }],
+                },
+            ]),
+            response: Promise.resolve({
+                functionCalls: () => [{ name: "fetch_recent_commits", args: { limit: 1 } }],
+            }),
+        });
+
+        const phaseTwoSendMessageStreamMock = vi.fn().mockResolvedValue({
+            stream: toAsyncStream([
+                {
+                    candidates: [{ content: { parts: [{ text: "Final answer" }] } }],
+                },
+            ]),
+            response: Promise.resolve({
+                functionCalls: () => [],
+            }),
+        });
+
+        const startChatMock = vi
+            .fn()
+            .mockReturnValueOnce({
+                sendMessageStream: phaseOneSendMessageStreamMock,
+            })
+            .mockReturnValueOnce({
+                sendMessageStream: phaseTwoSendMessageStreamMock,
+            });
+
+        getGenerativeModelMock.mockReturnValue({
+            startChat: startChatMock,
+        });
+
+        const chunks: string[] = [];
+        for await (const chunk of answerWithContextStream(
+            "Summarize recent commits",
+            "repo context",
+            { owner: "acme", repo: "widget" }
+        )) {
+            chunks.push(chunk);
+        }
+
+        expect(startChatMock).toHaveBeenCalledTimes(2);
+        expect(startChatMock).toHaveBeenNthCalledWith(2, {
+            history: [
+                { role: "user", parts: [{ text: expect.stringContaining("prompt") }] },
+                {
+                    role: "model",
+                    parts: [{ functionCall: { name: "fetch_recent_commits", args: { limit: 1 } } }],
+                },
+            ],
+        });
+
+        expect(phaseTwoSendMessageStreamMock).toHaveBeenCalledWith([
+            {
+                functionResponse: {
+                    name: "fetch_recent_commits",
+                    response: {
+                        name: "fetch_recent_commits",
+                        content: {
+                            commits: [{ sha: "abc123", message: "feat: test", date: "2026-03-17T00:00:00Z" }],
+                            scope: "repository",
+                            repository: "widget",
+                            limitExceeded: false,
+                            maxAllowed: 10,
+                        },
+                    },
+                },
+            },
+        ]);
+        expect(chunks).toContain("Final answer");
+    });
 });
 
 describe("analyzeFileSelection", () => {

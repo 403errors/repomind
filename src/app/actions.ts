@@ -102,6 +102,17 @@ function getErrorMessage(error: unknown): string {
     return String(error);
 }
 
+function classifyStreamError(error: unknown): { message: string; code?: string } {
+    const message = getErrorMessage(error) || "An error occurred";
+    if (/function response turn comes immediately after a function call turn/i.test(message)) {
+        return {
+            message: "AI tool-call handoff failed while streaming. Please retry.",
+            code: "AI_FUNCTION_TURN_ORDER",
+        };
+    }
+    return { message };
+}
+
 // ─── Private: Analytics tracking ─────────────────────────────────────────────
 
 /**
@@ -741,7 +752,8 @@ export async function* processProfileQueryStream(
         };
     } catch (error: unknown) {
         console.error("Profile stream error:", error);
-        yield { type: "error", message: getErrorMessage(error) || "An error occurred" };
+        const classified = classifyStreamError(error);
+        yield { type: "error", message: classified.message || "An error occurred", code: classified.code };
     }
 }
 

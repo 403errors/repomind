@@ -81,6 +81,17 @@ export interface QueryPipelineDeps {
     ) => AsyncGenerator<string>;
 }
 
+function classifyPipelineError(error: unknown): { message: string; code?: string } {
+    const message = error instanceof Error ? error.message : "An unexpected error occurred";
+    if (/function response turn comes immediately after a function call turn/i.test(message)) {
+        return {
+            message: "AI tool-call handoff failed while streaming. Please retry.",
+            code: "AI_FUNCTION_TURN_ORDER",
+        };
+    }
+    return { message };
+}
+
 // ─── File Pruning ──────────────────────────────────────────────────────────────
 
 /** Binary/generated files that add noise without value for AI analysis */
@@ -405,8 +416,8 @@ export async function* executeRepoQueryStream(
             queryPreview: query.slice(0, 160),
             error,
         });
-        const message = error instanceof Error ? error.message : "An unexpected error occurred";
-        yield { type: "error", message };
+        const classified = classifyPipelineError(error);
+        yield { type: "error", message: classified.message, code: classified.code };
     }
 }
 

@@ -15,7 +15,7 @@ import {
   getUserRepos,
   getUserReposByAge,
 } from "./github";
-import type { GenerationConfig } from "@google/generative-ai";
+import type { Content, GenerationConfig } from "@google/generative-ai";
 
 type JsonObject = Record<string, unknown>;
 type GeminiTool = Record<string, unknown>;
@@ -44,25 +44,35 @@ function getStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function safeJsonStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? "undefined";
-  } catch {
-    return "[unserializable]";
-  }
+function normalizeFunctionName(name: unknown): string {
+  return typeof name === "string" && name.trim().length > 0 ? name : "unknown_tool";
 }
 
-function dedupeFunctionCalls(calls: FunctionCallShape[]): FunctionCallShape[] {
-  const seen = new Set<string>();
-  const unique: FunctionCallShape[] = [];
-  for (const call of calls) {
-    const name = typeof call.name === "string" ? call.name : "unknown_tool";
-    const key = `${name}:${safeJsonStringify(call.args)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(call);
-  }
-  return unique;
+function buildModelFunctionCallParts(calls: FunctionCallShape[]) {
+  return calls.map((call) => ({
+    functionCall: {
+      name: normalizeFunctionName(call.name),
+      args: asObject(call.args),
+    },
+  }));
+}
+
+function buildFunctionResponseParts(
+  calls: FunctionCallShape[],
+  responses: Array<{ functionResponseData: Record<string, unknown> }>
+) {
+  return calls.map((call, index) => {
+    const name = normalizeFunctionName(call.name);
+    return {
+      functionResponse: {
+        name,
+        response: {
+          name,
+          content: responses[index].functionResponseData,
+        },
+      },
+    };
+  });
 }
 
 function getThinkingGenerationConfig(includeThoughts: boolean, thinkingLevel: "HIGH" | "LOW" | "MINIMAL"): GenerationConfig {
@@ -87,7 +97,7 @@ async function fetchWebSearchSnapshot(
 ): Promise<{ summary: string; queryHint: string }> {
   const searchModel = getGenAI().getGenerativeModel({
     model: getChatModelForPreference(modelPreference),
-    tools: [{ googleSearch: {} }] as any,
+    tools: [{ googleSearch: {} }] as unknown as GeminiTool[],
     generationConfig: getThinkingGenerationConfig(false, "LOW"),
   });
 
@@ -336,15 +346,19 @@ export async function answerWithContext(
   if (funcs && funcs.length > 0) {
     const calls = funcs as unknown as FunctionCallShape[];
     const responses = await Promise.all(calls.map(c => resolveToolCall(c, repoDetails)));
+    const modelFunctionCallParts = buildModelFunctionCallParts(calls);
+    const toolResponseParts = buildFunctionResponseParts(calls, responses);
+    const followupHistory: Content[] = [
+      { role: "user", parts: [{ text: prompt }] },
+      { role: "model", parts: modelFunctionCallParts },
+    ];
 
-    const toolResponseParts = calls.map((c, i) => ({
-      functionResponse: {
-        name: typeof c.name === "string" ? c.name : "unknown_tool",
-        response: responses[i].functionResponseData
-      }
-    }));
+    // Use a fresh chat with explicit function-call history to keep provider turn-order strictness stable.
+    const followupChat = model.startChat({
+      history: followupHistory,
+    });
 
-    result = await chat.sendMessage(toolResponseParts);
+    result = await followupChat.sendMessage(toolResponseParts);
   }
 
   return result.response.text();
@@ -440,7 +454,7 @@ export async function* answerWithContextStream(
     }
     // Finalize history and only trust calls from the finalized response.
     const firstResponse = await firstResult.response;
-    calls = dedupeFunctionCalls((firstResponse.functionCalls?.() as unknown as FunctionCallShape[] | undefined) ?? []);
+    calls = (firstResponse.functionCalls?.() as unknown as FunctionCallShape[] | undefined) ?? [];
     if (streamedCalls.length > 0 && calls.length === 0) {
       console.warn(`[answerWithContextStream] Ignoring ${streamedCalls.length} transient stream tool call(s); finalized response had no tool calls.`);
     }
@@ -472,14 +486,17 @@ export async function* answerWithContextStream(
     console.log(`[answerWithContextStream] Sending Phase 2 (tool response) stream...`);
 
     try {
-      const toolResponseParts = calls.map((c, i) => ({
-        functionResponse: {
-          name: typeof c.name === "string" ? c.name : "unknown_tool",
-          response: responses[i].functionResponseData
-        }
-      }));
+      const modelFunctionCallParts = buildModelFunctionCallParts(calls);
+      const toolResponseParts = buildFunctionResponseParts(calls, responses);
+      const followupHistory: Content[] = [
+        { role: "user", parts: [{ text: prompt }] },
+        { role: "model", parts: modelFunctionCallParts },
+      ];
+      const followupChat = model.startChat({
+        history: followupHistory,
+      });
 
-      const streamResult = await chat.sendMessageStream(toolResponseParts);
+      const streamResult = await followupChat.sendMessageStream(toolResponseParts);
 
       for await (const chunk of streamResult.stream) {
         const parts = ((chunk as unknown as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
