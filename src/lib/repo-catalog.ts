@@ -178,3 +178,24 @@ export async function isIndexableTopic(topic: string): Promise<boolean> {
   const data = await getCatalogData();
   return data.indexableTopics.includes(topic.toLowerCase());
 }
+
+export async function getCatalogStats() {
+  const data = await getCatalogData();
+  const tierCounts: Record<string, number> = {
+    'all-time': 0,
+    'yearly': 0,
+    '6-month': 0,
+    'monthly': 0,
+    'weekly': 0,
+  };
+
+  data.curatedRepos.forEach(repo => {
+    if (repo.tier) tierCounts[repo.tier]++;
+  });
+
+  return {
+    totalRepos: data.curatedRepos.length,
+    totalTopics: data.indexableTopics.length,
+    tierCounts
+  };
+}

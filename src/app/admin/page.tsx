@@ -2,9 +2,10 @@ import { auth } from "@/lib/auth";
 import { isAdminUser } from "@/lib/admin-auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { FileText, Settings, Users, ArrowRight, BarChart2, Globe, Activity } from "lucide-react";
+import { FileText, Settings, Users, ArrowRight, BarChart2, Globe, Activity, Database, Hash } from "lucide-react";
 import { getAllPosts } from "@/lib/services/blog-service";
 import { getAnalyticsData } from "@/lib/analytics";
+import { getCatalogStats } from "@/lib/repo-catalog";
 
 export default async function AdminDashboardPage() {
   const session = await auth();
@@ -13,9 +14,10 @@ export default async function AdminDashboardPage() {
     redirect("/");
   }
 
-  const [posts, analytics] = await Promise.all([
+  const [posts, analytics, catalogStats] = await Promise.all([
     getAllPosts(),
     getAnalyticsData(),
+    getCatalogStats(),
   ]);
 
   const publishedCount = posts.filter((p: any) => p.published).length;
@@ -23,9 +25,9 @@ export default async function AdminDashboardPage() {
 
   const stats = [
     { label: "Total Posts", value: posts.length.toString(), icon: FileText, color: "text-blue-400" },
-    { label: "Drafts", value: draftCount.toString(), icon: BarChart2, color: "text-yellow-400" },
-    { label: "Published", value: publishedCount.toString(), icon: BarChart2, color: "text-green-400" },
-    { label: "Total Visitors", value: analytics.totalVisitors.toString(), icon: Users, color: "text-purple-400" },
+    { label: "Curated Repos", value: catalogStats.totalRepos.toLocaleString(), icon: Database, color: "text-purple-400" },
+    { label: "Indexable Topics", value: catalogStats.totalTopics.toLocaleString(), icon: Hash, color: "text-pink-400" },
+    { label: "Total Visitors", value: analytics.totalVisitors.toString(), icon: Users, color: "text-orange-400" },
     { label: "Total Queries", value: analytics.totalQueries.toString(), icon: Activity, color: "text-cyan-400" },
   ];
 
@@ -60,7 +62,7 @@ export default async function AdminDashboardPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <Link 
           href="/admin/blog"
           className="group relative bg-zinc-900/40 border border-white/5 rounded-3xl p-8 hover:bg-zinc-900/60 hover:border-purple-500/30 transition-all overflow-hidden"
@@ -72,11 +74,30 @@ export default async function AdminDashboardPage() {
             <FileText className="text-purple-400" />
             Blog CMS
           </h2>
-          <p className="text-zinc-400 mb-6 relative z-10 max-w-md">
+          <p className="text-zinc-400 mb-6 relative z-10 max-w-md text-sm leading-relaxed">
             Manage your articles and drafts. Published {publishedCount} posts across {posts.length} total.
           </p>
-          <div className="flex items-center gap-2 text-zinc-300 font-bold group-hover:gap-4 transition-all">
+          <div className="flex items-center gap-2 text-zinc-300 font-bold group-hover:gap-4 transition-all mt-auto pt-4 shadow-sm">
             Manage Posts <ArrowRight size={18} />
+          </div>
+        </Link>
+
+        <Link 
+          href="/admin/index"
+          className="group relative bg-zinc-900/40 border border-white/5 rounded-3xl p-8 hover:bg-zinc-900/60 hover:border-pink-500/30 transition-all overflow-hidden"
+        >
+          <div className="absolute top-0 right-0 p-8 text-zinc-800/20 group-hover:text-pink-500/10 transition-colors">
+            <Database size={120} />
+          </div>
+          <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
+            <Database className="text-pink-400" />
+            Index Manager
+          </h2>
+          <p className="text-zinc-400 mb-6 relative z-10 max-w-md text-sm leading-relaxed">
+            Audit {catalogStats.totalRepos.toLocaleString()} repositories and {catalogStats.totalTopics.toLocaleString()} topics across multiple tiers.
+          </p>
+          <div className="flex items-center gap-2 text-zinc-300 font-bold group-hover:gap-4 transition-all mt-auto pt-4 shadow-sm">
+            Manage Index <ArrowRight size={18} />
           </div>
         </Link>
 
@@ -89,12 +110,12 @@ export default async function AdminDashboardPage() {
           </div>
           <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
             <BarChart2 className="text-blue-400" />
-            Platform Analytics
+            Analytics
           </h2>
-          <p className="text-zinc-400 mb-6 relative z-10 max-w-md">
+          <p className="text-zinc-400 mb-6 relative z-10 max-w-md text-sm leading-relaxed">
             Monitor real-time visitor activity, storage usage, and engagement metrics.
           </p>
-          <div className="flex items-center gap-2 text-zinc-300 font-bold group-hover:gap-4 transition-all">
+          <div className="flex items-center gap-2 text-zinc-300 font-bold group-hover:gap-4 transition-all mt-auto pt-4 shadow-sm">
             View Stats <ArrowRight size={18} />
           </div>
         </Link>
