@@ -161,9 +161,9 @@ export function ProfileChatInterface({
                             finalText?: string | null;
                             errorMessage?: string | null;
                         };
+                        const resumeMsgId = `run-${run.runId}`;
                         const text = (run.finalText ?? run.partialText ?? "").toString();
                         if (text) {
-                            const resumeMsgId = `run-${run.runId}`;
                             setMessages((prev) => {
                                 const has = prev.some((m) => m.id === resumeMsgId);
                                 if (has) {
@@ -177,7 +177,6 @@ export function ProfileChatInterface({
                         if (run.status === "RUNNING") {
                             setLoading(true);
                             setConnectionLost(true);
-                            const resumeMsgId = `run-${run.runId}`;
                             const poll = async () => {
                                 try {
                                     const r = await fetch(`/api/chat/run?runId=${encodeURIComponent(storedRunId)}`);

@@ -207,9 +207,9 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                             finalText?: string | null;
                             errorMessage?: string | null;
                         };
+                        const resumeMsgId = `run-${run.runId}`;
                         const text = (run.finalText ?? run.partialText ?? "").toString();
                         if (text) {
-                            const resumeMsgId = `run-${run.runId}`;
                             setMessages((prev) => {
                                 const has = prev.some((m) => m.id === resumeMsgId);
                                 if (has) {
