@@ -83,7 +83,7 @@ async function runTargetedRescan(params: {
         };
     }
 
-    const detection = runScanEngineV2(filesWithContent, {
+    const detection = await runScanEngineV2(filesWithContent, {
         profile: "deep",
         confidenceThreshold: 0,
     });

@@ -336,7 +336,7 @@ export async function runSecurityScan(
     const fetchDurationMs = Date.now() - fetchStartedAt;
 
     const deterministicStartedAt = Date.now();
-    const deterministic = runScanEngineV2(filesWithContent, {
+    const deterministic = await runScanEngineV2(filesWithContent, {
         profile: config.analysisProfile,
         confidenceThreshold: config.confidenceThreshold,
     });

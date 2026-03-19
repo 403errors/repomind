@@ -972,18 +972,35 @@ interface DependencyVulnerabilityRule {
 const KNOWN_VULNERABLE: Record<string, DependencyVulnerabilityRule[]> = {
     lodash: [{ range: "<4.17.21", severity: "high", issue: "Prototype pollution vulnerability", cve: "CVE-2019-10744" }],
     "node-fetch": [{ range: "<2.6.7", severity: "high", issue: "Potential SSRF vulnerability in older versions", cve: "CVE-2022-0235" }],
-    axios: [{ range: "<1.6.0", severity: "medium", issue: "Potential CSRF vulnerability in older versions", cve: "CVE-2023-45857" }],
-    jsonwebtoken: [{ range: "<9.0.0", severity: "high", issue: "Algorithm confusion risk in older versions", cve: "CVE-2022-23529" }],
-    express: [{ range: "<4.19.2", severity: "medium", issue: "Open redirect/XSS risks in older versions", cve: "CVE-2024-29041" }],
-    ws: [{ range: "<7.4.6", severity: "high", issue: "Potential ReDoS vulnerability in older versions", cve: "CVE-2021-32640" }],
-    "serialize-javascript": [{ range: "<3.1.0", severity: "high", issue: "Potential remote code execution risk", cve: "CVE-2020-7660" }],
-    ejs: [{ range: "<3.1.7", severity: "high", issue: "Template injection risk in older versions", cve: "CVE-2022-29078" }],
-    tar: [{ range: "<6.1.9", severity: "high", issue: "Path traversal vulnerability in older versions", cve: "CVE-2021-37713" }],
-    semver: [{ range: "<7.5.2", severity: "medium", issue: "Potential ReDoS vulnerability in older versions", cve: "CVE-2022-25883" }],
-    "tough-cookie": [{ range: "<4.1.3", severity: "medium", issue: "Prototype pollution vulnerability in older versions", cve: "CVE-2023-26136" }],
-    xml2js: [{ range: "<0.5.0", severity: "medium", issue: "Prototype pollution vulnerability in older versions", cve: "CVE-2023-0842" }],
-    minimist: [{ range: "<1.2.6", severity: "high", issue: "Prototype pollution vulnerability in older versions", cve: "CVE-2021-44906" }],
 };
+
+async function fetchVulnerabilitiesFromOSV(packageName: string, version: string): Promise<DependencyVulnerabilityRule[]> {
+    try {
+        const response = await fetch("https://api.osv.dev/v1/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                version,
+                package: { name: packageName, ecosystem: "npm" },
+            }),
+        });
+
+        if (!response.ok) return [];
+
+        const data = (await response.json()) as { vulns?: Array<{ id: string; summary: string; details: string; severity?: Array<{ score: string }> }> };
+        if (!data.vulns) return [];
+
+        return data.vulns.map((v) => ({
+            range: version, // OSV returns vulns relevant to the queried version
+            severity: (v.severity?.[0]?.score?.includes("HIGH") || v.severity?.[0]?.score?.includes("CRITICAL")) ? "high" : "medium",
+            issue: v.summary || v.details || "Known vulnerability",
+            cve: v.id.startsWith("GHSA") || v.id.startsWith("CVE") ? v.id : undefined,
+        }));
+    } catch (error) {
+        console.error(`Failed to fetch OSV data for ${packageName}:`, error);
+        return [];
+    }
+}
 
 function downgradeDevSeverity(severity: SecuritySeverity): SecuritySeverity {
     if (severity === "critical") return "high";
@@ -1136,10 +1153,10 @@ function buildResolvedDependencyIndex(lockfiles: { packageLock?: string; yarnLoc
     return map;
 }
 
-export function analyzeDependencies(
+export async function analyzeDependencies(
     packageJsonContent: string,
     lockfiles: { packageLock?: string; yarnLock?: string; pnpmLock?: string } = {}
-): SecurityFinding[] {
+): Promise<SecurityFinding[]> {
     const findings: SecurityFinding[] = [];
     try {
         const pkg = JSON.parse(packageJsonContent) as {
@@ -1159,14 +1176,20 @@ export function analyzeDependencies(
         const resolvedIndex = buildResolvedDependencyIndex(lockfiles);
 
         for (const dep of [...runtimeDeps, ...devDeps]) {
-            const rules = KNOWN_VULNERABLE[dep.name];
-            if (!rules?.length) continue;
-
             const resolved = resolvedIndex.get(dep.name) ?? parseDeclaredPinnedVersion(dep.declared);
             if (!resolved) continue;
 
-            for (const rule of rules) {
-                if (!isVersionInRange(resolved, rule.range)) continue;
+            // 1. Check local fallback (quick)
+            const fallbackRules = KNOWN_VULNERABLE[dep.name] || [];
+            const activeRules: DependencyVulnerabilityRule[] = [...fallbackRules.filter(r => isVersionInRange(resolved, r.range))];
+
+            // 2. Query OSV API for real-time data
+            const osvRules = await fetchVulnerabilitiesFromOSV(dep.name, resolved);
+            activeRules.push(...osvRules);
+
+            if (!activeRules.length) continue;
+
+            for (const rule of activeRules) {
                 const severity = dep.isDev ? downgradeDevSeverity(rule.severity) : rule.severity;
                 findings.push(
                     withFindingMetadata(
@@ -1227,8 +1250,9 @@ export function getScanSummary(findings: SecurityFinding[]): ScanSummary {
 }
 
 /** Main scanning function — runs all detectors across the given files */
-export function scanFiles(files: Array<{ path: string; content: string }>): SecurityFinding[] {
-    return runScanEngineV2(files, { profile: "deep", confidenceThreshold: 0 }).findings;
+export async function scanFiles(files: Array<{ path: string; content: string }>): Promise<SecurityFinding[]> {
+    const result = await runScanEngineV2(files, { profile: "deep", confidenceThreshold: 0 });
+    return result.findings;
 }
 
 function dedupeFindings(findings: SecurityFinding[]): SecurityFinding[] {
@@ -1244,10 +1268,10 @@ function dedupeFindings(findings: SecurityFinding[]): SecurityFinding[] {
     return out;
 }
 
-export function runScanEngineV2(
+export async function runScanEngineV2(
     files: Array<{ path: string; content: string }>,
     options: ScanEngineV2Options = {}
-): ScanEngineV2Result {
+): Promise<ScanEngineV2Result> {
     const profile = options.profile ?? "quick";
     const confidenceThreshold = options.confidenceThreshold ?? (profile === "deep" ? 0.68 : 0.78);
     const findings: SecurityFinding[] = [];
@@ -1287,7 +1311,7 @@ export function runScanEngineV2(
 
     const packageJson = fileMap.get("package.json");
     if (packageJson) {
-        const dependencyFindings = analyzeDependencies(packageJson, {
+        const dependencyFindings = await analyzeDependencies(packageJson, {
             packageLock: fileMap.get("package-lock.json"),
             yarnLock: fileMap.get("yarn.lock"),
             pnpmLock: fileMap.get("pnpm-lock.yaml"),

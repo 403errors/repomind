@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { detectSecrets, detectCodePatterns, analyzeDependencies, runScanEngineV2 } from "@/lib/security-scanner";
 
 // ─── detectSecrets ────────────────────────────────────────────────────────────
@@ -125,7 +125,23 @@ export function greet(name: string): string {
 });
 
 describe("analyzeDependencies", () => {
-    it("flags vulnerable dependency only when resolved version is in vulnerable range", () => {
+    beforeEach(() => {
+        vi.stubGlobal("fetch", vi.fn());
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("flags vulnerable dependency only when resolved version is in vulnerable range", async () => {
+        const mockFetch = vi.mocked(fetch);
+        mockFetch.mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                vulns: [{ id: "GHSA-123", summary: "Mock vulnerability", severity: [{ score: "HIGH" }] }],
+            }),
+        } as Response);
+
         const pkg = JSON.stringify({
             dependencies: {
                 axios: "^1.5.0",
@@ -137,11 +153,19 @@ describe("analyzeDependencies", () => {
                 "node_modules/axios": { version: "1.5.1" },
             },
         });
-        const findings = analyzeDependencies(pkg, { packageLock: lock });
+        const findings = await analyzeDependencies(pkg, { packageLock: lock });
         expect(findings.some((finding) => finding.title.includes("axios@1.5.1"))).toBe(true);
     });
 
-    it("does not flag dependency when resolved version is outside vulnerable range", () => {
+    it("does not flag dependency when resolved version is outside vulnerable range", async () => {
+        const mockFetch = vi.mocked(fetch);
+        mockFetch.mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                vulns: null,
+            }),
+        } as Response);
+
         const pkg = JSON.stringify({
             dependencies: {
                 axios: "^1.6.0",
@@ -153,13 +177,13 @@ describe("analyzeDependencies", () => {
                 "node_modules/axios": { version: "1.7.1" },
             },
         });
-        const findings = analyzeDependencies(pkg, { packageLock: lock });
+        const findings = await analyzeDependencies(pkg, { packageLock: lock });
         expect(findings.some((finding) => finding.title.includes("axios"))).toBe(false);
     });
 });
 
 describe("runScanEngineV2", () => {
-    it("detects tainted SQL injection flow and enriches finding metadata", () => {
+    it("detects tainted SQL injection flow and enriches finding metadata", async () => {
         const files = [
             {
                 path: "src/api.ts",
@@ -173,7 +197,7 @@ describe("runScanEngineV2", () => {
                 `,
             },
         ];
-        const result = runScanEngineV2(files, { profile: "deep", confidenceThreshold: 0.5 });
+        const result = await runScanEngineV2(files, { profile: "deep", confidenceThreshold: 0.5 });
         const finding = result.findings.find((item) => item.ruleId === "sqli-tainted-dynamic-query");
         expect(finding).toBeDefined();
         expect(finding?.engine).toBe("deterministic-v2");
