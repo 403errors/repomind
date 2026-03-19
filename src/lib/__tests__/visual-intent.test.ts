@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
     getSvgComplexityTarget,
+    getVisualDiagramProfile,
     isVisualDiagramIntentQuery,
     resolveVisualModelPreference,
 } from "@/lib/visual-intent";
@@ -29,5 +30,15 @@ describe("visual-intent", () => {
         expect(getSvgComplexityTarget("simple diagram").tier).toBe("simple");
         expect(getSvgComplexityTarget("simple diagram").minNodes).toBe(6);
         expect(getSvgComplexityTarget("complex distributed architecture diagram").tier).toBe("complex");
+        expect(getSvgComplexityTarget("complex distributed architecture diagram").minNodes).toBe(15);
+        expect(getSvgComplexityTarget("complex distributed architecture diagram").maxNodes).toBe(50);
+    });
+
+    it("routes visuals to the right diagram family", () => {
+        expect(getVisualDiagramProfile("animated architecture system diagram").family).toBe("architecture");
+        expect(getVisualDiagramProfile("pipeline workflow with stages").family).toBe("pipeline");
+        expect(getVisualDiagramProfile("state lifecycle transition map").family).toBe("state");
+        expect(getVisualDiagramProfile("timeline of releases").preferredMermaidDiagram).toBe("gantt");
+        expect(getVisualDiagramProfile("animated architecture system diagram").preferredNodeRange).toEqual([15, 20]);
     });
 });

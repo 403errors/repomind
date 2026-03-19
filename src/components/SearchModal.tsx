@@ -4,6 +4,7 @@ import { Search, X, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { searchRepositoryCode } from "@/app/actions";
+import { stripEmojiCharacters } from "@/lib/no-emoji";
 
 interface SearchFileNode {
     path: string;
@@ -40,7 +41,7 @@ export function SearchModal({ repoContext, onSendMessage }: SearchModalProps) {
                 searchType
             );
 
-            let content = `### 🔍 Search Results for "${searchQuery}" (${searchType})\n\n`;
+            let content = `### Search Results for "${searchQuery}" (${searchType})\n\n`;
             if (results.length === 0) {
                 content += "No matches found.";
             } else {
@@ -51,7 +52,7 @@ export function SearchModal({ repoContext, onSendMessage }: SearchModalProps) {
                 if (results.length > 30) content += `\n*...and ${results.length - 30} more.*`;
             }
 
-            onSendMessage("model", content);
+            onSendMessage("model", stripEmojiCharacters(content));
             setIsOpen(false);
         } catch (error) {
             toast.error("Search failed");

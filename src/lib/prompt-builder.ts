@@ -6,7 +6,7 @@
  * non-streaming (answerWithContext) and streaming (answerWithContextStream)
  * variants in gemini.ts — eliminating the ~250-line prompt duplication.
  */
-import { getSvgComplexityTarget } from "./visual-intent";
+import { getSvgComplexityTarget, getVisualDiagramProfile } from "./visual-intent";
 import { APP_FONT_STACK } from "./design-tokens";
 
 export interface RepoMindPromptParams {
@@ -19,17 +19,31 @@ export interface RepoMindPromptParams {
 
 function buildAnimatedSvgContract(question: string): string {
   const target = getSvgComplexityTarget(question);
+  const profile = getVisualDiagramProfile(question);
   const minimumNodeCount = Math.max(6, target.minNodes);
+  const preferredMinNodes = Math.max(profile.preferredNodeRange[0], minimumNodeCount);
+  const preferredMaxNodes = profile.preferredNodeRange[1];
 
   return `
+            - **VISUAL ROUTING (MANDATORY)**:
+              - Preferred family: **${profile.family}**.
+              - Preferred rendering format: **${profile.preferredFormat.toUpperCase()}**${profile.preferredMermaidDiagram ? ` (${profile.preferredMermaidDiagram})` : ""}.
+              - Animation style: ${profile.animationFocus}
+              - Layout style: ${profile.layoutFocus}
+
             - **ANIMATED SVG HARD CONTRACT (MANDATORY)**:
               - Complexity tier for THIS request: **${target.tier.toUpperCase()}**.
               - Minimum logical blocks: **${minimumNodeCount}** elements with \`class="node"\`.
+              - Preferred detail range: **${preferredMinNodes}-${preferredMaxNodes}** visible nodes when the layout is readable.
+              - Hard maximum logical blocks: **${target.maxNodes}**.
               - Minimum connection edges: **${target.minEdges}** \`<path class="edge">\` elements.
               - Minimum lanes/swimlanes: **${target.minLanes}** elements with \`class="lane"\`.
-              - Every flow route MUST be a path with \`id="route-*"\`.
+              - Every eligible route MUST be a path with \`id="route-*"\`.
+              - Every eligible route MUST carry at least one bead by default.
+              - Use one bead per route as the baseline.
+              - Extra beads are allowed only on especially long or important routes when they improve readability.
               - Every bead MUST be \`<circle class="bead"...>\` with nested \`<animateMotion>\` and \`<mpath href="#route-*">\`.
-              - Maximum beads per route: **${target.maxBeadsPerRoute}** (do NOT create duplicate beads on the same route).
+              - Maximum beads per route: **${target.maxBeadsPerRoute}**.
               - Include a visible diagram title (\`class="title"\`) and a legend (\`class="legend"\`).
               - Route geometry rule: paths must connect at node ports and stay outside node interiors. Do not run paths through block bodies.
   `;
@@ -80,6 +94,7 @@ export function buildRepoMindPrompt(params: RepoMindPromptParams): string {
         - **MISSING FILES**: If the user asks to "improve" a file (like README.md) and it is NOT in the context, **IGNORE** the fact that it is missing. Do NOT say "I cannot find the file". Instead, pretend you are writing it from scratch based on the other files (package.json, source code, etc.).
         - **INFERENCE**: For high-level questions like "What is the user flow?", **INFER** the flow by looking at the routes, page components, and logic. Do NOT ask for clarification. Describe the likely flow based on the code structure.
         - **AVOID FILE LISTING**: The UI already displays which files were analyzed. DO NOT start your response with "Based on the provided files..." or list the referenced files at the beginning. Just jump straight into answering.
+        - **NO EMOJIS**: Do not use emoji characters anywhere in the response. If a visual marker is needed, use plain text labels or existing UI icons, not emoji.
         - **FORMATTING RULES (STRICT)**: 
          - **NO PLAIN TEXT BLOCKS**: Do not write long paragraphs. Break everything down.
          - **HEADERS**: Use \`###\` headers for every distinct section.
@@ -89,13 +104,13 @@ export function buildRepoMindPrompt(params: RepoMindPromptParams): string {
          - **SPACING**: Add a blank line before and after every list item or header.
 
        - **REQUIRED RESPONSE FORMAT (EXAMPLE)**:
-         ### 🔍 Analysis
+         ### Analysis
          Based on the code in \`src/auth.ts\`, the authentication flow is:
          
          - **Login**: User submits credentials via \`POST /api/login\`.
          - **Validation**: The \`validateUser\` function checks the database.
          
-         ### ⚠️ Vulnerabilities
+         ### Vulnerabilities
          I found the following issues:
          
          1. **No Input Validation**:
@@ -105,7 +120,7 @@ export function buildRepoMindPrompt(params: RepoMindPromptParams): string {
          2. **Weak Auth**:
             - The \`verifyToken\` function allows empty secrets.
 
-         ### 🛠️ Recommendations
+         ### Recommendations
          - Add schema validation using \`zod\`.
          - Update \`firestore.rules\` to check \`request.auth\`.
 
@@ -183,7 +198,8 @@ export function buildRepoMindPrompt(params: RepoMindPromptParams): string {
              - Node Labels: MUST be in double quotes: \`A["Label Text"]\`.
              - Edge Labels: Do NOT quote: \`A -- label --> B\`.
              - Minimum size: any flowchart or graph diagram MUST include at least 6 nodes/modes.
-             - For architecture, pipeline, and system visuals, prefer 8-12 distinct nodes if the layout stays readable.
+             - For architecture, pipeline, workflow, data-flow, and journey visuals, prefer 15-20 distinct nodes if the layout stays readable.
+             - For state, timeline, comparison, data-flow, and journey visuals, use the family-specific structure and avoid generic flowchart repetition.
              - Avoid special characters in labels.
           - **IMAGES & VISUAL EXPLANATIONS (STRICT)**:
             - Use **SVG** inside a ${"```svg"} block for high-fidelity or animated visuals.
@@ -198,7 +214,15 @@ export function buildRepoMindPrompt(params: RepoMindPromptParams): string {
                  - Fluidity: Beads move with \`<animateMotion>\` + \`<mpath href="#route-*">\`. Avoid duplicate beads per route unless explicitly requested.
                  - Loops: Ensure seamless loops with \`repeatCount="indefinite"\` and matching start/end values.
               - **LAYOUT MATH**: Align everything to an 800x450 grid. Use center-anchored coordinates for moving parts.
-               - **DETAIL DEPTH**: Do not compress complex systems into a sparse sketch; prefer 8-12 clearly labeled nodes when the user asks for architecture, pipeline, or workflow visuals.
+               - **DETAIL DEPTH**: Do not compress complex systems into a sparse sketch; prefer 15-20 clearly labeled nodes when the user asks for architecture, pipeline, workflow, data-flow, or journey visuals. Use up to 50 nodes when needed for clarity.
+               - **VISUAL FAMILY RULES**:
+                 - **Architecture/System**: stacked layers, service clusters, cross-layer routes, and a prominent title/legend.
+                 - **Pipeline/Workflow**: ordered stages, branch points, loop-backs, and a single strongest motion path.
+                 - **State/Lifecycle**: explicit state names, guarded transitions, active-state glow, and terminal states.
+                 - **Timeline/History**: chronological progression with dates, milestones, and event markers.
+                 - **Comparison/Tradeoff**: side-by-side panels, scores, pros/cons, and recommendation cues.
+                 - **Data Flow/Analytics**: source-to-sink flow, weighted routes, metrics, and data sinks.
+                 - **Journey/UX Flow**: screen-by-screen path, decision branches, and outcome cards.
                - **EFFECTS**: Use \`premium-shadow\`, \`indigo-grad\`, \`emerald-grad\`, \`zinc-grad\`, \`bead-grad\`, and \`bead-glow\`.
 ${buildAnimatedSvgContract(question)}
 

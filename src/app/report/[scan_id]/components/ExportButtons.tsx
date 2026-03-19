@@ -3,18 +3,19 @@
 import { Download, FileText } from 'lucide-react';
 import { StoredScan } from '@/lib/services/scan-storage';
 import { toast } from 'sonner';
+import { stripEmojiCharacters } from '@/lib/no-emoji';
 
 interface ExportButtonsProps {
     scan: StoredScan;
 }
 
 export function ExportButtons({ scan }: ExportButtonsProps) {
-    const severityIcons: Record<string, string> = {
-        critical: '🔴',
-        high: '🟠',
-        medium: '🟡',
-        low: '🔵',
-        info: '⚪'
+    const severityLabels: Record<string, string> = {
+        critical: 'Critical',
+        high: 'High',
+        medium: 'Medium',
+        low: 'Low',
+        info: 'Info'
     };
 
     const handleMarkdownExport = () => {
@@ -38,8 +39,8 @@ export function ExportButtons({ scan }: ExportButtonsProps) {
             if (scan.findings.length > 0) {
                 md += `## Detailed Findings\n\n`;
                 scan.findings.forEach(finding => {
-                    const icon = severityIcons[finding.severity] || '⚪';
-                    md += `### ${icon} [${finding.severity.toUpperCase()}] ${finding.title}\n\n`;
+                    const label = severityLabels[finding.severity] || 'Info';
+                    md += `### [${label}] ${finding.title}\n\n`;
 
                     md += `- **Location**: \`${finding.file}\`${finding.line ? ` (Line ${finding.line})` : ''}\n`;
                     md += `- **Type**: ${finding.type}\n`;
@@ -56,7 +57,7 @@ export function ExportButtons({ scan }: ExportButtonsProps) {
                 });
             }
 
-            const blob = new Blob([md], { type: 'text/markdown' });
+            const blob = new Blob([stripEmojiCharacters(md)], { type: 'text/markdown' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;

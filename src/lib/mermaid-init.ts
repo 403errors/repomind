@@ -19,6 +19,14 @@ export const initMermaid = () => {
             secondaryColor: '#27272a', // zinc-800
             tertiaryColor: '#27272a', // zinc-800
             fontFamily: APP_FONT_STACK,
-        }
+        },
+        themeCSS: `
+            .label, .label text, .nodeLabel, .edgeLabel, .cluster-label, text {
+                font-family: ${APP_FONT_STACK} !important;
+            }
+            .label {
+                fill: #e4e4e7 !important;
+            }
+        `,
     });
 };

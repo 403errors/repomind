@@ -5,6 +5,7 @@ export interface SvgQualityMetrics {
     edgeCount: number;
     laneCount: number;
     routeCount: number;
+    routeCoverageCount: number;
     beadCount: number;
     animateMotionCount: number;
     mpathRefCount: number;
@@ -66,11 +67,22 @@ function estimateEdgeCount(svg: string): number {
     return Math.max(0, pathTags.length - routePaths);
 }
 
+function extractRouteIds(svg: string): string[] {
+    return Array.from(svg.matchAll(/<path\b[^>]*id=(['"])(route-[^"']+)\1[^>]*>/gi), (match) => match[2]);
+}
+
+function extractBeadRouteRefs(svg: string): string[] {
+    return Array.from(svg.matchAll(/<mpath\b[^>]*(?:href|xlink:href)=(['"])#(route-[^"']+)\1/gi), (match) => match[2]);
+}
+
 function buildMetrics(svg: string): SvgQualityMetrics {
     const nodeCount = estimateNodeCount(svg);
     const edgeCount = estimateEdgeCount(svg);
     const laneCount = countMatches(svg, /<[^>]*class=(['"])[^"']*\blane\b[^"']*\1[^>]*>/gi);
     const routeCount = countMatches(svg, /<path\b[^>]*id=(['"])route-[^"']+\1[^>]*>/gi);
+    const routeIds = extractRouteIds(svg);
+    const beadRouteRefs = new Set(extractBeadRouteRefs(svg));
+    const routeCoverageCount = routeIds.filter((routeId) => beadRouteRefs.has(routeId)).length;
     const beadCountByClass = countMatches(svg, /<circle\b[^>]*class=(['"])[^"']*\bbead\b[^"']*\1[^>]*>/gi);
     const beadCount = beadCountByClass > 0 ? beadCountByClass : countMatches(svg, /<animateMotion\b/gi);
     const animateMotionCount = countMatches(svg, /<animateMotion\b/gi);
@@ -85,6 +97,7 @@ function buildMetrics(svg: string): SvgQualityMetrics {
         edgeCount,
         laneCount,
         routeCount,
+        routeCoverageCount,
         beadCount,
         animateMotionCount,
         mpathRefCount,
@@ -104,6 +117,7 @@ export function validateAnimatedSvgMarkdown(markdown: string, target: SvgComplex
                 edgeCount: 0,
                 laneCount: 0,
                 routeCount: 0,
+                routeCoverageCount: 0,
                 beadCount: 0,
                 animateMotionCount: 0,
                 mpathRefCount: 0,
@@ -132,9 +146,12 @@ export function validateAnimatedSvgMarkdown(markdown: string, target: SvgComplex
         failures.push('Missing route paths with id="route-*" for bead motion.');
     }
 
-    const minBeads = Math.min(3, Math.max(1, metrics.routeCount));
-    if (metrics.beadCount < minBeads) {
-        failures.push(`Need at least ${minBeads} animated beads; found ${metrics.beadCount}.`);
+    if (metrics.beadCount < metrics.routeCount) {
+        failures.push(`Need at least one animated bead per route; found ${metrics.beadCount} beads for ${metrics.routeCount} routes.`);
+    }
+
+    if (metrics.routeCoverageCount < metrics.routeCount) {
+        failures.push(`Every route must be covered by at least one bead; only ${metrics.routeCoverageCount} of ${metrics.routeCount} routes were covered.`);
     }
 
     if (metrics.routeCount > 0 && metrics.beadCount > metrics.routeCount * target.maxBeadsPerRoute) {

@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import html2canvas from "html2canvas-pro";
 import { motion, AnimatePresence } from "framer-motion";
 import { initMermaid } from "@/lib/mermaid-init";
+import { APP_FONT_STACK } from "@/lib/design-tokens";
+import { ensureMermaidMinimumDetail } from "@/lib/diagram-utils";
 
 // Initialize mermaid once
 initMermaid();
@@ -76,7 +78,16 @@ function normalizeMermaidSvg(svgString: string): string {
         svgEl.style.width = '100%';
         svgEl.style.height = 'auto';
         svgEl.style.overflow = 'visible';
-        svgEl.style.maxHeight = '70vh';
+        svgEl.style.maxHeight = 'none';
+        svgEl.style.fontFamily = APP_FONT_STACK;
+
+        const existingStyle = doc.querySelector('style[data-repomind-font]');
+        if (!existingStyle) {
+            const styleEl = doc.createElement('style');
+            styleEl.setAttribute('data-repomind-font', 'true');
+            styleEl.textContent = `svg, svg * { font-family: ${APP_FONT_STACK} !important; } .label, .nodeLabel, .edgeLabel { font-family: ${APP_FONT_STACK} !important; }`;
+            doc.documentElement.insertBefore(styleEl, doc.documentElement.firstChild);
+        }
 
         return new XMLSerializer().serializeToString(doc.documentElement);
     } catch {
@@ -103,7 +114,8 @@ function applyResponsiveSvgSizing(svgElement: SVGSVGElement): void {
     svgElement.style.width = '100%';
     svgElement.style.height = 'auto';
     svgElement.style.overflow = 'visible';
-    svgElement.style.maxHeight = '70vh';
+    svgElement.style.maxHeight = 'none';
+    svgElement.style.fontFamily = APP_FONT_STACK;
 }
 
 function resetAnimatedSvgStyles(svgElement: SVGSVGElement): void {
@@ -179,7 +191,8 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
 
                 // Layer 1: Basic sanitization (fast, catches obvious issues)
                 console.log('🔄 Attempting Layer 1: Basic sanitization...');
-                const sanitized = sanitizeMermaidCode(codeToRender);
+                const detailed = ensureMermaidMinimumDetail(codeToRender, chart);
+                const sanitized = sanitizeMermaidCode(detailed);
                 const validation = validateMermaidSyntax(sanitized);
 
                 if (!validation.valid) {
@@ -505,7 +518,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                                         width: 100% !important;
                                         height: auto !important;
                                         max-width: 100% !important;
-                                        max-height: 80vh !important;
+                                        max-height: none !important;
                                         color-scheme: dark;
                                     }
                                 `}</style>

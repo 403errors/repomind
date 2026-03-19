@@ -9,6 +9,7 @@ import { buildRepoMindPrompt, formatHistoryText } from "./prompt-builder";
 import { cacheQuerySelection, getCachedQuerySelection } from "./cache";
 import type { FileCachePolicy } from "./cache";
 import type { GitHubProfile } from "./github";
+import { stripEmojiCharacters } from "./no-emoji";
 import {
   getRecentProfileCommitsSnapshot,
   getRecentRepoCommitsSnapshot,
@@ -275,7 +276,7 @@ async function pruneFileTreeHierarchically(question: string, fileTree: string[])
       return targetDirs.some(dir => path.startsWith(dir));
     });
 
-    console.log(`✅ Pruned tree from ${fileTree.length} to ${pruned.length} files`);
+    console.log(`[gemini] Pruned tree from ${fileTree.length} to ${pruned.length} files`);
     return pruned;
   } catch (e) {
     console.warn("Hierarchical pruning failed, using flat list", e);
@@ -341,7 +342,7 @@ export async function answerWithContext(
     result = await chat.sendMessage(toolResponseParts);
   }
 
-  return result.response.text();
+  return stripEmojiCharacters(result.response.text());
 }
 
 /**
@@ -426,9 +427,9 @@ export async function* answerWithContextStream(
       const parts = ((chunk as unknown as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
       for (const part of parts) {
         if (part.thought && modelPreference === "thinking") {
-          yield `THOUGHT:${part.text}`;
+          yield `THOUGHT:${stripEmojiCharacters(part.text ?? "")}`;
         } else if (part.text) {
-          yield part.text;
+          yield stripEmojiCharacters(part.text);
         }
       }
     }
@@ -473,9 +474,9 @@ export async function* answerWithContextStream(
         const parts = ((chunk as unknown as StreamChunkShape).candidates?.[0]?.content?.parts ?? []);
         for (const part of parts) {
           if (part.thought && modelPreference === "thinking") {
-            yield `THOUGHT:${part.text}`;
+            yield `THOUGHT:${stripEmojiCharacters(part.text ?? "")}`;
           } else if (part.text) {
-            yield part.text;
+            yield stripEmojiCharacters(part.text);
           }
         }
       }

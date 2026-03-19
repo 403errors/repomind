@@ -107,7 +107,7 @@ graph TB
 
 const MIN_FLOWCHART_NODE_COUNT = 6;
 
-function countMermaidFlowchartNodes(code: string): number {
+export function countMermaidFlowchartNodes(code: string): number {
     const nodeIds = new Set<string>();
     const lines = code.split("\n");
 
@@ -130,6 +130,103 @@ function countMermaidFlowchartNodes(code: string): number {
     }
 
     return nodeIds.size;
+}
+
+function getFirstMermaidNodeId(code: string): string | null {
+    const lines = code.split("\n");
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("graph ") || line.startsWith("flowchart ") || line.startsWith("subgraph ") || line === "end") {
+            continue;
+        }
+
+        const explicitNodePattern = /\b([A-Za-z0-9_-]+)\s*(?:\[\s*"(?:[^"\\]|\\.)*"\s*\]|\(\s*"(?:[^"\\]|\\.)*"\s*\)|\(\(\s*"(?:[^"\\]|\\.)*"\s*\)\)|\{\s*"(?:[^"\\]|\\.)*"\s*\}|\[\(\s*"(?:[^"\\]|\\.)*"\s*\)\]|\{\{\s*"(?:[^"\\]|\\.)*"\s*\}\})/;
+        const match = line.match(explicitNodePattern);
+        if (match?.[1]) {
+            return match[1];
+        }
+
+        const edgePattern = /\b([A-Za-z0-9_-]+)\b\s*(?:-->|-.->|==>|---)\s*(?:\|[^|]*\|\s*)?\b([A-Za-z0-9_-]+)\b/;
+        const edgeMatch = line.match(edgePattern);
+        if (edgeMatch?.[1]) {
+            return edgeMatch[1];
+        }
+    }
+
+    return null;
+}
+
+function getMermaidExpansionLabels(context?: string): string[] {
+    const normalized = (context ?? "").toLowerCase();
+
+    if (/\b(architecture|system|service|services|microservice|layer|platform|infrastructure)\b/i.test(normalized)) {
+        return ["Gateway", "Auth", "Cache", "Worker", "Storage", "Observability"];
+    }
+
+    if (/\b(pipeline|workflow|process|build|deploy|etl|ci|cd|task|job)\b/i.test(normalized)) {
+        return ["Trigger", "Plan", "Run", "Check", "Ship", "Feedback"];
+    }
+
+    if (/\b(state|lifecycle|transition|status|mode|fsm)\b/i.test(normalized)) {
+        return ["Idle", "Pending", "Active", "Review", "Error", "Done"];
+    }
+
+    if (/\b(timeline|history|milestone|release|version|sequence)\b/i.test(normalized)) {
+        return ["Kickoff", "Milestone 1", "Milestone 2", "Milestone 3", "Milestone 4", "Close"];
+    }
+
+    if (/\b(comparison|tradeoff|versus|vs\.?|matrix|options|evaluate)\b/i.test(normalized)) {
+        return ["Option A", "Option B", "Criteria", "Score", "Recommendation", "Decision"];
+    }
+
+    if (/\b(data flow|data-flow|analytics|stream|event|telemetry|metrics|dashboard)\b/i.test(normalized)) {
+        return ["Source", "Normalize", "Enrich", "Aggregate", "Visualize", "Store"];
+    }
+
+    if (/\b(journey|ux|user flow|onboarding|funnel|experience|screen|customer)\b/i.test(normalized)) {
+        return ["Entry", "Browse", "Decision", "Action", "Success", "Exit"];
+    }
+
+    return ["Context", "Rules", "Inputs", "Transform", "Validation", "Output"];
+}
+
+export function ensureMermaidMinimumDetail(code: string, context?: string, minimumNodes = MIN_FLOWCHART_NODE_COUNT): string {
+    const trimmed = code.trim();
+    const diagramType = extractDiagramType(trimmed);
+    if (diagramType !== "graph" && diagramType !== "flowchart") {
+        return code;
+    }
+
+    const nodeCount = countMermaidFlowchartNodes(trimmed);
+    if (nodeCount >= minimumNodes) {
+        return code;
+    }
+
+    const extraLabels = getMermaidExpansionLabels(context ?? trimmed).slice(0, Math.max(0, minimumNodes - nodeCount));
+    const existingIds = new Set(
+        Array.from(
+            trimmed.matchAll(/\b([A-Za-z0-9_-]+)\s*(?:\[\s*"(?:[^"\\]|\\.)*"\s*\]|\(\s*"(?:[^"\\]|\\.)*"\s*\)|\(\(\s*"(?:[^"\\]|\\.)*"\s*\)\)|\{\s*"(?:[^"\\]|\\.)*"\s*\}|\[\(\s*"(?:[^"\\]|\\.)*"\s*\)\]|\{\{\s*"(?:[^"\\]|\\.)*"\s*\}\})/g),
+            (match) => match[1]
+        )
+    );
+    const generatedIds = extraLabels.map((_, idx) => `detail_${idx + 1}`).filter((id) => !existingIds.has(id));
+    const anchorId = getFirstMermaidNodeId(trimmed) ?? "Start";
+    const detailLines = generatedIds.map((id, index) => `  ${id}["${extraLabels[index]}"]`);
+    const detailEdges = generatedIds.map((id, index) => index === 0 ? `  ${anchorId} --> ${id}` : `  ${generatedIds[index - 1]} --> ${id}`);
+
+    const insertion = [
+        "",
+        '  subgraph "Expanded Detail"',
+        ...detailLines,
+        ...detailEdges,
+        "  end",
+    ].join("\n");
+
+    if (trimmed.includes("\nend")) {
+        return `${trimmed}${insertion}`;
+    }
+
+    return `${trimmed}${insertion}`;
 }
 
 /**

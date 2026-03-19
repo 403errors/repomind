@@ -70,11 +70,11 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
                 
                 // If it doesn't have an overflow style, add it
                 if (!enhanced.includes("style=")) {
-                    enhanced += ` style="overflow: visible; width: 100%; height: auto; max-height: 70vh; font-family: ${APP_FONT_STACK};"`;
+                    enhanced += ` style="overflow: visible; width: 100%; height: auto; font-family: ${APP_FONT_STACK};"`;
                 } else if (!enhanced.includes("overflow: visible")) {
                     enhanced = enhanced.replace(
                         /style="([^"]*)"/i,
-                        `style="$1; overflow: visible; width: 100%; height: auto; max-height: 70vh; font-family: ${APP_FONT_STACK};"`
+                        `style="$1; overflow: visible; width: 100%; height: auto; font-family: ${APP_FONT_STACK};"`
                     );
                 } else if (!enhanced.includes("font-family")) {
                     enhanced = enhanced.replace(

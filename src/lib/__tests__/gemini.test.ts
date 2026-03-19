@@ -111,6 +111,36 @@ describe("answerWithContextStream", () => {
         expect(chunks).toContain("Interim reasoning...");
     });
 
+    it("strips emoji characters from streamed answer chunks", async () => {
+        const sendMessageStreamMock = vi.fn().mockResolvedValue({
+            stream: toAsyncStream([
+                {
+                    candidates: [{ content: { parts: [{ text: "Final answer 🚀" }] } }],
+                },
+            ]),
+            response: Promise.resolve({
+                functionCalls: () => [],
+            }),
+        });
+
+        getGenerativeModelMock.mockReturnValue({
+            startChat: () => ({
+                sendMessageStream: sendMessageStreamMock,
+            }),
+        });
+
+        const chunks: string[] = [];
+        for await (const chunk of answerWithContextStream(
+            "Summarize recent activity",
+            "repo context",
+            { owner: "acme", repo: "widget" }
+        )) {
+            chunks.push(chunk);
+        }
+
+        expect(chunks).toContain("Final answer ");
+    });
+
     it("reuses the same chat session for tool follow-up so thought signatures stay intact", async () => {
         getRecentRepoCommitsSnapshotMock.mockResolvedValue({
             success: true,

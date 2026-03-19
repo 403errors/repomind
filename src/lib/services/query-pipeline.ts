@@ -23,6 +23,7 @@ import type { FileCachePolicy } from "@/lib/cache";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import type { GitHubProfile } from "@/lib/github";
 import type { ModelPreference } from "@/lib/ai-client";
+import { stripEmojiCharacters } from "@/lib/no-emoji";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -200,13 +201,13 @@ export async function* executeRepoQueryStream(
         // This bypasses file selection, fetching, and AI generation entirely (0.1s hit).
         const shortCircuit = await getLatestRepoQueryAnswer(owner, repo, query, fileCachePolicy);
         if (shortCircuit) {
-            console.log(`🚀 Short-Circuit Cache Hit: ${owner}/${repo} -> ${query}`);
+            console.log(`[query-pipeline] Short-circuit cache hit: ${owner}/${repo} -> ${query}`);
             yield {
                 type: "status",
                 message: "Using cached answer...",
                 progress: 95,
             };
-            yield { type: "content", text: shortCircuit, append: true };
+            yield { type: "content", text: stripEmojiCharacters(shortCircuit), append: true };
             yield { type: "complete", relevantFiles: [] }; // In short-circuit we don't know the files, or we could cache them too.
             return;
         }
@@ -382,7 +383,7 @@ export async function* executeRepoQueryStream(
                     // Ignore malformed META payloads.
                 }
             } else {
-                yield { type: "content", text: chunk, append: true };
+                yield { type: "content", text: stripEmojiCharacters(chunk), append: true };
             }
         }
         answerMs = Date.now() - answerStartMs;
@@ -454,8 +455,8 @@ export async function executeRepoQuery(
     );
 
     if (cached) {
-        console.log(`🧠 AI Response Cache Hit for ${params.owner}/${params.repo}: ${params.query}`);
-        return { answer: cached, relevantFiles: selectedFiles };
+        console.log(`[query-pipeline] AI response cache hit for ${params.owner}/${params.repo}: ${params.query}`);
+        return { answer: stripEmojiCharacters(cached), relevantFiles: selectedFiles };
     }
 
     for await (const update of executeRepoQueryStream(params, deps)) {

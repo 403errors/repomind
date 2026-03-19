@@ -6,6 +6,8 @@ import {
     getFallbackTemplate,
     generateMermaidFromJSON,
     templates,
+    countMermaidFlowchartNodes,
+    ensureMermaidMinimumDetail,
 } from "@/lib/diagram-utils";
 
 describe("validateMermaidSyntax", () => {
@@ -51,6 +53,18 @@ describe("validateMermaidSyntax", () => {
         const result = validateMermaidSyntax("flowchart TD\n  A --> B\n  B --> C");
         expect(result.valid).toBe(false);
         expect(result.error).toContain("at least 6 nodes");
+    });
+
+    it("pads undersized flowcharts with family-aware detail", () => {
+        const expanded = ensureMermaidMinimumDetail(
+            "flowchart TD\n  A[\"Start\"]\n  A --> B\n  B --> C",
+            "pipeline workflow"
+        );
+
+        expect(expanded).toContain("Expanded Detail");
+        expect(countMermaidFlowchartNodes(expanded)).toBeGreaterThanOrEqual(6);
+        expect(expanded).toContain("Trigger");
+        expect(validateMermaidSyntax(expanded).valid).toBe(true);
     });
 });
 

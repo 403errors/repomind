@@ -1,7 +1,8 @@
 import type { SecurityFinding, ScanSummary } from "@/lib/security-scanner";
+import { stripEmojiCharacters } from "@/lib/no-emoji";
 
 export const CACHED_SCAN_BANNER =
-    "♻️ Cached result: no code changes detected since the last scan for this mode/settings.";
+    "Cached result: no code changes detected since the last scan for this mode/settings.";
 
 function buildFixPrompt(finding: SecurityFinding): string {
     return [
@@ -27,7 +28,7 @@ export function buildSecurityScanMessage(input: {
     const cachePrefix = isFromCache ? `${CACHED_SCAN_BANNER}\n\n` : "";
 
     if (summary.total === 0) {
-        return `${cachePrefix}✅ **Security scan complete!**
+        return stripEmojiCharacters(`${cachePrefix}Security scan complete!
 
 I've comprehensively scanned the **core repository files** and found **no verified security vulnerabilities**.
 
@@ -39,19 +40,19 @@ Your code looks secure! The scan checked for:
 - Weak cryptographic algorithms
 - Command injection
 
-Keep up the good security practices! 🔒`;
+Keep up the good security practices!`);
     }
 
-    let content = `${cachePrefix}⚠️ **Security scan complete!**
+    let content = `${cachePrefix}Security scan complete!
 
 I've comprehensively scanned the **core repository files** and found **${summary.total} verified vulnerabilit${summary.total !== 1 ? "ies" : "y"}**.
 
 `;
 
-    if (summary.critical > 0) content += `🔴 **${summary.critical} Critical**\n`;
-    if (summary.high > 0) content += `🟠 **${summary.high} High**\n`;
-    if (summary.medium > 0) content += `🟡 **${summary.medium} Medium**\n`;
-    if (summary.low > 0) content += `🔵 **${summary.low} Low**\n`;
+    if (summary.critical > 0) content += `Critical: **${summary.critical}**\n`;
+    if (summary.high > 0) content += `High: **${summary.high}**\n`;
+    if (summary.medium > 0) content += `Medium: **${summary.medium}**\n`;
+    if (summary.low > 0) content += `Low: **${summary.low}**\n`;
 
     content += "\nHere are the key findings:\n\n";
 
@@ -70,5 +71,5 @@ I've comprehensively scanned the **core repository files** and found **${summary
         content += `*...and ${hiddenCount} more issue${hiddenCount !== 1 ? "s" : ""}.*`;
     }
 
-    return content;
+    return stripEmojiCharacters(content);
 }

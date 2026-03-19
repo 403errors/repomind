@@ -49,6 +49,22 @@ describe("buildRepoMindPrompt", () => {
         const result = buildRepoMindPrompt(baseParams);
         expect(result).toContain("RepoMind");
     });
+
+    it("pushes dense svg diagrams toward 15-20 nodes and a 50-node cap", () => {
+        const result = buildRepoMindPrompt({
+            ...baseParams,
+            question: "Create a detailed architecture SVG for this repo",
+        });
+
+        expect(result).toContain("15-20");
+        expect(result).toContain("50");
+        expect(result).toContain("one bead per route");
+    });
+
+    it("keeps the static prompt template free of emoji characters", () => {
+        const result = buildRepoMindPrompt(baseParams);
+        expect(result).not.toMatch(/\p{Extended_Pictographic}/u);
+    });
 });
 
 describe("formatHistoryText", () => {
