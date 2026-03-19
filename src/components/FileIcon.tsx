@@ -4,7 +4,7 @@ import {
     File, FileCode2, FileJson, FileText, FilePenLine, FileType2, FileImage, 
     Settings, FileKey, FileBox, Database, Terminal, Lock,
     Folder, FolderOpen, FolderCode, FolderGit2, FolderCheck, FolderCog, FolderArchive, FolderKanban,
-    Globe, Layers
+    Globe, Layers, FileVideo, FileAudio
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
@@ -62,7 +62,25 @@ export function FileIcon({ filename, className }: FileIconProps) {
         case 'svg':
         case 'webp':
         case 'ico':
+        case 'tiff':
+        case 'avif':
             return <FileImage className={cn("w-4 h-4 text-purple-400 shrink-0 transition-colors", className)} />;
+        case 'mp4':
+        case 'mov':
+        case 'avi':
+        case 'webm':
+        case 'mkv':
+        case 'ogv':
+            return <FileVideo className={cn("w-4 h-4 text-rose-400 shrink-0 transition-colors", className)} />;
+        case 'mp3':
+        case 'wav':
+        case 'ogg':
+        case 'm4a':
+        case 'aac':
+        case 'flac':
+            return <FileAudio className={cn("w-4 h-4 text-blue-500 shrink-0 transition-colors", className)} />;
+        case 'pdf':
+            return <FileText className={cn("w-4 h-4 text-red-500 shrink-0 transition-colors", className)} />;
         case 'yml':
         case 'yaml':
             return <Settings className={cn("w-4 h-4 text-rose-400 shrink-0 transition-colors", className)} />;
