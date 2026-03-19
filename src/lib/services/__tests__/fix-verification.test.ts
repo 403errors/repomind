@@ -149,7 +149,7 @@ describe("fix verification flow", () => {
         getFixVerificationRunMock.mockResolvedValue(makeRun());
 
         const result = await finalizeFixVerificationRun("run_1", {
-            runRegressionSuite: () => ({ precision: 0.95, recall: 0.9, truePositiveCount: 5, falsePositiveCount: 0, falseNegativeCount: 0 }),
+            runRegressionSuite: async () => ({ precision: 0.95, recall: 0.9, truePositiveCount: 5, falsePositiveCount: 0, falseNegativeCount: 0 }),
         });
 
         expect(result.closed).toBe(true);
@@ -192,7 +192,7 @@ describe("fix verification flow", () => {
         });
 
         const result = await finalizeFixVerificationRun("run_1", {
-            runRegressionSuite: () => ({ precision: 0.95, recall: 0.9, truePositiveCount: 5, falsePositiveCount: 0, falseNegativeCount: 0 }),
+            runRegressionSuite: async () => ({ precision: 0.95, recall: 0.9, truePositiveCount: 5, falsePositiveCount: 0, falseNegativeCount: 0 }),
         });
 
         expect(result.closed).toBe(false);

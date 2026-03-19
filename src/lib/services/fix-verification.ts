@@ -28,7 +28,13 @@ export interface FinalizeFixVerificationResult {
 export interface FixVerificationDeps {
     fetchFileTree?: typeof getRepoFileTree;
     fetchFileContent?: typeof getFileContent;
-    runRegressionSuite?: typeof runSecurityBenchmarkSuite;
+    runRegressionSuite?: (threshold: number) => Promise<{
+        precision: number;
+        recall: number;
+        truePositiveCount: number;
+        falsePositiveCount: number;
+        falseNegativeCount: number;
+    }>;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -194,7 +200,7 @@ export async function finalizeFixVerificationRun(
     const reasons: string[] = [];
     const changedFiles = asStringArray(run.changedFiles);
 
-    const regression = (deps.runRegressionSuite ?? runSecurityBenchmarkSuite)(0.5);
+    const regression = await (deps.runRegressionSuite ?? runSecurityBenchmarkSuite)(0.5);
     const regressionPassed =
         regression.precision >= SECURITY_VERIFICATION_THRESHOLDS.benchmarkPrecision &&
         regression.recall >= SECURITY_VERIFICATION_THRESHOLDS.benchmarkRecall;

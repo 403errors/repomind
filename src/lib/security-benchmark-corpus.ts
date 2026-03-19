@@ -115,19 +115,19 @@ export const SECURITY_BENCHMARK_CORPUS: SecurityBenchmarkCase[] = [
     },
 ];
 
-export function runSecurityBenchmarkSuite(threshold = 0.5): {
+export async function runSecurityBenchmarkSuite(threshold = 0.5): Promise<{
     precision: number;
     recall: number;
     truePositiveCount: number;
     falsePositiveCount: number;
     falseNegativeCount: number;
-} {
+}> {
     let truePositiveCount = 0;
     let falsePositiveCount = 0;
     let falseNegativeCount = 0;
 
     for (const testCase of SECURITY_BENCHMARK_CORPUS) {
-        const result = runScanEngineV2(testCase.files, {
+        const result = await runScanEngineV2(testCase.files, {
             profile: "deep",
             confidenceThreshold: threshold,
         });

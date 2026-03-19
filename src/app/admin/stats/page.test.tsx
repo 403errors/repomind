@@ -92,6 +92,7 @@ describe("AdminStatsPage", () => {
             data: unknown;
             country: string;
             isMobile: boolean;
+            currentUsername: string | null;
         }>;
 
         expect(view.type).toBe(StatsDashboardClient);
