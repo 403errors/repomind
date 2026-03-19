@@ -6,6 +6,7 @@
  * non-streaming (answerWithContext) and streaming (answerWithContextStream)
  * variants in gemini.ts — eliminating the ~250-line prompt duplication.
  */
+import { getSvgComplexityTarget } from "./visual-intent";
 
 export interface RepoMindPromptParams {
   question: string;
@@ -13,6 +14,23 @@ export interface RepoMindPromptParams {
   repoDetails: { owner: string; repo: string };
   /** Pre-formatted conversation history string */
   historyText: string;
+}
+
+function buildAnimatedSvgContract(question: string): string {
+  const target = getSvgComplexityTarget(question);
+
+  return `
+            - **ANIMATED SVG HARD CONTRACT (MANDATORY)**:
+              - Complexity tier for THIS request: **${target.tier.toUpperCase()}**.
+              - Minimum logical blocks: **${target.minNodes}** elements with \`class="node"\`.
+              - Minimum connection edges: **${target.minEdges}** \`<path class="edge">\` elements.
+              - Minimum lanes/swimlanes: **${target.minLanes}** elements with \`class="lane"\`.
+              - Every flow route MUST be a path with \`id="route-*"\`.
+              - Every bead MUST be \`<circle class="bead"...>\` with nested \`<animateMotion>\` and \`<mpath href="#route-*">\`.
+              - Maximum beads per route: **${target.maxBeadsPerRoute}** (do NOT create duplicate beads on the same route).
+              - Include a visible diagram title (\`class="title"\`) and a legend (\`class="legend"\`).
+              - Route geometry rule: paths must connect at node ports and stay outside node interiors. Do not run paths through block bodies.
+  `;
 }
 
 /**
@@ -170,27 +188,39 @@ export function buildRepoMindPrompt(params: RepoMindPromptParams): string {
                - **Aesthetics**: Use \`rx="12"\` for containers, \`rx="6"\` for items. Stroke: \`1.5px\`. 
                - **Color Palette**: Zinc-950 (#09090b) Border, Zinc-900 (#18181b) Surface, Indigo-500 (#6366f1) Primary, Emerald-500 (#10b981) Data, Rose-500 (#f43f5e) Error.
                - **Typography**: Inter/System font. Clean Zinc-300 (#d4d4d8) labels.
-               - **PRECISE BEAD SYSTEM**: Data packets (beads) MUST be \`<circle r="4" fill="url(#bead-grad)" filter="url(#bead-glow)" />\`.
+               - **PRECISE BEAD SYSTEM**: Data packets MUST be \`<circle class="bead" r="4" fill="url(#bead-grad)" filter="url(#bead-glow)">...</circle>\`.
                - **ULTRA-FLUID SMIL**: 
                  - Easing: ALWAYS use \`calcMode="spline" keySplines="0.4 0 0.2 1; 0.4 0 0.2 1"\` (Standard) or \`0.68 -0.55 0.27 1.55\` (Elastic).
-                 - Fluidity: Use multiple beads on the same path with staggered delays (e.g., \`0s\`, \`0.2s\`, \`0.4s\`) to create a "trailing" data flow.
+                 - Fluidity: Beads move with \`<animateMotion>\` + \`<mpath href="#route-*">\`. Avoid duplicate beads per route unless explicitly requested.
                  - Loops: Ensure seamless loops with \`repeatCount="indefinite"\` and matching start/end values.
                - **LAYOUT MATH**: Align everything to an 800x450 grid. Use center-anchored coordinates for moving parts.
                - **EFFECTS**: Use \`premium-shadow\`, \`indigo-grad\`, \`emerald-grad\`, \`zinc-grad\`, \`bead-grad\`, and \`bead-glow\`.
+${buildAnimatedSvgContract(question)}
 
             - **SVG STRUCTURE TEMPLATE**:
               \`\`\`svg
               <svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
                 <!-- Defs are injected automatically by the engine; you don't need to repeat them unless custom -->
                 <rect x="0" y="0" width="800" height="450" rx="16" fill="#18181b" stroke="#27272a" stroke-width="1"/>
-                <!-- Elite visual content + precise SMIL animations -->
+                <g class="lane lane-1"></g>
+                <g class="lane lane-2"></g>
+                <g class="node" id="node-a"></g>
+                <g class="node" id="node-b"></g>
+                <path class="edge" id="route-a-b" d="..." />
+                <circle class="bead" r="4" fill="url(#bead-grad)" filter="url(#bead-glow)">
+                  <animateMotion dur="2.8s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1;0.4 0 0.2 1">
+                    <mpath href="#route-a-b"/>
+                  </animateMotion>
+                </circle>
+                <text class="title" x="400" y="34" text-anchor="middle">...</text>
+                <g class="legend"></g>
               </svg>
               \`\`\`
 
             - **VISUAL DECISION LOGIC**:
               1. "Draw/Picture/Image" -> Static production SVG.
-              2. "Flowchart/Diagram" -> Mermaid.
-              3. "Animate/Flow/Dynamics" -> Elite 2.0 Animated SVG.
+              2. "Animate/Flow/Dynamics" -> Elite 2.0 Animated SVG.
+              3. "Architecture/Pipeline/System Diagram" -> Prefer Animated SVG (not Mermaid) unless user explicitly asks for Mermaid.
 
             - **TECHNICAL QUALITY CHECK (PRE-RESPONSE)**:
               Before outputting an SVG, briefly state (in a hidden thought or pre-response text): 

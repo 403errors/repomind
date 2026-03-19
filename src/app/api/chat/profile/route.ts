@@ -7,6 +7,8 @@ import { getAnonymousActorId } from "@/lib/actor-id";
 import { getInvalidSessionApiError, getSessionAuthState, getSessionUserId } from "@/lib/session-guard";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import { prisma } from "@/lib/db";
+import type { ModelPreference } from "@/lib/ai-client";
+import { normalizeModelPreference, resolveVisualModelPreference } from "@/lib/visual-intent";
 
 function getErrorMessage(error: unknown, fallback: string): string {
     return error instanceof Error ? error.message : fallback;
@@ -33,8 +35,12 @@ export async function POST(req: NextRequest) {
 
         const body = await req.json();
         const { query, profileContext, modelPreference, history, crossRepoEnabled, runId } = body;
+        const normalizedQuery = typeof query === "string" ? query : "";
+        const requestedModelPreference = normalizeModelPreference(modelPreference) as ModelPreference;
+        const visualRouting = resolveVisualModelPreference(requestedModelPreference, normalizedQuery, Boolean(userId));
+        const effectiveModelPreference = visualRouting.effectiveModelPreference;
 
-        if (modelPreference === "thinking" && !userId) {
+        if (requestedModelPreference === "thinking" && !userId) {
             return NextResponse.json(
                 {
                     error: "Login required for Thinking mode.",
@@ -73,7 +79,6 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const anonId = getAnonymousActorId(req.headers);
         if (userId) {
             await trackAuthenticatedQueryEvent(userId);
             const userAgent = req.headers.get("user-agent") ?? "";
@@ -83,7 +88,7 @@ export async function POST(req: NextRequest) {
         }
 
         const username = typeof profileContext?.username === "string" ? profileContext.username : undefined;
-        const queryPreview = typeof query === "string" ? query.slice(0, 160) : undefined;
+        const queryPreview = normalizedQuery ? normalizedQuery.slice(0, 160) : undefined;
 
         const safeRunId = typeof runId === "string" && runId.trim() ? runId.trim() : null;
         if (safeRunId) {
@@ -112,7 +117,23 @@ export async function POST(req: NextRequest) {
                     let lastPersistAt = 0;
                     const persistEveryMs = 400;
 
-                    const generator = processProfileQueryStream(query, profileContext, modelPreference, {
+                    if (visualRouting.autoPromotedToThinking) {
+                        const status: StreamUpdate = {
+                            type: "status",
+                            message: "Detected visual request. Using high-detail diagram mode.",
+                            progress: 18,
+                        };
+                        safeEnqueue(JSON.stringify(status) + "\n");
+                    } else if (visualRouting.fellBackToFlashForAnonymous) {
+                        const status: StreamUpdate = {
+                            type: "status",
+                            message: "Sign in to unlock higher-detail diagram mode. Continuing in Flash mode.",
+                            progress: 18,
+                        };
+                        safeEnqueue(JSON.stringify(status) + "\n");
+                    }
+
+                    const generator = processProfileQueryStream(normalizedQuery, profileContext, effectiveModelPreference, {
                         cacheAudience: audience,
                         cacheActorId: actorId,
                         crossRepoEnabled: Boolean(crossRepoEnabled),

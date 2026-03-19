@@ -99,7 +99,9 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
         if (!svgElement) return;
 
         // Animate paths (drawing effect)
-        const paths = svgElement.querySelectorAll<SVGPathElement>("path");
+        const paths = svgElement.querySelectorAll<SVGPathElement>(
+            "path:not([id^='route-']):not([data-route]):not(.route-guide):not(.motion-guide)"
+        );
         paths.forEach((path, i) => {
             try {
                 const length = path.getTotalLength();
