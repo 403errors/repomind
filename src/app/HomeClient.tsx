@@ -48,7 +48,7 @@ export default function HomeClient({
     const searchParams = useSearchParams();
     const { data: session } = useSession();
     const [recentSearches, setRecentSearches] = useState<SearchHistoryItem[]>([]);
-    const [visibleReposCount, setVisibleReposCount] = useState(50);
+    const [visibleReposCount, setVisibleReposCount] = useState(6);
     const hasInvalidSessionError = searchParams.get("error") === INVALID_SESSION_ERROR_PARAM;
 
     const visibleRepos = trendingRepos.slice(0, visibleReposCount);
@@ -305,7 +305,24 @@ export default function HomeClient({
                             ))}
                         </div>
 
-                        {hasMoreRepos && (
+                        {hasMoreRepos ? (
+                            <div className="mt-12 flex flex-col items-center gap-4">
+                                <button 
+                                    onClick={() => setVisibleReposCount(prev => prev + 6)}
+                                    className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-white text-black font-bold hover:bg-zinc-200 transition-colors group"
+                                >
+                                    Show more repositories
+                                    <TrendingUp size={18} className="group-hover:scale-110 transition-transform" />
+                                </button>
+                                <Link 
+                                    href="/trending"
+                                    className="text-zinc-500 hover:text-white transition-colors text-sm font-medium flex items-center gap-1 group"
+                                >
+                                    Explore all trending repositories
+                                    <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                                </Link>
+                            </div>
+                        ) : (
                             <div className="mt-12 text-center">
                                 <Link 
                                     href="/trending"
