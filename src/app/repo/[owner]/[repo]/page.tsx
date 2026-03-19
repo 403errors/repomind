@@ -181,18 +181,20 @@ export default async function RepoPage({ params }: Props) {
     let detailsData: { languages: RepoLanguage[]; commits: RepoCommit[] } = { languages: [], commits: [] };
     let readmeContent: string | null = null;
 
-    try {
-        const context = await getRepoFullContext(owner, repo);
-        repoData = context.metadata;
-        detailsData = { languages: context.languages, commits: context.commits };
-        readmeContent = context.readme;
-    } catch (error) {
-        if (getErrorStatus(error) === 404) {
+    const result = await getRepoFullContext(owner, repo);
+    
+    if (!result.success) {
+        if (result.status === 404) {
             await cacheRepoUnavailable(owner, repo);
         }
-        console.error('Failed to load full repo context:', error);
+        console.error('Failed to load full repo context:', result.error);
         return <RepoUnavailableState owner={owner} repo={repo} />;
     }
+
+    const context = result.data;
+    repoData = context.metadata;
+    detailsData = { languages: context.languages, commits: context.commits };
+    readmeContent = context.readme;
 
     const fullReadme = normalizeReadmeForPreview(readmeContent);
     const crawlerReadmeExcerpt = isCrawler ? buildCrawlerReadmeExcerpt(fullReadme) : null;

@@ -62,6 +62,10 @@ interface RepoDetailsGraphQLResponse {
   };
 }
 
+export type Result<T> =
+  | { success: true; data: T }
+  | { success: false; error: string; status?: number };
+
 export function getErrorStatus(error: unknown): number | undefined {
   if (error && typeof error === "object" && "status" in error) {
     const status = (error as ErrorWithStatus).status;
@@ -419,7 +423,7 @@ export async function getRepoFileTree(owner: string, repo: string, branch: strin
 /**
  * Fetch enhanced repository details using GraphQL
  */
-export async function getRepoDetailsGraphQL(owner: string, repo: string) {
+export async function getRepoDetailsGraphQL(owner: string, repo: string): Promise<Result<{ languages: RepoLanguage[], commits: RepoCommit[], totalSize: number }>> {
   const { graphql } = await import("@octokit/graphql");
 
   try {
@@ -449,51 +453,66 @@ export async function getRepoDetailsGraphQL(owner: string, repo: string) {
     }));
 
     return {
-      languages,
-      commits,
-      totalSize: data.repository.languages.totalSize
+      success: true,
+      data: {
+        languages,
+        commits,
+        totalSize: data.repository.languages.totalSize
+      }
     };
   } catch (error) {
+    // TODO: Replace with robust logger
+    // logger.error("GraphQL fetch failed", { owner, repo, error });
     console.error("GraphQL fetch failed:", error);
-    return null;
+    return { success: false, error: "Failed to fetch repository details from GitHub" };
   }
 }
 
 /**
  * Core Repo Context Fetcher (hit by unstable_cache)
  */
-async function getRepoFullContextRaw(owner: string, repo: string): Promise<RepoFullContext> {
+async function getRepoFullContextRaw(owner: string, repo: string): Promise<Result<RepoFullContext>> {
   // Check Mega-Key cache first
   const cached = await getCachedRepoFullContext(owner, repo);
   if (cached && isGitHubRepo(cached.metadata)) {
     // Put into memory caches for efficiency if needed
     repoCache.set(`${owner}/${repo}`, cached.metadata);
     return {
-      metadata: cached.metadata,
-      languages: Array.isArray(cached.languages) ? (cached.languages as RepoLanguage[]) : [],
-      commits: Array.isArray(cached.commits) ? (cached.commits as RepoCommit[]) : [],
-      readme: typeof cached.readme === "string" ? cached.readme : null
+      success: true,
+      data: {
+        metadata: cached.metadata,
+        languages: Array.isArray(cached.languages) ? (cached.languages as RepoLanguage[]) : [],
+        commits: Array.isArray(cached.commits) ? (cached.commits as RepoCommit[]) : [],
+        readme: typeof cached.readme === "string" ? cached.readme : null
+      }
     };
   }
 
-  // Fetch all in parallel
+  try {
+    // Fetch all in parallel
   const [metadata, details, readme] = await Promise.all([
     getRepo(owner, repo),
     getRepoDetailsGraphQL(owner, repo),
     getRepoReadme(owner, repo)
   ]);
 
-  const context = {
+  const context: RepoFullContext = {
     metadata,
-    languages: details?.languages || [],
-    commits: details?.commits || [],
+    languages: details.success ? details.data.languages : [],
+    commits: details.success ? details.data.commits : [],
     readme
   };
 
   // Cache as Mega-Key
   await cacheRepoFullContext(owner, repo, context);
 
-  return context;
+  return { success: true, data: context };
+  } catch (error) {
+    // TODO: Replace with robust logger
+    console.error("Failed to load repo full context:", error);
+    const status = getErrorStatus(error);
+    return { success: false, error: "Failed to load repository.", status };
+  }
 }
 
 /**
@@ -691,17 +710,12 @@ export async function getRepoReadme(owner: string, repo: string) {
  */
 export const getUserRepos = unstable_cache(
   async (username: string): Promise<GitHubRepo[]> => {
-    try {
       const { data } = await octokit.rest.repos.listForUser({
         username,
         sort: "updated",
         per_page: 100,
       });
       return data as unknown as GitHubRepo[];
-    } catch (e) {
-      console.error(`Failed to fetch user repos for ${username}`, e);
-      return [];
-    }
   },
   ['github-user-repos'],
   {
@@ -819,49 +833,64 @@ function toFreshness(fetchedAt: number, isCached: boolean): CommitFreshness {
 export async function getRecentProfileCommitsSnapshot(
   username: string,
   limit: number = 20
-): Promise<{ commits: RecentCommitSnapshot[]; freshness: CommitFreshness }> {
+): Promise<Result<{ commits: RecentCommitSnapshot[]; freshness: CommitFreshness }>> {
   const cached = await getCachedProfileCommitSnapshot<RecentCommitSnapshot[]>(username, limit);
   if (cached) {
     return {
-      commits: cached.data,
-      freshness: toFreshness(cached.fetchedAt, true),
+      success: true,
+      data: {
+        commits: cached.data,
+        freshness: toFreshness(cached.fetchedAt, true),
+      }
     };
   }
 
-  const repos = await getUserRepos(username);
-  console.log(`[getRecentProfileCommitsSnapshot] Fetching commits for ${repos.length} repos (limit ${limit})...`);
-  const commits = await getRecentCommitsForUser(
-    username,
-    repos.map((repo) => repo.name),
-    limit
-  );
-  console.log(`[getRecentProfileCommitsSnapshot] Found ${commits.length} total commits.`);
+  try {
+    const repos = await getUserRepos(username);
+    console.log(`[getRecentProfileCommitsSnapshot] Fetching commits for ${repos.length} repos (limit ${limit})...`);
+    const commits = await getRecentCommitsForUser(
+      username,
+      repos.map((repo) => repo.name),
+      limit
+    );
+    console.log(`[getRecentProfileCommitsSnapshot] Found ${commits.length} total commits.`);
 
-  const normalized: RecentCommitSnapshot[] = commits.slice(0, limit).map((commit) => ({
-    repo: String(commit.repo ?? ""),
-    message: String(commit.message ?? ""),
-    date: typeof commit.date === "string" ? commit.date : null,
-    sha: String(commit.sha ?? "").slice(0, 7),
-  }));
+    const normalized: RecentCommitSnapshot[] = commits.slice(0, limit).map((commit) => ({
+      repo: String(commit.repo ?? ""),
+      message: String(commit.message ?? ""),
+      date: typeof commit.date === "string" ? commit.date : null,
+      sha: String(commit.sha ?? "").slice(0, 7),
+    }));
 
-  await cacheProfileCommitSnapshot(username, limit, normalized);
+    await cacheProfileCommitSnapshot(username, limit, normalized);
 
-  return {
-    commits: normalized,
-    freshness: toFreshness(Date.now(), false),
-  };
+    return {
+      success: true,
+      data: {
+        commits: normalized,
+        freshness: toFreshness(Date.now(), false),
+      }
+    };
+  } catch (error) {
+    // TODO: Replace with robust logger
+    console.error(`Failed to fetch profile commits for ${username}:`, error);
+    return { success: false, error: "Failed to fetch profile commits.", status: getErrorStatus(error) };
+  }
 }
 
 export async function getRecentRepoCommitsSnapshot(
   owner: string,
   repo: string,
   limit: number = 10
-): Promise<{ commits: RecentCommitSnapshot[]; freshness: CommitFreshness }> {
+): Promise<Result<{ commits: RecentCommitSnapshot[]; freshness: CommitFreshness }>> {
   const cached = await getCachedRepoCommitSnapshot<RecentCommitSnapshot[]>(owner, repo, limit);
   if (cached) {
     return {
-      commits: cached.data,
-      freshness: toFreshness(cached.fetchedAt, true),
+      success: true,
+      data: {
+        commits: cached.data,
+        freshness: toFreshness(cached.fetchedAt, true),
+      }
     };
   }
 
@@ -881,15 +910,16 @@ export async function getRecentRepoCommitsSnapshot(
 
     await cacheRepoCommitSnapshot(owner, repo, limit, commits);
     return {
-      commits,
-      freshness: toFreshness(Date.now(), false),
+      success: true,
+      data: {
+        commits,
+        freshness: toFreshness(Date.now(), false),
+      }
     };
   } catch (error) {
+    // TODO: Replace with robust logger
     console.error(`Failed to fetch recent commits for ${owner}/${repo}:`, error);
-    return {
-      commits: [],
-      freshness: toFreshness(Date.now(), false),
-    };
+    return { success: false, error: "Failed to fetch repository commits.", status: getErrorStatus(error) };
   }
 }
 

@@ -632,13 +632,23 @@ export async function* processProfileQueryStream(
         if (!profileContext.recentCommits || profileContext.recentCommits.length === 0) {
             console.log(`[processProfileQueryStream] No commits in context, fetching fresh for ${profileContext.username}...`);
             const snapshot = await getRecentProfileCommitsSnapshot(profileContext.username, 20);
-            profileContext = {
-                ...profileContext,
-                recentCommits: snapshot.commits,
-                recentCommitFreshnessLabel: snapshot.freshness.label,
-            };
-            commitFreshnessLabel = `Commits checked: ${snapshot.freshness.label}`;
-            console.log(`[processProfileQueryStream] Fetched ${snapshot.commits.length} commits.`);
+            if (snapshot.success) {
+                profileContext = {
+                    ...profileContext,
+                    recentCommits: snapshot.data.commits,
+                    recentCommitFreshnessLabel: snapshot.data.freshness.label,
+                };
+                commitFreshnessLabel = `Commits checked: ${snapshot.data.freshness.label}`;
+                console.log(`[processProfileQueryStream] Fetched ${snapshot.data.commits.length} commits.`);
+            } else {
+                console.warn(`[processProfileQueryStream] Failed to fetch commits:`, snapshot.error);
+                profileContext = {
+                    ...profileContext,
+                    recentCommits: [],
+                    recentCommitFreshnessLabel: "GitHub API Unavailable"
+                };
+                commitFreshnessLabel = "Commits checked: GitHub API Unavailable";
+            }
         } else if (profileContext.recentCommitFreshnessLabel) {
             commitFreshnessLabel = `Commits checked: ${profileContext.recentCommitFreshnessLabel}`;
         }

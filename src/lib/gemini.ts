@@ -592,9 +592,16 @@ async function resolveToolCall(
 
       if (isSpecficRepo) {
         const snapshot = await getRecentRepoCommitsSnapshot(repoDetails.owner, repository, limit);
+        if (!snapshot.success) {
+          return {
+            functionResponseData: { error: snapshot.error, commits: [] },
+            statusMessage: "Failed to fetch repository commits.",
+            toolEvent: { name: "fetch_recent_commits", detail: repository, usageUnits: 1 },
+          };
+        }
         return {
           functionResponseData: {
-            commits: snapshot.commits,
+            commits: snapshot.data.commits,
             scope: "repository",
             repository,
             limitExceeded,
@@ -602,21 +609,28 @@ async function resolveToolCall(
           },
           statusMessage: `Fetching latest ${limit} commits of ${repository}...`,
           toolEvent: { name: "fetch_recent_commits", detail: repository, usageUnits: 1 },
-          commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
+          commitFreshnessLabel: `Commits checked: ${snapshot.data.freshness.label}`,
         };
       }
 
       const snapshot = await getRecentProfileCommitsSnapshot(repoDetails.owner, limit);
+      if (!snapshot.success) {
+        return {
+          functionResponseData: { error: snapshot.error, commits: [] },
+          statusMessage: "Failed to fetch profile commits.",
+          toolEvent: { name: "fetch_recent_commits", detail: "overall", usageUnits: 1 },
+        };
+      }
       return {
         functionResponseData: {
-          commits: snapshot.commits,
+          commits: snapshot.data.commits,
           scope: "overall",
           limitExceeded,
           maxAllowed
         },
         statusMessage: "Fetching latest commits across repositories...",
         toolEvent: { name: "fetch_recent_commits", detail: "overall", usageUnits: 1 },
-        commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
+        commitFreshnessLabel: `Commits checked: ${snapshot.data.freshness.label}`,
       };
     }
 
@@ -625,9 +639,16 @@ async function resolveToolCall(
     const limitExceeded = (requestedLimit !== undefined && requestedLimit > maxAllowed);
 
     const snapshot = await getRecentRepoCommitsSnapshot(repoDetails.owner, repoDetails.repo, limit);
+    if (!snapshot.success) {
+      return {
+        functionResponseData: { error: snapshot.error, commits: [] },
+        statusMessage: "Failed to fetch repository commits.",
+        toolEvent: { name: "fetch_recent_commits", detail: `${repoDetails.owner}/${repoDetails.repo}`, usageUnits: 1 },
+      };
+    }
     return {
       functionResponseData: {
-        commits: snapshot.commits,
+        commits: snapshot.data.commits,
         scope: "repository",
         repository: repoDetails.repo,
         limitExceeded,
@@ -635,7 +656,7 @@ async function resolveToolCall(
       },
       statusMessage: `Fetching latest ${limit} commits of ${repoDetails.owner}/${repoDetails.repo}...`,
       toolEvent: { name: "fetch_recent_commits", detail: `${repoDetails.owner}/${repoDetails.repo}`, usageUnits: 1 },
-      commitFreshnessLabel: `Commits checked: ${snapshot.freshness.label}`,
+      commitFreshnessLabel: `Commits checked: ${snapshot.data.freshness.label}`,
     };
   }
 

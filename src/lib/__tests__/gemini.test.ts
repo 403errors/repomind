@@ -113,8 +113,11 @@ describe("answerWithContextStream", () => {
 
     it("uses explicit follow-up history and canonical function-response payload when a tool call is finalized", async () => {
         getRecentRepoCommitsSnapshotMock.mockResolvedValue({
-            commits: [{ sha: "abc123", message: "feat: test", date: "2026-03-17T00:00:00Z" }],
-            freshness: { label: "just now" },
+            success: true,
+            data: {
+                commits: [{ sha: "abc123", message: "feat: test", date: "2026-03-17T00:00:00Z" }],
+                freshness: { label: "just now" },
+            }
         });
 
         const phaseOneSendMessageStreamMock = vi.fn().mockResolvedValue({

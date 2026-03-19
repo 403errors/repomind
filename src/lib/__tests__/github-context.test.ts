@@ -177,9 +177,12 @@ describe("getRepoFullContext", () => {
 
         const context = await getRepoFullContext("acme", "repo");
 
-        expect(context.metadata.full_name).toBe("acme/repo");
-        expect(context.languages).toHaveLength(1);
-        expect(context.readme).toBe("# cached");
+        expect(context.success).toBe(true);
+        if (!context.success) throw new Error("Expected success");
+        
+        expect(context.data.metadata.full_name).toBe("acme/repo");
+        expect(context.data.languages).toHaveLength(1);
+        expect(context.data.readme).toBe("# cached");
         expect(getRepoMock).not.toHaveBeenCalled();
         expect(cacheRepoFullContextMock).not.toHaveBeenCalled();
     });
@@ -236,16 +239,19 @@ describe("getRepoFullContext", () => {
 
         const context = await getRepoFullContext("acme", "widget");
 
-        expect(context.metadata.full_name).toBe("acme/widget");
-        expect(context.languages[0]?.name).toBe("TypeScript");
-        expect(context.commits[0]?.author.login).toBe("gojo");
-        expect(context.readme).toBe("# Widget");
+        expect(context.success).toBe(true);
+        if (!context.success) throw new Error("Expected success");
+
+        expect(context.data.metadata.full_name).toBe("acme/widget");
+        expect(context.data.languages[0]?.name).toBe("TypeScript");
+        expect(context.data.commits[0]?.author.login).toBe("gojo");
+        expect(context.data.readme).toBe("# Widget");
         expect(cacheRepoFullContextMock).toHaveBeenCalledTimes(1);
         expect(cacheRepoFullContextMock).toHaveBeenCalledWith("acme", "widget", {
-            metadata: context.metadata,
-            languages: context.languages,
-            commits: context.commits,
-            readme: context.readme,
+            metadata: context.data.metadata,
+            languages: context.data.languages,
+            commits: context.data.commits,
+            readme: context.data.readme,
         });
     });
 });
@@ -255,11 +261,14 @@ describe("getRepoDetailsGraphQL", () => {
         graphqlMock.mockReset();
     });
 
-    it("returns null when graphql request fails", async () => {
+    it("returns failed Result when graphql request fails", async () => {
         graphqlMock.mockRejectedValue(new Error("graphql unavailable"));
 
         const result = await getRepoDetailsGraphQL("acme", "repo");
 
-        expect(result).toBeNull();
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.error).toBeDefined();
+        }
     });
 });

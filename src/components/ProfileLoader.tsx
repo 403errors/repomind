@@ -146,15 +146,24 @@ export function ProfileLoader({ username }: ProfileLoaderProps) {
             // Step 4: Prefetch latest commits snapshot
             updateStep("commits", "loading", "Fetching latest commits snapshot...");
             const commitSnapshot = await fetchRecentProfileCommitSnapshot(username);
-            updateStep("commits", "complete", `Loaded ${commitSnapshot.commits.length} recent commits`);
+            let recentCommits: ProfileLoaderData["recentCommits"] = [];
+            let freshnessLabel = "GitHub API Unavailable";
+            
+            if (commitSnapshot.success) {
+                recentCommits = commitSnapshot.data.commits;
+                freshnessLabel = commitSnapshot.data.freshness.label;
+                updateStep("commits", "complete", `Loaded ${recentCommits.length} recent commits`);
+            } else {
+                updateStep("commits", "complete", `No recent commits loaded (API error)`);
+            }
 
             // All done
             const nextData = {
                 profile,
                 profileReadme,
                 repoReadmes,
-                recentCommits: commitSnapshot.commits,
-                recentCommitFreshnessLabel: commitSnapshot.freshness.label,
+                recentCommits,
+                recentCommitFreshnessLabel: freshnessLabel,
             };
             setProfileData(nextData);
             writeCachedProfileLoaderData(username, nextData);
