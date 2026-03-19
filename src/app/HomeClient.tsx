@@ -4,9 +4,9 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, Loader2, Star, GitFork, MessageSquare, Globe, TrendingUp } from "lucide-react";
-import { fetchGitHubData, getRecentSearches } from "./actions";
+import { fetchGitHubData, getRecentSearches, getRepoSuggestions } from "./actions";
 import TrustedByMarquee from "@/components/TrustedByMarquee";
 import InteractiveDemo from "@/components/InteractiveDemo";
 import BentoFeatures from "@/components/BentoFeatures";
@@ -26,6 +26,8 @@ import { INVALID_SESSION_ERROR_PARAM } from "@/lib/session-guard";
 import { BlogPost } from "@prisma/client";
 import { CatalogRepoEntry } from "@/lib/repo-catalog";
 import { normalizeGitHubInput } from "@/lib/utils";
+import SuggestionsList from "@/components/SuggestionsList";
+import type { RepoSuggestion } from "@/lib/services/repo-suggestions";
 
 type PublicStatsData = {
     totalVisitors: number;
@@ -50,6 +52,10 @@ export default function HomeClient({
     const { data: session } = useSession();
     const [recentSearches, setRecentSearches] = useState<SearchHistoryItem[]>([]);
     const [visibleReposCount, setVisibleReposCount] = useState(6);
+    const [suggestions, setSuggestions] = useState<RepoSuggestion[]>([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [selectedIndex, setSelectedIndex] = useState(-1);
+    const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
     const hasInvalidSessionError = searchParams.get("error") === INVALID_SESSION_ERROR_PARAM;
 
     const visibleRepos = trendingRepos.slice(0, visibleReposCount);
@@ -61,13 +67,15 @@ export default function HomeClient({
         }
     }, [session]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const normalizedInput = normalizeGitHubInput(input);
+    const handleSubmit = async (e?: React.FormEvent, overriddenInput?: string) => {
+        if (e) e.preventDefault();
+        const finalInput = overriddenInput || input;
+        const normalizedInput = normalizeGitHubInput(finalInput);
         if (!normalizedInput) return;
 
         setLoading(true);
         setError("");
+        setShowSuggestions(false);
 
         try {
             const result = await fetchGitHubData(normalizedInput);
@@ -82,6 +90,77 @@ export default function HomeClient({
         } finally {
             setLoading(false);
         }
+    };
+
+    useEffect(() => {
+        let isCancelled = false;
+        
+        const fetchSuggestions = async () => {
+            if (input.length < 2) {
+                setSuggestions([]);
+                setShowSuggestions(false);
+                return;
+            }
+
+            setIsFetchingSuggestions(true);
+            try {
+                const results = await getRepoSuggestions(input);
+                if (!isCancelled) {
+                    setSuggestions(results);
+                    setShowSuggestions(results.length > 0);
+                }
+            } catch (err) {
+                if (!isCancelled) {
+                    console.error("Failed to fetch suggestions:", err);
+                }
+            } finally {
+                if (!isCancelled) {
+                    setIsFetchingSuggestions(false);
+                }
+            }
+        };
+
+        const timer = setTimeout(() => {
+            if (!loading) {
+                fetchSuggestions();
+            }
+        }, 300);
+
+        return () => {
+            isCancelled = true;
+            clearTimeout(timer);
+        };
+    }, [input, loading]);
+
+    const handleInputChange = (val: string) => {
+        setInput(val);
+        setSelectedIndex(-1);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (!showSuggestions || suggestions.length === 0) return;
+
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setSelectedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : prev));
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        } else if (e.key === "Enter" && selectedIndex >= 0) {
+            e.preventDefault();
+            const selected = suggestions[selectedIndex];
+            const suggestionInput = `${selected.owner}/${selected.repo}`;
+            setInput(suggestionInput);
+            handleSubmit(undefined, suggestionInput);
+        } else if (e.key === "Escape") {
+            setShowSuggestions(false);
+        }
+    };
+
+    const handleSuggestionSelect = (selected: RepoSuggestion) => {
+        const suggestionInput = `${selected.owner}/${selected.repo}`;
+        setInput(suggestionInput);
+        handleSubmit(undefined, suggestionInput);
     };
 
     return (
@@ -145,7 +224,10 @@ export default function HomeClient({
                             <input
                                 type="text"
                                 value={input}
-                                onChange={(e) => setInput(e.target.value)}
+                                onChange={(e) => handleInputChange(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                onFocus={() => input.length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
+                                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                                 placeholder="GitHub URL, username, or repo"
                                 className="flex-1 bg-transparent border-none outline-none text-white px-3 py-2 md:px-4 md:py-3 placeholder-zinc-500 text-sm md:text-base w-full min-w-0"
                             />
@@ -154,9 +236,19 @@ export default function HomeClient({
                                 disabled={loading}
                                 className="bg-white text-black p-2 md:p-3 rounded-md hover:bg-zinc-200 transition-colors disabled:opacity-50 shrink-0"
                             >
-                                {loading ? <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />}
+                                {loading || isFetchingSuggestions ? <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />}
                             </button>
                         </div>
+                        <AnimatePresence>
+                            {showSuggestions && (
+                                <SuggestionsList
+                                    suggestions={suggestions}
+                                    onSelect={handleSuggestionSelect}
+                                    isVisible={showSuggestions}
+                                    selectedIndex={selectedIndex}
+                                />
+                            )}
+                        </AnimatePresence>
                     </form>
 
                     {error && (

@@ -85,6 +85,7 @@ import {
     finalizeFixVerificationRun,
     startFixVerificationRun,
 } from "@/lib/services/fix-verification";
+import { getRepoSuggestions as _getRepoSuggestions } from "@/lib/services/repo-suggestions";
 import { prisma } from "@/lib/db";
 
 const FALSE_POSITIVE_REASONS = new Set<ReportFalsePositiveReason>([
@@ -394,6 +395,10 @@ export async function fetchGitHubData(input: string) {
         }
     }
     return { error: "Invalid input format" };
+}
+
+export async function getRepoSuggestions(query: string) {
+    return _getRepoSuggestions(query);
 }
 
 export async function fetchProfile(username: string) {

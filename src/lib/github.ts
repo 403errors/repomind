@@ -105,7 +105,7 @@ if (!githubToken) {
   console.warn("⚠️ GITHUB_TOKEN environment variable is not set - API rate limits will be very restrictive");
 }
 
-const octokit = new Octokit({
+export const octokit = new Octokit({
   auth: githubToken,
   request: {
     // NOTE: cache:"no-store" disables HTTP caching for all GitHub API calls.
@@ -687,20 +687,28 @@ export async function getRepoReadme(owner: string, repo: string) {
 
 /**
  * Get all public repositories for a user
+ * EDGE-CACHE: Fetches up to 100 most recent repos
  */
-export async function getUserRepos(username: string): Promise<GitHubRepo[]> {
-  try {
-    const { data } = await octokit.rest.repos.listForUser({
-      username,
-      sort: "updated",
-      per_page: 100, // Get up to 100 most recent repos
-    });
-    return data as unknown as GitHubRepo[];
-  } catch (e) {
-    console.error("Failed to fetch user repos", e);
-    return [];
+export const getUserRepos = unstable_cache(
+  async (username: string): Promise<GitHubRepo[]> => {
+    try {
+      const { data } = await octokit.rest.repos.listForUser({
+        username,
+        sort: "updated",
+        per_page: 100,
+      });
+      return data as unknown as GitHubRepo[];
+    } catch (e) {
+      console.error(`Failed to fetch user repos for ${username}`, e);
+      return [];
+    }
+  },
+  ['github-user-repos'],
+  {
+    revalidate: 3600, // 1 hour
+    tags: ['user-repos']
   }
-}
+);
 
 /**
  * Get public starred repositories for a user
