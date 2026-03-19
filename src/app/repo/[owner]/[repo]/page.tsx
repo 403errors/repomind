@@ -131,11 +131,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         openGraph: {
             title: `${owner}/${repo} - RepoMind Analysis`,
             description: `Deep AI analysis for ${owner}/${repo}.`,
+            images: [`/api/og?owner=${owner}&repo=${repo}`],
         },
         twitter: {
             card: 'summary_large_image',
             title: `${owner}/${repo} Architecture Analysis`,
             description: `Deep AI analysis for ${owner}/${repo}.`,
+            images: [`/api/og?owner=${owner}&repo=${repo}`],
         },
         alternates: {
             canonical: `/repo/${owner}/${repo}`,

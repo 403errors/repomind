@@ -34,6 +34,9 @@ RepoMind is an open-source, AI-powered platform for understanding public GitHub 
 
 ### Landing Experience
 
+- **Trending Repositories**: Discover popular and highly-active public repositories directly from the landing page.
+- **Real-Time Global Search**: Instant, optimized repository search with auto-complete suggestions for seamless navigation.
+
 ![RepoMind Landing Page](public/assets/landing_page.png)
 
 ### Repo Profile Intelligence

@@ -31,6 +31,7 @@ const footerLinks = {
         { name: "Compare", href: "/compare" },
         { name: "Insights", href: "/blog" },
         { name: "SEO Topics", href: "/explore" },
+        { name: "FAQ", href: "/faq" },
     ],
     company: [
         { name: "About", href: "/about" },

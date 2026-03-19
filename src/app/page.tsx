@@ -6,9 +6,9 @@ import { getCuratedRepos } from "@/lib/repo-catalog";
 import { getPublicStats } from "@/lib/analytics";
 
 export const metadata: Metadata = {
-    title: "AI Code Analyzer & Security Scanner for GitHub Repos | RepoMind",
+    title: "Chat with Any GitHub Repo & Visualize Architecture | RepoMind",
     description:
-        "RepoMind is an AI code analyzer and security scanner for GitHub repositories. Analyze architecture, review code, and audit repos faster.",
+        "Stop reading code. Use RepoMind's Agentic AI to chat directly with any GitHub repository or developer profile. Instantly generate architecture flowcharts, understand complex codebases, and run security scans without cloning.",
     keywords: [
         "code analyzer",
         "security scanner",
