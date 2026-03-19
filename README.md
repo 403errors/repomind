@@ -96,13 +96,15 @@ graph TD
     A[Start scan] --> B{Quick or Deep}
     B --> C[Collect scoped files + dependencies]
     C --> D[Deterministic security engine]
-    D --> E{AI assist enabled?}
-    E -->|Yes| F[AI validation pass]
-    E -->|No| G[Verification gate]
-    F --> G
-    G --> H{Verified true?}
-    H -->|Yes| I[Show finding in report]
-    H -->|No| J[Hide as rejected/inconclusive]
+    C --> E[OSV API live vulnerability check]
+    D --> F{AI assist enabled?}
+    E --> F
+    F -->|Yes| G[AI validation pass]
+    F -->|No| H[Verification gate]
+    G --> H
+    H --> I{Verified true?}
+    I -->|Yes| J[Show finding in report]
+    I -->|No| K[Hide as rejected/inconclusive]
 ```
 
 ## Security Scanning
@@ -111,6 +113,7 @@ RepoMind includes a verification-first scanning flow for application and depende
 
 - Quick scan for fast triage
 - Deep scan for broader coverage
+- **Real-time dependency checks**: Integrated with [OSV.dev API](https://osv.dev) for latest CVE data
 - Verified-first reporting pipeline
 - Actionable fixes inside repo chat flow
 
@@ -269,6 +272,7 @@ Recent major updates are tracked in [CHANGELOG.md](CHANGELOG.md), including impr
 - [Next.js](https://nextjs.org/)
 - [React](https://react.dev/)
 - [Gemini](https://ai.google.dev/)
+- [OSV (Open Source Vulnerabilities)](https://osv.dev/)
 - [Prisma](https://www.prisma.io/)
 - [Vercel KV](https://vercel.com/docs/storage/vercel-kv)
 - [Vitest](https://vitest.dev/)
