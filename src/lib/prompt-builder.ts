@@ -7,6 +7,7 @@
  * variants in gemini.ts — eliminating the ~250-line prompt duplication.
  */
 import { getSvgComplexityTarget, getVisualDiagramProfile } from "./visual-intent";
+import { routeMermaidDiagram, type MermaidDiagramType } from "./mermaid-router";
 
 export interface RepoMindPromptParams {
   question: string;
@@ -17,23 +18,151 @@ export interface RepoMindPromptParams {
 }
 
 function shouldIncludeVisualContract(question: string): boolean {
-  return getVisualDiagramProfile(question).family !== "default";
+  return routeMermaidDiagram(question).visualIntent;
+}
+
+function getMermaidJsonSchema(diagramType: MermaidDiagramType): string {
+  switch (diagramType) {
+    case "flowchart":
+      return `{
+  "diagramType": "flowchart",
+  "title": "Short title",
+  "payload": {
+    "direction": "LR",
+    "nodes": [
+      { "id": "start", "label": "Start", "shape": "rounded" },
+      { "id": "end", "label": "End" }
+    ],
+    "edges": [
+      { "from": "start", "to": "end", "label": "next" }
+    ]
+  }
+}`;
+    case "sequenceDiagram":
+      return `{
+  "diagramType": "sequenceDiagram",
+  "title": "Short title",
+  "payload": {
+    "participants": [
+      { "id": "user", "label": "User", "kind": "actor" },
+      { "id": "api", "label": "API" }
+    ],
+    "messages": [
+      { "from": "user", "to": "api", "text": "Request", "kind": "sync" }
+    ]
+  }
+}`;
+    case "classDiagram":
+      return `{
+  "diagramType": "classDiagram",
+  "title": "Short title",
+  "payload": {
+    "classes": [
+      {
+        "name": "Repo",
+        "attributes": [{ "name": "name", "type": "string" }],
+        "methods": [{ "signature": "+analyze()" }]
+      }
+    ],
+    "relations": [
+      { "from": "Repo", "to": "Scanner", "kind": "dependency", "label": "uses" }
+    ]
+  }
+}`;
+    case "stateDiagram-v2":
+      return `{
+  "diagramType": "stateDiagram-v2",
+  "title": "Short title",
+  "payload": {
+    "initialState": "idle",
+    "states": [
+      { "id": "idle", "label": "Idle", "kind": "start" },
+      { "id": "active", "label": "Active" },
+      { "id": "done", "label": "Done", "kind": "end" }
+    ],
+    "transitions": [
+      { "from": "idle", "to": "active", "label": "start" },
+      { "from": "active", "to": "done", "label": "finish" }
+    ]
+  }
+}`;
+    case "erDiagram":
+      return `{
+  "diagramType": "erDiagram",
+  "title": "Short title",
+  "payload": {
+    "entities": [
+      {
+        "name": "Repo",
+        "attributes": [
+          { "name": "id", "type": "uuid", "key": "pk" },
+          { "name": "name", "type": "string" }
+        ]
+      }
+    ],
+    "relations": [
+      { "from": "User", "to": "Repo", "cardinality": "||--o{", "label": "owns" }
+    ]
+  }
+}`;
+    case "gantt":
+      return `{
+  "diagramType": "gantt",
+  "title": "Short title",
+  "payload": {
+    "dateFormat": "YYYY-MM-DD",
+    "axisFormat": "%b %d",
+    "sections": [
+      {
+        "name": "Planning",
+        "tasks": [
+          { "id": "kickoff", "label": "Kickoff", "start": "2026-03-20", "end": "2026-03-21" }
+        ]
+      }
+    ]
+  }
+}`;
+    case "mindmap":
+      return `{
+  "diagramType": "mindmap",
+  "title": "Short title",
+  "payload": {
+    "root": {
+      "label": "RepoMind",
+      "children": [
+        { "label": "API" },
+        { "label": "UI" }
+      ]
+    }
+  }
+}`;
+    default:
+      return "Use valid Mermaid syntax and keep the structure concise.";
+  }
 }
 
 function buildVisualContract(question: string): string {
+  const route = routeMermaidDiagram(question);
   const target = getSvgComplexityTarget(question);
   const profile = getVisualDiagramProfile(question);
   const minimumNodeCount = Math.max(6, target.minNodes);
   const preferredMinNodes = Math.max(profile.preferredNodeRange[0], minimumNodeCount);
   const preferredMaxNodes = profile.preferredNodeRange[1];
+  const diagramSchema = getMermaidJsonSchema(route.diagramType);
 
-  return `
+  if (!route.visualIntent) {
+    return "";
+  }
+
+  if (route.renderMode === "mermaid-json") {
+    return `
             - **VISUAL ROUTING (MANDATORY)**:
-              - Preferred family: **${profile.family}**.
+              - Preferred family: **${route.family}**.
               - Preferred output format: **MERMAID-JSON**.
-              - Preferred topology: **${profile.preferredMermaidDiagram ?? "flowchart"}**.
+              - Preferred topology: **${route.diagramType}**.
               - Layout style: ${profile.layoutFocus}
               - Emphasis: ${profile.animationFocus}
+              - Diagram guidance: Use the exact typed JSON schema below and nothing else.
 
             - **MERMAID-JSON HARD CONTRACT (MANDATORY)**:
               - Complexity tier for THIS request: **${target.tier.toUpperCase()}**.
@@ -41,24 +170,54 @@ function buildVisualContract(question: string): string {
               - Preferred detail range: **${preferredMinNodes}-${preferredMaxNodes}** visible nodes when the layout is readable.
               - Hard maximum logical blocks: **${target.maxNodes}**.
               - Minimum connection edges: **${target.minEdges}** relationships.
-              - Use a single \`\`\`mermaid-json\`\`\` block when a visual is clearly helpful.
-              - Do not emit raw Mermaid or SVG unless explicitly requested.
+              - Output exactly one \`\`\`mermaid-json\`\`\` block.
+              - The JSON must have:
+                - \`diagramType\`: one of \`flowchart\`, \`sequenceDiagram\`, \`stateDiagram-v2\`, \`mindmap\`, \`gantt\`, \`classDiagram\`, or \`erDiagram\`.
+                - \`title\`: short human-readable title.
+                - \`payload\`: the diagram-specific content.
+              - Use this schema:
+\`\`\`json
+${diagramSchema}
+\`\`\`
+               - Keep labels concise and relationships explicit.
+              - Use markdown tables instead of diagrams when a table communicates the answer more clearly.
+              - If the request is not clearly visual, answer in text only.
+  `;
+  }
+
+  return `
+            - **VISUAL ROUTING (MANDATORY)**:
+              - Preferred family: **${route.family}**.
+              - Preferred output format: **MERMAID**.
+              - Preferred topology: **${route.diagramType}**.
+              - Layout style: ${profile.layoutFocus}
+              - Emphasis: ${profile.animationFocus}
+              - Diagram guidance: Use the exact Mermaid syntax for the requested diagram type.
+
+            - **MERMAID HARD CONTRACT (MANDATORY)**:
+              - Use a single \`\`\`mermaid\`\`\` block when a visual is clearly helpful.
+              - Start the block with \`${route.diagramType}\`.
+              - Do not emit SVG unless explicitly requested.
               - Keep labels concise and relationships explicit.
               - Use markdown tables instead of diagrams when a table communicates the answer more clearly.
-              - Prefer the family-specific layout cues in the question and avoid generic flowchart repetition.
+              - Prefer the routed topology and avoid generic flowchart repetition.
   `;
 }
 
 function buildResponseStructureRules(question: string): string {
-  if (shouldIncludeVisualContract(question)) {
+  const route = routeMermaidDiagram(question);
+
+  if (route.visualIntent) {
+    const visualBlockLanguage = route.renderMode === "mermaid-json" ? "mermaid-json" : "mermaid";
+
     return `
             - **VISUAL DECISION LOGIC**:
               1. If the query does not clearly benefit from a visual, answer in text only.
-              2. If a visual helps, use a single \`\`\`mermaid-json\`\`\` block.
+              2. If a visual helps, use a single routed Mermaid block exactly once.
               3. Use markdown tables for comparisons, tradeoffs, and structured summaries when they are clearer than prose or diagrams.
 
             - **RESPONSE FORMAT**:
-              Output only the final answer and, if needed, a markdown table or a single \`\`\`mermaid-json\`\`\` block.
+              Output only the final answer and, if needed, a markdown table or a single \`\`\`${visualBlockLanguage}\`\`\` block.
               Do not add commentary, status messages, or preambles.
 `;
   }

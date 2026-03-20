@@ -1,4 +1,4 @@
-import { useMemo, type HTMLAttributes, type ReactNode } from "react";
+import { memo, useMemo, type HTMLAttributes, type ReactNode } from "react";
 
 import { EnhancedMarkdown } from "@/components/EnhancedMarkdown";
 import { Mermaid } from "@/components/Mermaid";
@@ -41,7 +41,7 @@ function stripEliteSvgBanner(content: string): string {
         .trimStart();
 }
 
-export function MessageContent({
+function MessageContentBase({
     content,
     messageId,
     messages = [],
@@ -116,27 +116,31 @@ export function MessageContent({
                 const jsonContent = String(children).replace(/\n$/, "");
                 try {
                     const chart = generateMermaidFromJSON(JSON.parse(jsonContent));
-                    return <Mermaid chart={chart} isStreaming={isStreamingMessage} />;
-                } catch {
-                    if (isStreamingMessage) {
-                        return (
-                            <div className="flex items-center gap-2 p-4 bg-zinc-900/50 rounded-lg border border-white/10">
-                                <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
-                                <span className="text-zinc-400 text-sm">Generating diagram...</span>
-                            </div>
-                        );
+                    if (chart) {
+                        return <Mermaid chart={chart} isStreaming={isStreamingMessage} />;
                     }
+                } catch {
+                    // Fall through to code rendering below.
+                }
 
+                if (isStreamingMessage) {
                     return (
-                        <CodeBlock
-                            language="json"
-                            value={jsonContent}
-                            components={components}
-                            owner={currentOwner}
-                            repo={currentRepo}
-                        />
+                        <div className="flex items-center gap-2 p-4 bg-zinc-900/50 rounded-lg border border-white/10">
+                            <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+                            <span className="text-zinc-400 text-sm">Generating diagram...</span>
+                        </div>
                     );
                 }
+
+                return (
+                    <CodeBlock
+                        language="json"
+                        value={jsonContent}
+                        components={components}
+                        owner={currentOwner}
+                        repo={currentRepo}
+                    />
+                );
             }
 
             const childrenStr = String(children ?? "").replace(/\n$/, "");
@@ -263,3 +267,12 @@ export function MessageContent({
         </div>
     );
 }
+
+export const MessageContent = memo(MessageContentBase, (prev, next) => (
+    prev.content === next.content &&
+    prev.messageId === next.messageId &&
+    prev.currentOwner === next.currentOwner &&
+    prev.currentRepo === next.currentRepo &&
+    prev.isStreaming === next.isStreaming &&
+    prev.fileTree === next.fileTree
+));

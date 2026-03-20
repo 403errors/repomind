@@ -150,19 +150,23 @@ export function EnhancedMarkdown({ content, components, currentOwner, currentRep
             if (isMermaidJson) {
                 try {
                     const chart = generateMermaidFromJSON(JSON.parse(childrenStr));
-                    return (
-                        <Mermaid
-                            chart={chart}
-                            isStreaming={isStreaming}
-                        />
-                    );
+                    if (chart) {
+                        return (
+                            <Mermaid
+                                chart={chart}
+                                isStreaming={isStreaming}
+                            />
+                        );
+                    }
                 } catch {
-                    return (
-                        <pre className="my-4 overflow-x-auto rounded-lg border border-white/10 bg-zinc-900/60 p-4 text-xs text-zinc-300 whitespace-pre-wrap">
-                            {childrenStr}
-                        </pre>
-                    );
+                    // Fall through to the raw JSON fallback below.
                 }
+
+                return (
+                    <pre className="my-4 overflow-x-auto rounded-lg border border-white/10 bg-zinc-900/60 p-4 text-xs text-zinc-300 whitespace-pre-wrap">
+                        {childrenStr}
+                    </pre>
+                );
             }
 
             // Detect if this is likely a file or folder path

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import mermaid from "mermaid";
-import { validateMermaidSyntax, sanitizeMermaidCode, generateMermaidFromJSON } from "@/lib/diagram-utils";
+import { validateMermaidSyntax, sanitizeMermaidCode, compileMermaidFromJSON } from "@/lib/diagram-utils";
 import { Download, X, Maximize2, ZoomIn, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import html2canvas from "html2canvas-pro";
@@ -221,6 +221,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
         const renderDiagram = async (retryCount = 0) => {
             try {
                 let codeToRender = chart;
+                let isTypedMermaidJson = false;
 
                 // Check if the content is JSON (starts with {)
                 // This handles cases where the LLM uses ```mermaid for JSON content
@@ -228,7 +229,16 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                     try {
                         console.log('🔍 Detected JSON content in Mermaid block, converting...');
                         const data = JSON.parse(chart);
-                        codeToRender = generateMermaidFromJSON(data);
+                        const compiled = compileMermaidFromJSON(data);
+                        if (!compiled.valid || !compiled.mermaid) {
+                            if (mounted) {
+                                setIsFixing(false);
+                                setError(compiled.error || "Unsupported mermaid-json payload");
+                            }
+                            return;
+                        }
+                        codeToRender = compiled.mermaid;
+                        isTypedMermaidJson = true;
                         console.log('✅ Converted JSON to Mermaid:', codeToRender);
                     } catch (e) {
                         console.warn('⚠️ Failed to parse JSON in Mermaid block:', e);
@@ -259,6 +269,20 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                     // If we are streaming, don't show error yet — diagram is still being built
                     if (isStreaming) {
                         // In streaming mode, we expect partial syntax errors. Skip console error noise.
+                        return;
+                    }
+
+                    if (isTypedMermaidJson) {
+                        if (mounted) {
+                            setIsFixing(false);
+                            const errorMessage = extractErrorMessage(renderError) || 'Syntax error in diagram';
+                            const isInternalError = errorMessage.includes('dmermaid') ||
+                                errorMessage.includes('#') ||
+                                errorMessage.startsWith('Parse error');
+
+                            const sanitizedError = isInternalError ? 'Syntax error in diagram' : errorMessage;
+                            setError(sanitizedError);
+                        }
                         return;
                     }
 
@@ -338,9 +362,29 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
         setIsFixing(true);
 
         try {
+            let codeToRender = chart;
+            if (chart.trim().startsWith("{")) {
+                try {
+                    const compiled = compileMermaidFromJSON(JSON.parse(chart));
+                    if (!compiled.valid || !compiled.mermaid) {
+                        setError(compiled.error || "Unsupported mermaid-json payload");
+                        return;
+                    }
+                    codeToRender = compiled.mermaid;
+                    const { svg } = await mermaid.render(id + '-manualfixed', codeToRender);
+                    setSvg(normalizeMermaidSvg(svg));
+                    setError(null);
+                    console.log('✅ Layer 3 successful: Typed Mermaid JSON re-rendered');
+                    return;
+                } catch (e: unknown) {
+                    setError(extractErrorMessage(e) || "Failed to re-render diagram");
+                    return;
+                }
+            }
+
             // Layer 3: Manual AI-powered syntax fix (if auto-fix failed or user wants to try again)
             console.log('🔄 Attempting Layer 3: Manual AI-powered fix...');
-            const sanitized = sanitizeMermaidCode(chart);
+            const sanitized = sanitizeMermaidCode(codeToRender);
 
             const response = await fetch('/api/fix-mermaid', {
                 method: 'POST',
@@ -382,20 +426,19 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
             const svgElement = container.querySelector("svg");
             if (!svgElement) return;
 
-            // ① Normalize size and ② clear stale animation styles every pass.
-            applyResponsiveSvgSizing(svgElement);
-            resetAnimatedSvgStyles(svgElement);
-
             const shouldAnimate =
                 isStreaming
                     ? !streamAnimationPlayedRef.current && lastAnimatedSvgRef.current !== svg
-                    : lastAnimatedSvgRef.current !== svg;
+                    : !streamAnimationPlayedRef.current && lastAnimatedSvgRef.current !== svg;
 
             if (!shouldAnimate) {
                 lastAnimatedSvgRef.current = svg;
                 return;
             }
 
+            // Only reset styles when we are actually going to animate.
+            applyResponsiveSvgSizing(svgElement);
+            resetAnimatedSvgStyles(svgElement);
             runningAnimations.push(...runMermaidEntranceAnimations(svgElement));
 
             if (isStreaming) {
@@ -408,7 +451,7 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
             cancelAnimationFrame(raf);
             runningAnimations.forEach((animation) => animation.cancel());
         };
-    }, [svg, isGenerating, isStreaming]);
+    }, [svg, isStreaming]);
 
     useEffect(() => {
         if (!isModalOpen || !modalRef.current) return;

@@ -58,16 +58,37 @@ describe("buildRepoMindPrompt", () => {
         expect(result).not.toContain("SVG");
     });
 
-    it("uses a mermaid-json contract for clear visual requests", () => {
+    it("uses a mermaid-json contract for explicit flowchart requests", () => {
         const result = buildRepoMindPrompt({
             ...baseParams,
-            question: "Create a detailed architecture diagram for this repo",
+            question: "Create a detailed flowchart for this repo",
         });
 
         expect(result).toContain("mermaid-json");
         expect(result).toContain("15-20");
         expect(result).toContain("50");
         expect(result).toContain("markdown tables instead of diagrams");
+    });
+
+    it("uses mermaid-json for a supported non-flowchart diagram type", () => {
+        const result = buildRepoMindPrompt({
+            ...baseParams,
+            question: "Create a mindmap of the repo modules",
+        });
+
+        expect(result).toContain("mindmap");
+        expect(result).toContain("```mermaid-json```");
+        expect(result).toContain('"diagramType": "mindmap"');
+    });
+
+    it("falls back to raw Mermaid for unsupported explicit diagram types", () => {
+        const result = buildRepoMindPrompt({
+            ...baseParams,
+            question: "Create a pie chart for module distribution",
+        });
+
+        expect(result).toContain("```mermaid```");
+        expect(result).not.toContain("```mermaid-json```");
     });
 
     it("keeps the static prompt template free of emoji characters", () => {

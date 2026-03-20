@@ -1,4 +1,5 @@
 import type { ModelPreference } from "@/lib/ai-client";
+import { routeMermaidDiagram, type MermaidDiagramType } from "./mermaid-router";
 
 const COMPLEX_VISUAL_PATTERN = /\b(complex|detailed|comprehensive|end[- ]to[- ]end|distributed|microservice|event[- ]driven|orchestr|multi[- ]stage|multi[- ]step|production[- ]grade|full[- ]fledged|deep dive)\b/i;
 const SIMPLE_VISUAL_PATTERN = /\b(simple|basic|minimal|quick|overview|high[- ]level|small|tiny)\b/i;
@@ -12,10 +13,17 @@ export type VisualDiagramFamily =
     | "comparison"
     | "data-flow"
     | "journey"
+    | "workflow"
+    | "data"
+    | "model"
+    | "planning"
+    | "analysis"
+    | "board"
+    | "mindmap"
     | "default";
 
-export type VisualDiagramFormat = "svg" | "mermaid";
-export type PreferredMermaidDiagram = "flowchart" | "stateDiagram-v2" | "gantt" | "sequenceDiagram";
+export type VisualDiagramFormat = "svg" | "mermaid" | "mermaid-json";
+export type PreferredMermaidDiagram = MermaidDiagramType;
 
 export interface VisualDiagramProfile {
     family: VisualDiagramFamily;
@@ -51,11 +59,22 @@ export function normalizeModelPreference(value: unknown): ModelPreference {
 }
 
 export function isVisualDiagramIntentQuery(query: string): boolean {
-    return getVisualDiagramProfile(query).family !== "default";
+    return routeMermaidDiagram(query).visualIntent;
 }
 
 export function getVisualDiagramProfile(query: string): VisualDiagramProfile {
     const normalized = (query || "").toLowerCase();
+
+    if (/\b(flowchart|flow chart)\b/i.test(normalized)) {
+        return {
+            family: "pipeline",
+            preferredFormat: "mermaid",
+            preferredMermaidDiagram: "flowchart",
+            preferredNodeRange: [15, 20],
+            animationFocus: "Primary route bead, stage pulses, and branch emphasis.",
+            layoutFocus: "Use stages, handoffs, loops, and a visible critical path.",
+        };
+    }
 
     if (/\b(state|lifecycle|transition|fsm|finite state|status|mode)\b/i.test(normalized)) {
         return {
@@ -187,6 +206,7 @@ export function resolveVisualModelPreference(
     query: string,
     canUseThinking: boolean
 ): VisualModelRoutingDecision {
+    const route = routeMermaidDiagram(query);
     const visualIntent = isVisualDiagramIntentQuery(query);
     const profile = getVisualDiagramProfile(query);
 
@@ -196,9 +216,9 @@ export function resolveVisualModelPreference(
             effectiveModelPreference: requestedModelPreference,
             autoPromotedToThinking: false,
             fellBackToFlashForAnonymous: false,
-            visualFamily: profile.family,
-            preferredVisualFormat: profile.preferredFormat,
-            preferredMermaidDiagram: profile.preferredMermaidDiagram,
+            visualFamily: visualIntent ? route.family : profile.family,
+            preferredVisualFormat: visualIntent ? route.renderMode : profile.preferredFormat,
+            preferredMermaidDiagram: visualIntent ? route.diagramType : profile.preferredMermaidDiagram,
         };
     }
 
@@ -208,9 +228,9 @@ export function resolveVisualModelPreference(
             effectiveModelPreference: "thinking",
             autoPromotedToThinking: true,
             fellBackToFlashForAnonymous: false,
-            visualFamily: profile.family,
-            preferredVisualFormat: profile.preferredFormat,
-            preferredMermaidDiagram: profile.preferredMermaidDiagram,
+            visualFamily: route.family,
+            preferredVisualFormat: route.renderMode,
+            preferredMermaidDiagram: route.diagramType,
         };
     }
 
@@ -219,8 +239,8 @@ export function resolveVisualModelPreference(
         effectiveModelPreference: "flash",
         autoPromotedToThinking: false,
         fellBackToFlashForAnonymous: true,
-        visualFamily: profile.family,
-        preferredVisualFormat: profile.preferredFormat,
-        preferredMermaidDiagram: profile.preferredMermaidDiagram,
+        visualFamily: route.family,
+        preferredVisualFormat: route.renderMode,
+        preferredMermaidDiagram: route.diagramType,
     };
 }

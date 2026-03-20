@@ -9,6 +9,7 @@ import {
 describe("visual-intent", () => {
     it("detects visual diagram intent", () => {
         expect(isVisualDiagramIntentQuery("Create an animated architecture diagram")).toBe(true);
+        expect(isVisualDiagramIntentQuery("Create a mindmap of the repo")).toBe(true);
         expect(isVisualDiagramIntentQuery("Summarize this README")).toBe(false);
         expect(isVisualDiagramIntentQuery("Draw a diagram")).toBe(false);
     });
@@ -20,12 +21,12 @@ describe("visual-intent", () => {
         expect(decision.fellBackToFlashForAnonymous).toBe(false);
     });
 
-    it("keeps flash for vague non-family requests", () => {
+    it("falls back to flash for anonymous visual requests", () => {
         const decision = resolveVisualModelPreference("flash", "animated flowchart please", false);
         expect(decision.effectiveModelPreference).toBe("flash");
         expect(decision.autoPromotedToThinking).toBe(false);
-        expect(decision.fellBackToFlashForAnonymous).toBe(false);
-        expect(decision.visualIntent).toBe(false);
+        expect(decision.fellBackToFlashForAnonymous).toBe(true);
+        expect(decision.visualIntent).toBe(true);
     });
 
     it("returns complexity targets by query detail", () => {

@@ -51,6 +51,21 @@ describe("MessageContent", () => {
         expect(html).toContain("Start");
     });
 
+    it("converts typed sequence mermaid-json into mermaid before rendering", () => {
+        const html = renderToStaticMarkup(
+            <MessageContent
+                content={`\`\`\`mermaid-json
+{"diagramType":"sequenceDiagram","payload":{"participants":[{"id":"user","label":"User","kind":"actor"},{"id":"api","label":"API"}],"messages":[{"from":"user","to":"api","text":"Request","kind":"sync"}]}}
+\`\`\``}
+                messageId="msg-1b"
+            />
+        );
+
+        expect(html).toContain('data-testid="mermaid"');
+        expect(html).toContain("sequenceDiagram");
+        expect(html).toContain("actor user as User");
+    });
+
     it("falls back to raw json when mermaid-json is malformed", () => {
         const html = renderToStaticMarkup(
             <MessageContent

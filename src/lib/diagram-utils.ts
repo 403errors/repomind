@@ -2,6 +2,8 @@
  * Fallback diagram templates for when AI generation fails
  */
 
+import { MERMAID_DIAGRAM_DECLARATIONS } from "./mermaid-router";
+
 export const templates = {
     /**
      * Basic linear flow diagram
@@ -106,6 +108,7 @@ graph TB
 };
 
 const MIN_FLOWCHART_NODE_COUNT = 6;
+const VALID_MERMAID_DIAGRAM_TYPES = ["graph", ...MERMAID_DIAGRAM_DECLARATIONS];
 
 export function countMermaidFlowchartNodes(code: string): number {
     const nodeIds = new Set<string>();
@@ -242,8 +245,7 @@ export function validateMermaidSyntax(code: string): { valid: boolean; error?: s
         }
 
         // 1. Check for valid diagram type
-        const validTypes = ['graph', 'flowchart', 'sequenceDiagram', 'classDiagram', 'stateDiagram', 'erDiagram', 'gantt', 'pie', 'gitGraph'];
-        const hasValidType = validTypes.some(type => trimmed.startsWith(type));
+        const hasValidType = VALID_MERMAID_DIAGRAM_TYPES.some((type) => trimmed.startsWith(type));
 
         if (!hasValidType) {
             return { valid: false, error: 'Missing or invalid diagram type declaration' };
@@ -302,6 +304,16 @@ export function sanitizeMermaidCode(code: string): string {
         const commentIndex = line.indexOf('%%');
         return commentIndex >= 0 ? line.substring(0, commentIndex) : line;
     }).join('\n');
+
+    const diagramType = extractDiagramType(sanitized);
+    if (diagramType === "mindmap" || diagramType === "gantt") {
+        return sanitized
+            .split('\n')
+            .map((line) => line.replace(/[ \t]+$/g, ""))
+            .filter((line) => line.trim().length > 0)
+            .join('\n')
+            .trim();
+    }
 
     // 3. Process line by line
     const lines = sanitized.split('\n');
@@ -377,8 +389,23 @@ export function sanitizeMermaidCode(code: string): string {
  * Extract diagram type from code
  */
 export function extractDiagramType(code: string): string {
-    const match = code.match(/(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt)/);
-    return match ? match[1] : 'unknown';
+    const trimmed = code.trim();
+
+    if (!trimmed) {
+        return "unknown";
+    }
+
+    if (trimmed.startsWith("graph") || trimmed.startsWith("flowchart")) {
+        return "flowchart";
+    }
+
+    for (const diagramType of MERMAID_DIAGRAM_DECLARATIONS) {
+        if (trimmed.startsWith(diagramType)) {
+            return diagramType;
+        }
+    }
+
+    return "unknown";
 }
 
 /**
@@ -418,78 +445,652 @@ export function getFallbackTemplate(context?: string): string {
 /**
  * Types for JSON-based Mermaid generation
  */
+export type MermaidJsonDiagramType =
+    | "flowchart"
+    | "sequenceDiagram"
+    | "stateDiagram-v2"
+    | "mindmap"
+    | "gantt"
+    | "classDiagram"
+    | "erDiagram";
+
 export interface MermaidNode {
     id: string;
     label: string;
-    shape?: 'rect' | 'rounded' | 'circle' | 'diamond' | 'database' | 'cloud' | 'hexagon';
+    shape?: "rect" | "rounded" | "circle" | "diamond" | "database" | "cloud" | "hexagon";
 }
 
 export interface MermaidEdge {
     from: string;
     to: string;
     label?: string;
-    type?: 'arrow' | 'dotted' | 'thick' | 'line';
+    type?: "arrow" | "dotted" | "thick" | "line";
 }
 
-export interface MermaidDiagramData {
+export interface MermaidFlowchartDiagramData {
+    diagramType?: "flowchart" | "graph";
     title?: string;
-    direction?: 'TB' | 'TD' | 'BT' | 'RL' | 'LR';
+    direction?: "TB" | "TD" | "BT" | "RL" | "LR";
     nodes: MermaidNode[];
     edges: MermaidEdge[];
 }
 
-/**
- * Generate valid Mermaid code from structured JSON data
- * This guarantees syntax correctness by handling escaping and formatting programmatically
- */
-export function generateMermaidFromJSON(data: MermaidDiagramData): string {
-    const { direction = 'TD', nodes = [], edges = [] } = data;
+export interface MermaidSequenceParticipant {
+    id: string;
+    label?: string;
+    kind?: "participant" | "actor" | "boundary" | "control" | "entity" | "database" | "collections" | "queue";
+}
 
-    // Helper to sanitize label text (keep it minimal, we will quote it)
-    const cleanLabel = (text: string) => {
-        return text ? text.replace(/["\n\r]/g, ' ').trim() : '';
-    };
+export interface MermaidSequenceMessage {
+    from: string;
+    to: string;
+    text: string;
+    kind?: "sync" | "async" | "reply" | "create" | "destroy";
+}
 
-    // Helper to sanitize IDs (must be alphanumeric, no spaces)
-    const cleanId = (id: string) => {
-        return id.replace(/[^a-zA-Z0-9]/g, '_');
-    };
+export interface MermaidSequenceDiagramData {
+    diagramType: "sequenceDiagram";
+    title?: string;
+    participants: MermaidSequenceParticipant[];
+    messages: MermaidSequenceMessage[];
+}
 
-    // Helper to get shape syntax
-    const getShape = (id: string, label: string, shape?: string) => {
-        const safeId = cleanId(id);
-        const clean = cleanLabel(label || safeId); // Fallback to ID if label missing
-        switch (shape) {
-            case 'rounded': return `${safeId}("${clean}")`;
-            case 'circle': return `${safeId}(("${clean}"))`;
-            case 'diamond': return `${safeId}{"${clean}"}`;
-            case 'database': return `${safeId}[("${clean}")]`;
-            case 'cloud': return `${safeId}(("${clean}"))`;
-            case 'hexagon': return `${safeId}{{"${clean}"}}`;
-            case 'rect':
-            default: return `${safeId}["${clean}"]`;
-        }
-    };
+export interface MermaidStateNode {
+    id: string;
+    label?: string;
+    kind?: "state" | "start" | "end";
+}
 
-    // Helper to get edge syntax
-    const getEdge = (type?: string, label?: string) => {
-        const clean = label ? cleanLabel(label) : '';
-        const labelPart = clean ? `|"${clean}"|` : '';
+export interface MermaidStateTransition {
+    from: string;
+    to: string;
+    label?: string;
+}
 
-        switch (type) {
-            case 'dotted': return `-.->${labelPart}`;
-            case 'thick': return `==>${labelPart}`;
-            case 'line': return `---${labelPart}`;
-            case 'arrow':
-            default: return `-->${labelPart}`;
-        }
-    };
+export interface MermaidStateDiagramData {
+    diagramType: "stateDiagram-v2";
+    title?: string;
+    states: MermaidStateNode[];
+    transitions: MermaidStateTransition[];
+    initialState?: string;
+}
+
+export interface MermaidMindmapNode {
+    label: string;
+    children?: MermaidMindmapNode[];
+}
+
+export interface MermaidMindmapDiagramData {
+    diagramType: "mindmap";
+    title?: string;
+    root: MermaidMindmapNode;
+}
+
+export interface MermaidGanttTask {
+    id: string;
+    label: string;
+    start?: string;
+    end?: string;
+    after?: string[];
+    milestone?: boolean;
+    done?: boolean;
+}
+
+export interface MermaidGanttSection {
+    name: string;
+    tasks: MermaidGanttTask[];
+}
+
+export interface MermaidGanttDiagramData {
+    diagramType: "gantt";
+    title?: string;
+    dateFormat: string;
+    axisFormat?: string;
+    sections: MermaidGanttSection[];
+}
+
+export interface MermaidClassAttribute {
+    name: string;
+    type?: string;
+}
+
+export interface MermaidClassMethod {
+    signature: string;
+}
+
+export interface MermaidClassDefinition {
+    name: string;
+    attributes?: MermaidClassAttribute[];
+    methods?: MermaidClassMethod[];
+}
+
+export interface MermaidClassRelation {
+    from: string;
+    to: string;
+    kind?: "inheritance" | "composition" | "aggregation" | "association" | "dependency";
+    label?: string;
+}
+
+export interface MermaidClassDiagramData {
+    diagramType: "classDiagram";
+    title?: string;
+    classes: MermaidClassDefinition[];
+    relations?: MermaidClassRelation[];
+}
+
+export interface MermaidErAttribute {
+    name: string;
+    type?: string;
+    key?: "pk" | "fk" | "uk";
+}
+
+export interface MermaidErEntity {
+    name: string;
+    attributes: MermaidErAttribute[];
+}
+
+export interface MermaidErRelation {
+    from: string;
+    to: string;
+    cardinality?: string;
+    label?: string;
+}
+
+export interface MermaidErDiagramData {
+    diagramType: "erDiagram";
+    title?: string;
+    entities: MermaidErEntity[];
+    relations?: MermaidErRelation[];
+}
+
+export type MermaidTypedDiagramData =
+    | MermaidFlowchartDiagramData
+    | MermaidSequenceDiagramData
+    | MermaidStateDiagramData
+    | MermaidMindmapDiagramData
+    | MermaidGanttDiagramData
+    | MermaidClassDiagramData
+    | MermaidErDiagramData;
+
+export interface MermaidJsonCompileResult {
+    valid: boolean;
+    diagramType?: MermaidJsonDiagramType;
+    mermaid?: string;
+    error?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function cleanLabel(text: string): string {
+    return text ? text.replace(/["\n\r]/g, " ").trim() : "";
+}
+
+function cleanId(id: string): string {
+    return id.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+function normalizeDiagramType(value: unknown): MermaidJsonDiagramType | "flowchart" | null {
+    if (value === "graph" || value === "flowchart" || value == null) {
+        return "flowchart";
+    }
+
+    if (
+        value === "sequenceDiagram" ||
+        value === "stateDiagram-v2" ||
+        value === "mindmap" ||
+        value === "gantt" ||
+        value === "classDiagram" ||
+        value === "erDiagram"
+    ) {
+        return value;
+    }
+
+    return null;
+}
+
+function getFlowchartShape(id: string, label: string, shape?: string) {
+    const safeId = cleanId(id);
+    const clean = cleanLabel(label || safeId);
+
+    switch (shape) {
+        case "rounded":
+            return `${safeId}("${clean}")`;
+        case "circle":
+            return `${safeId}(("${clean}"))`;
+        case "diamond":
+            return `${safeId}{"${clean}"}`;
+        case "database":
+            return `${safeId}[("${clean}")]`;
+        case "cloud":
+            return `${safeId}(("${clean}"))`;
+        case "hexagon":
+            return `${safeId}{{"${clean}"}}`;
+        case "rect":
+        default:
+            return `${safeId}["${clean}"]`;
+    }
+}
+
+function getFlowchartEdge(type?: string, label?: string) {
+    const clean = label ? cleanLabel(label) : "";
+    const labelPart = clean ? `|"${clean}"|` : "";
+
+    switch (type) {
+        case "dotted":
+            return `-.->${labelPart}`;
+        case "thick":
+            return `==>${labelPart}`;
+        case "line":
+            return `---${labelPart}`;
+        case "arrow":
+        default:
+            return `-->${labelPart}`;
+    }
+}
+
+function compileFlowchartDiagram(data: MermaidFlowchartDiagramData | Record<string, unknown>): MermaidJsonCompileResult {
+    const source = data as MermaidFlowchartDiagramData | Record<string, unknown>;
+    const direction = typeof source.direction === "string" ? source.direction : "TD";
+    const nodes = Array.isArray(source.nodes) ? source.nodes : [];
+    const edges = Array.isArray(source.edges) ? source.edges : [];
+
+    if (nodes.length === 0) {
+        return { valid: false, diagramType: "flowchart", error: "Flowchart JSON must include at least one node." };
+    }
 
     const lines = [
         `graph ${direction}`,
-        ...nodes.map(n => `  ${getShape(n.id, n.label, n.shape)}`),
-        ...edges.map(e => `  ${cleanId(e.from)} ${getEdge(e.type, e.label)} ${cleanId(e.to)}`)
+        ...nodes.map((node) => {
+            const entry = node as MermaidNode;
+            if (!entry.id || !entry.label) {
+                return null;
+            }
+            return `  ${getFlowchartShape(entry.id, entry.label, entry.shape)}`;
+        }).filter((line): line is string => Boolean(line)),
+        ...edges.map((edge) => {
+            const entry = edge as MermaidEdge;
+            if (!entry.from || !entry.to) {
+                return null;
+            }
+            return `  ${cleanId(entry.from)} ${getFlowchartEdge(entry.type, entry.label)} ${cleanId(entry.to)}`;
+        }).filter((line): line is string => Boolean(line))
     ];
 
-    return lines.join('\n');
+    if (lines.length <= 1) {
+        return { valid: false, diagramType: "flowchart", error: "Flowchart JSON is missing valid nodes or edges." };
+    }
+
+    return { valid: true, diagramType: "flowchart", mermaid: lines.join("\n") };
+}
+
+function compileSequenceDiagram(data: MermaidSequenceDiagramData): MermaidJsonCompileResult {
+    if (!Array.isArray(data.participants) || data.participants.length < 2) {
+        return { valid: false, diagramType: "sequenceDiagram", error: "Sequence JSON must include at least two participants." };
+    }
+
+    if (!Array.isArray(data.messages) || data.messages.length === 0) {
+        return { valid: false, diagramType: "sequenceDiagram", error: "Sequence JSON must include at least one message." };
+    }
+
+    const lines = ["sequenceDiagram"];
+    if (data.title) {
+        lines.push(`  %% ${cleanLabel(data.title)}`);
+    }
+
+    for (const participant of data.participants) {
+        if (!participant.id) continue;
+        const label = cleanLabel(participant.label || participant.id);
+        const prefix = participant.kind && participant.kind !== "participant" ? `${participant.kind} ` : "participant ";
+        lines.push(`  ${prefix}${cleanId(participant.id)} as ${label}`);
+    }
+
+    const arrowForKind = (kind?: MermaidSequenceMessage["kind"]) => {
+        switch (kind) {
+            case "async":
+                return "->>";
+            case "reply":
+                return "-->>";
+            case "create":
+                return "->>";
+            case "destroy":
+                return "-x";
+            case "sync":
+            default:
+                return "->>";
+        }
+    };
+
+    for (const message of data.messages) {
+        if (!message.from || !message.to || !message.text) continue;
+        lines.push(`  ${cleanId(message.from)}${arrowForKind(message.kind)}${cleanId(message.to)}: ${cleanLabel(message.text)}`);
+    }
+
+    return { valid: true, diagramType: "sequenceDiagram", mermaid: lines.join("\n") };
+}
+
+function compileStateDiagram(data: MermaidStateDiagramData): MermaidJsonCompileResult {
+    if (!Array.isArray(data.states) || data.states.length === 0) {
+        return { valid: false, diagramType: "stateDiagram-v2", error: "State JSON must include at least one state." };
+    }
+
+    const lines = ["stateDiagram-v2"];
+    if (data.title) {
+        lines.push(`  %% ${cleanLabel(data.title)}`);
+    }
+
+    const declaredAliases = new Set<string>();
+    const transitionStateIds = new Set<string>();
+
+    for (const transition of data.transitions ?? []) {
+        if (transition.from) {
+            transitionStateIds.add(cleanId(transition.from));
+        }
+        if (transition.to) {
+            transitionStateIds.add(cleanId(transition.to));
+        }
+    }
+
+    const startStateIds = new Set<string>();
+    if (data.initialState) {
+        startStateIds.add(cleanId(data.initialState));
+    }
+
+    for (const state of data.states) {
+        if (!state.id) continue;
+        const id = cleanId(state.id);
+        if (state.kind === "start") {
+            startStateIds.add(id);
+        }
+
+        const label = cleanLabel(state.label ?? "");
+        if (label && label !== state.id && !declaredAliases.has(id)) {
+            lines.push(`  state "${label}" as ${id}`);
+            declaredAliases.add(id);
+            if (state.kind === "end") {
+                lines.push(`  ${id} --> [*]`);
+            }
+            continue;
+        }
+
+        if (state.kind !== "end" && !transitionStateIds.has(id) && !startStateIds.has(id)) {
+            lines.push(`  state ${id}`);
+        }
+
+        if (state.kind === "end") {
+            lines.push(`  ${id} --> [*]`);
+        }
+    }
+
+    for (const startStateId of startStateIds) {
+        lines.push(`  [*] --> ${startStateId}`);
+    }
+
+    if (!Array.isArray(data.transitions) || data.transitions.length === 0) {
+        return { valid: false, diagramType: "stateDiagram-v2", error: "State JSON must include at least one transition." };
+    }
+
+    for (const transition of data.transitions) {
+        if (!transition.from || !transition.to) continue;
+        const label = transition.label ? `: ${cleanLabel(transition.label)}` : "";
+        lines.push(`  ${cleanId(transition.from)} --> ${cleanId(transition.to)}${label}`);
+    }
+
+    return { valid: true, diagramType: "stateDiagram-v2", mermaid: lines.join("\n") };
+}
+
+function compileMindmapDiagram(data: MermaidMindmapDiagramData): MermaidJsonCompileResult {
+    if (!data.root || !data.root.label) {
+        return { valid: false, diagramType: "mindmap", error: "Mindmap JSON must include a root label." };
+    }
+
+    const lines = ["mindmap"];
+    if (data.title) {
+        lines.push(`  %% ${cleanLabel(data.title)}`);
+    }
+
+    const renderNode = (node: MermaidMindmapNode, depth: number) => {
+        const indent = "  ".repeat(depth + 1);
+        const label = cleanLabel(node.label);
+        if (!label) return;
+        lines.push(`${indent}${label}`);
+        for (const child of node.children ?? []) {
+            renderNode(child, depth + 1);
+        }
+    };
+
+    renderNode(data.root, 0);
+    return { valid: true, diagramType: "mindmap", mermaid: lines.join("\n") };
+}
+
+function compileGanttDiagram(data: MermaidGanttDiagramData): MermaidJsonCompileResult {
+    if (!data.dateFormat) {
+        return { valid: false, diagramType: "gantt", error: "Gantt JSON must include a dateFormat." };
+    }
+
+    if (!Array.isArray(data.sections) || data.sections.length === 0) {
+        return { valid: false, diagramType: "gantt", error: "Gantt JSON must include at least one section." };
+    }
+
+    const lines = ["gantt"];
+    if (data.title) {
+        lines.push(`  title ${cleanLabel(data.title)}`);
+    }
+    lines.push(`  dateFormat ${cleanLabel(data.dateFormat)}`);
+    if (data.axisFormat) {
+        lines.push(`  axisFormat ${cleanLabel(data.axisFormat)}`);
+    }
+
+    const parseDate = (value?: string) => {
+        if (!value) return null;
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? null : parsed;
+    };
+
+    const formatDuration = (start?: string, end?: string, milestone = false) => {
+        if (milestone) {
+            return "0d";
+        }
+
+        if (!start) {
+            return "1d";
+        }
+
+        const startTime = parseDate(start);
+        const endTime = parseDate(end);
+
+        if (startTime == null || endTime == null) {
+            return "1d";
+        }
+
+        const diffDays = Math.max(1, Math.round((endTime - startTime) / 86400000));
+        return `${diffDays}d`;
+    };
+
+    for (const section of data.sections) {
+        if (!section.name) continue;
+        lines.push(`  section ${cleanLabel(section.name)}`);
+        for (const task of section.tasks ?? []) {
+            if (!task.id || !task.label) continue;
+            const pieces: string[] = [];
+            if (task.done) {
+                pieces.push("done");
+            }
+            if (task.milestone) {
+                pieces.push("milestone");
+            }
+            pieces.push(cleanId(task.id));
+            if (task.after?.length) {
+                pieces.push(`after ${task.after.map(cleanId).join(" ")}`);
+            } else if (task.start) {
+                pieces.push(cleanLabel(task.start));
+            }
+            pieces.push(formatDuration(task.start, task.end, task.milestone));
+            lines.push(`  ${cleanLabel(task.label)} : ${pieces.join(", ")}`);
+        }
+    }
+
+    return { valid: true, diagramType: "gantt", mermaid: lines.join("\n") };
+}
+
+function compileClassDiagram(data: MermaidClassDiagramData): MermaidJsonCompileResult {
+    if (!Array.isArray(data.classes) || data.classes.length === 0) {
+        return { valid: false, diagramType: "classDiagram", error: "Class JSON must include at least one class." };
+    }
+
+    const lines = ["classDiagram"];
+    if (data.title) {
+        lines.push(`  %% ${cleanLabel(data.title)}`);
+    }
+
+    for (const classDef of data.classes) {
+        if (!classDef.name) continue;
+        const classId = cleanId(classDef.name);
+        lines.push(`  class ${classId} {`);
+        for (const attribute of classDef.attributes ?? []) {
+            if (!attribute.name) continue;
+            const typePart = attribute.type ? `${cleanLabel(attribute.type)} ` : "";
+            lines.push(`    ${typePart}${cleanLabel(attribute.name)}`);
+        }
+        for (const method of classDef.methods ?? []) {
+            if (!method.signature) continue;
+            lines.push(`    ${cleanLabel(method.signature)}`);
+        }
+        lines.push("  }");
+    }
+
+    for (const relation of data.relations ?? []) {
+        if (!relation.from || !relation.to) continue;
+        const arrow = (() => {
+            switch (relation.kind) {
+                case "composition":
+                    return "*--";
+                case "aggregation":
+                    return "o--";
+                case "dependency":
+                    return "..>";
+                case "association":
+                    return "--";
+                case "inheritance":
+                default:
+                    return "<|--";
+            }
+        })();
+        const label = relation.label ? ` : ${cleanLabel(relation.label)}` : "";
+        lines.push(`  ${cleanId(relation.from)} ${arrow} ${cleanId(relation.to)}${label}`);
+    }
+
+    return { valid: true, diagramType: "classDiagram", mermaid: lines.join("\n") };
+}
+
+function compileErDiagram(data: MermaidErDiagramData): MermaidJsonCompileResult {
+    if (!Array.isArray(data.entities) || data.entities.length === 0) {
+        return { valid: false, diagramType: "erDiagram", error: "ER JSON must include at least one entity." };
+    }
+
+    const lines = ["erDiagram"];
+    if (data.title) {
+        lines.push(`  %% ${cleanLabel(data.title)}`);
+    }
+
+    for (const entity of data.entities) {
+        if (!entity.name) continue;
+        lines.push(`  ${cleanId(entity.name)} {`);
+        for (const attribute of entity.attributes ?? []) {
+            if (!attribute.name) continue;
+            const typePart = attribute.type ? `${cleanLabel(attribute.type)} ` : "";
+            const keyPart = attribute.key ? ` ${attribute.key.toUpperCase()}` : "";
+            lines.push(`    ${typePart}${cleanLabel(attribute.name)}${keyPart}`);
+        }
+        lines.push("  }");
+    }
+
+    for (const relation of data.relations ?? []) {
+        if (!relation.from || !relation.to) continue;
+        const label = relation.label ? ` : ${cleanLabel(relation.label)}` : "";
+        const cardinality = relation.cardinality?.trim();
+        const safeCardinality = cardinality && /^[|}o]+--[|{o]+$/.test(cardinality) ? cardinality : "||--o{";
+        lines.push(`  ${cleanId(relation.from)} ${safeCardinality} ${cleanId(relation.to)}${label}`);
+    }
+
+    return { valid: true, diagramType: "erDiagram", mermaid: lines.join("\n") };
+}
+
+function compileTypedMermaidJson(data: unknown): MermaidJsonCompileResult {
+    if (!isRecord(data)) {
+        return { valid: false, error: "Mermaid JSON must be an object." };
+    }
+
+    const explicitDiagramType = normalizeDiagramType(data.diagramType);
+    const legacyFlowchart = !explicitDiagramType && !data.diagramType && Array.isArray(data.nodes) && Array.isArray(data.edges);
+    const diagramType = explicitDiagramType ?? (legacyFlowchart ? "flowchart" : null);
+    const payload = isRecord(data.payload) ? data.payload : data;
+
+    if (!diagramType) {
+        return { valid: false, error: "Missing or unsupported diagramType in Mermaid JSON." };
+    }
+
+    switch (diagramType) {
+        case "flowchart":
+            return compileFlowchartDiagram(payload);
+        case "sequenceDiagram":
+            return compileSequenceDiagram({
+                diagramType: "sequenceDiagram",
+                title: typeof data.title === "string" ? data.title : undefined,
+                participants: Array.isArray(payload.participants) ? payload.participants as MermaidSequenceParticipant[] : [],
+                messages: Array.isArray(payload.messages) ? payload.messages as MermaidSequenceMessage[] : [],
+            });
+        case "stateDiagram-v2":
+            return compileStateDiagram({
+                diagramType: "stateDiagram-v2",
+                title: typeof data.title === "string" ? data.title : undefined,
+                states: Array.isArray(payload.states) ? payload.states as MermaidStateNode[] : [],
+                transitions: Array.isArray(payload.transitions) ? payload.transitions as MermaidStateTransition[] : [],
+                initialState: typeof payload.initialState === "string" ? payload.initialState : undefined,
+            });
+        case "mindmap":
+            return compileMindmapDiagram({
+                diagramType: "mindmap",
+                title: typeof data.title === "string" ? data.title : undefined,
+                root: (payload.root as MermaidMindmapNode) ?? { label: "" },
+            });
+        case "gantt":
+            return compileGanttDiagram({
+                diagramType: "gantt",
+                title: typeof data.title === "string" ? data.title : undefined,
+                dateFormat: typeof payload.dateFormat === "string" ? payload.dateFormat : "",
+                axisFormat: typeof payload.axisFormat === "string" ? payload.axisFormat : undefined,
+                sections: Array.isArray(payload.sections) ? payload.sections as MermaidGanttSection[] : [],
+            });
+        case "classDiagram":
+            return compileClassDiagram({
+                diagramType: "classDiagram",
+                title: typeof data.title === "string" ? data.title : undefined,
+                classes: Array.isArray(payload.classes) ? payload.classes as MermaidClassDefinition[] : [],
+                relations: Array.isArray(payload.relations) ? payload.relations as MermaidClassRelation[] : [],
+            });
+        case "erDiagram":
+            return compileErDiagram({
+                diagramType: "erDiagram",
+                title: typeof data.title === "string" ? data.title : undefined,
+                entities: Array.isArray(payload.entities) ? payload.entities as MermaidErEntity[] : [],
+                relations: Array.isArray(payload.relations) ? payload.relations as MermaidErRelation[] : [],
+            });
+        default:
+            return { valid: false, error: `Unsupported Mermaid diagram type: ${String(diagramType)}` };
+    }
+}
+
+/**
+ * Generate valid Mermaid code from structured JSON data.
+ * Supports both the legacy flowchart JSON and the newer typed JSON envelope.
+ */
+export function generateMermaidFromJSON(data: unknown): string | null {
+    const result = compileTypedMermaidJson(data);
+    return result.valid ? result.mermaid ?? null : null;
+}
+
+export function compileMermaidFromJSON(data: unknown): MermaidJsonCompileResult {
+    return compileTypedMermaidJson(data);
 }

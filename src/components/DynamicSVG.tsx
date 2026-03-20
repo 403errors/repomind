@@ -202,7 +202,7 @@ export const DynamicSVG = ({ svg, isStreaming = false }: DynamicSVGProps) => {
         const shouldAnimate =
             isStreaming
                 ? !streamAnimationPlayedRef.current && lastAnimatedSvgRef.current !== cleanSvg
-                : lastAnimatedSvgRef.current !== cleanSvg;
+                : !streamAnimationPlayedRef.current && lastAnimatedSvgRef.current !== cleanSvg;
 
         if (shouldAnimate) {
             animateSvg(container);
