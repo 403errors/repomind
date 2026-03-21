@@ -86,7 +86,7 @@ export default function TrendingClient({ initialRepos }: TrendingClientProps) {
                         </h1>
                         <p className="text-zinc-400 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed">
                             Discover the most influential and rapidly growing projects on GitHub this week.
-                            Analyze any of them instantly with RepoMind's Agentic intelligence.
+                            Analyze any of them instantly with RepoMind&apos;s Agentic intelligence.
                         </p>
                     </motion.div>
                 </div>
@@ -151,7 +151,7 @@ export default function TrendingClient({ initialRepos }: TrendingClientProps) {
                                     <div className="flex items-center gap-2 text-zinc-300 font-medium">
                                         <Image 
                                             src={`https://github.com/${repo.owner}.png`}
-                                            alt={repo.owner}
+                                            alt={`${repo.owner} avatar`}
                                             width={20}
                                             height={20}
                                             className="rounded-full bg-white/10"
@@ -183,10 +183,11 @@ export default function TrendingClient({ initialRepos }: TrendingClientProps) {
                                 </div>
                                 <Link 
                                     href={`/chat?q=${repo.owner}/${repo.repo}`}
+                                    aria-label={`Analyze ${repo.owner}/${repo.repo} with RepoMind`}
                                     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-white text-black text-xs font-bold hover:bg-zinc-200 transition-colors shadow-xl"
                                 >
                                     <MessageSquare size={12} />
-                                    Talk to Repo
+                                    Analyze {repo.repo}
                                 </Link>
                             </div>
                         </motion.div>

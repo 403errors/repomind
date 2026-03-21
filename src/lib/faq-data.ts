@@ -10,11 +10,6 @@ export const FAQ_PAGE_ITEMS: FaqItem[] = [
             "Yes. RepoMind uses Agentic Context-Augmented Generation (CAG) to analyze entire GitHub repositories, loading the full files needed to understand logic, dependencies, and architecture.",
     },
     {
-        question: "Is RepoMind just an LLM wrapper or AI slop?",
-        answer:
-            "No. RepoMind is a repository analysis workflow that uses full-file context selection, architecture mapping, code review, and security scanning. It does more than summarize snippets because it preserves file relationships, dependency context, and control flow.",
-    },
-    {
         question: "How do I visualize a GitHub repository's architecture?",
         answer:
             "Paste a public GitHub repository URL into RepoMind and it generates architecture views, Mermaid flowcharts, and repository-level context without requiring a clone.",
@@ -23,11 +18,6 @@ export const FAQ_PAGE_ITEMS: FaqItem[] = [
         question: "How is RepoMind different from standard 'chat with your code' tools?",
         answer:
             "Standard RAG tools often work from disconnected chunks. RepoMind selects and loads complete files so the model keeps structural, dependency, and control-flow context.",
-    },
-    {
-        question: "Can I analyze an individual developer's GitHub profile?",
-        answer:
-            "Yes. You can enter a GitHub username to summarize a developer's public profile, technical stack, language preferences, and recent project activity.",
     },
     {
         question: "Does RepoMind scan for code vulnerabilities?",

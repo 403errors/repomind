@@ -48,7 +48,6 @@ export default function HomeClient({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [activeFaqIndex, setActiveFaqIndex] = useState<number | null>(null);
-    const [showAllFaqs, setShowAllFaqs] = useState(false);
     const router = useRouter();
     const searchParams = useSearchParams();
     const { data: session } = useSession();
@@ -144,7 +143,7 @@ export default function HomeClient({
                     <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-3 bg-clip-text text-transparent bg-gradient-to-b from-white to-white/70 relative">
                         GitHub Repository Analysis,
                         <br />
-                        Code Review and Security Scanning
+                        Code Review & Security Scanning
                     </h1>
 
                     <CAGBadge />
@@ -288,7 +287,7 @@ export default function HomeClient({
                         {FAQ_PAGE_ITEMS.map((item, index) => (
                             <article
                                 key={item.question}
-                                className={`${!showAllFaqs && index >= 3 ? "hidden" : "block"} rounded-2xl border border-zinc-800 bg-zinc-900/40`}
+                                className="rounded-2xl border border-zinc-800 bg-zinc-900/40"
                             >
                                 <button
                                     type="button"
@@ -304,25 +303,24 @@ export default function HomeClient({
                                         }`}
                                     />
                                 </button>
-                                {activeFaqIndex === index && (
-                                    <div id={`homepage-faq-answer-${index}`} className="px-6 pb-6">
+                                <motion.div
+                                    id={`homepage-faq-answer-${index}`}
+                                    aria-hidden={activeFaqIndex !== index}
+                                    initial={false}
+                                    animate={
+                                        activeFaqIndex === index
+                                            ? { height: "auto", opacity: 1 }
+                                            : { height: 0, opacity: 0 }
+                                    }
+                                    transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                                    className="overflow-hidden will-change-[height,opacity]"
+                                >
+                                    <div className="px-6 pb-6">
                                         <p className="text-zinc-400 leading-relaxed">{item.answer}</p>
                                     </div>
-                                )}
+                                </motion.div>
                             </article>
                         ))}
-                    </div>
-                    <div className="mt-8 flex justify-center">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setShowAllFaqs((current) => !current);
-                                setActiveFaqIndex(null);
-                            }}
-                            className="inline-flex items-center justify-center px-5 py-2.5 rounded-full border border-white/10 bg-zinc-900/50 text-sm font-semibold text-white hover:bg-zinc-800 hover:border-white/20 transition-colors"
-                        >
-                            {showAllFaqs ? "Show fewer FAQs" : "Show more FAQs"}
-                        </button>
                     </div>
                 </div>
             </section>
@@ -352,7 +350,7 @@ export default function HomeClient({
                                             <div className="flex items-center gap-2 text-zinc-300 font-medium">
                                                 <Image 
                                                     src={`https://github.com/${repo.owner}.png`}
-                                                    alt={repo.owner}
+                                                    alt={`${repo.owner} avatar`}
                                                     width={20}
                                                     height={20}
                                                     className="rounded-full bg-white/10"
@@ -384,10 +382,11 @@ export default function HomeClient({
                                         </div>
                                         <Link 
                                             href={`/chat?q=${repo.owner}/${repo.repo}`}
+                                            aria-label={`Analyze ${repo.owner}/${repo.repo} with RepoMind`}
                                             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-white text-black text-xs font-bold hover:bg-zinc-200 transition-colors"
                                         >
                                             <MessageSquare size={12} />
-                                            Talk to Repo
+                                            Analyze {repo.repo}
                                         </Link>
                                     </div>
                                 </div>

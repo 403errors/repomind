@@ -5,7 +5,9 @@ export type OgCardVariant = "home" | "repo" | "profile" | "report" | "blog" | "t
 export type ChatIntent = "architecture" | "security" | "explain" | "general";
 
 const BRAND_NAME = "RepoMind";
-const DEFAULT_OG_IMAGE_PATH = "/assets/landing_page.png";
+const BRAND_TWITTER_HANDLE = "@repomind";
+const OG_IMAGE_WIDTH = 1200;
+const OG_IMAGE_HEIGHT = 630;
 
 export function normalizeMetaText(value: string | null | undefined): string {
     return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
@@ -47,10 +49,12 @@ export function buildNoIndexRobots(): NonNullable<Metadata["robots"]> {
     };
 }
 
-function toMetadataImage(url: string, alt: string): { url: string; alt: string } {
+function toMetadataImage(url: string, alt: string): { url: string; alt: string; width: number; height: number } {
     return {
         url,
         alt,
+        width: OG_IMAGE_WIDTH,
+        height: OG_IMAGE_HEIGHT,
     };
 }
 
@@ -71,6 +75,8 @@ type SeoMetadataInput = {
     twitterImage?: string;
     twitterTitle?: string;
     twitterDescription?: string;
+    twitterCreator?: string;
+    twitterSite?: string;
     robots?: Metadata["robots"];
     noIndex?: boolean;
 };
@@ -120,6 +126,8 @@ export function createSeoMetadata(input: SeoMetadataInput): Metadata {
             title: twitterTitle,
             description: twitterDescription,
             images: [twitterImage],
+            creator: input.twitterCreator ?? BRAND_TWITTER_HANDLE,
+            site: input.twitterSite ?? BRAND_TWITTER_HANDLE,
         },
     };
 

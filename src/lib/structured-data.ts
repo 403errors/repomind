@@ -48,7 +48,12 @@ export function buildRootStructuredData() {
         "@id": `${baseUrl}#organization`,
         name: "RepoMind",
         url: baseUrl,
-        logo: `${baseUrl}/no-bg-repomind.png`,
+        logo: {
+          "@type": "ImageObject",
+          url: `${baseUrl}/no-bg-repomind.png`,
+          width: 500,
+          height: 500,
+        },
         sameAs: ["https://github.com/403errors/repomind"],
       },
     ],

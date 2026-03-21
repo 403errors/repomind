@@ -77,6 +77,7 @@ export const metadata: Metadata = {
     description: "Analyze GitHub repositories with full-context AI for architecture understanding, code review, and security scanning.",
     images: ["/assets/landing_page.png"],
     creator: "@repomind",
+    site: "@repomind",
   },
   robots: {
     index: true,
