@@ -21,6 +21,105 @@ function shouldIncludeVisualContract(question: string): boolean {
   return routeMermaidDiagram(question).visualIntent;
 }
 
+type VisualOutputFormat = "svg" | "mermaid" | "mermaid-json";
+
+interface VisualOutputDecision {
+  primaryFormat: VisualOutputFormat;
+  fallbackFormat: VisualOutputFormat;
+  reason: string;
+}
+
+const TYPED_MERMAID_JSON_DIAGRAMS = new Set<MermaidDiagramType>([
+  "sequenceDiagram",
+  "classDiagram",
+  "erDiagram",
+  "stateDiagram-v2",
+  "gantt",
+  "mindmap",
+]);
+
+const SVG_EXPLICIT_PATTERN = /\b(svg|scalable vector graphic|scalable vector graphics)\b/i;
+const MERMAID_JSON_EXPLICIT_PATTERN = /\bmermaid-json\b/i;
+const MERMAID_EXPLICIT_PATTERN = /\bmermaid\b/i;
+const VISUAL_POLISH_PATTERN =
+  /\b(animated|animation|beautiful|polish|polished|presentation|hero|showcase|stylish|aesthetic|premium|pretty)\b/i;
+
+export function resolveVisualOutputDecision(question: string): VisualOutputDecision {
+  const route = routeMermaidDiagram(question);
+  const target = getSvgComplexityTarget(question);
+  const normalizedQuestion = question || "";
+
+  if (MERMAID_JSON_EXPLICIT_PATTERN.test(normalizedQuestion)) {
+    return {
+      primaryFormat: "mermaid-json",
+      fallbackFormat: "svg",
+      reason: "User explicitly requested mermaid-json.",
+    };
+  }
+
+  if (SVG_EXPLICIT_PATTERN.test(normalizedQuestion)) {
+    return {
+      primaryFormat: "svg",
+      fallbackFormat: "mermaid-json",
+      reason: "User explicitly requested SVG.",
+    };
+  }
+
+  if (MERMAID_EXPLICIT_PATTERN.test(normalizedQuestion)) {
+    return {
+      primaryFormat: "mermaid",
+      fallbackFormat: "svg",
+      reason: "User explicitly requested Mermaid.",
+    };
+  }
+
+  if (TYPED_MERMAID_JSON_DIAGRAMS.has(route.diagramType)) {
+    return {
+      primaryFormat: "mermaid-json",
+      fallbackFormat: "svg",
+      reason: "Typed diagrams are more reliable with mermaid-json.",
+    };
+  }
+
+  if (VISUAL_POLISH_PATTERN.test(normalizedQuestion)) {
+    return {
+      primaryFormat: "svg",
+      fallbackFormat: "mermaid-json",
+      reason: "Visual polish intent detected.",
+    };
+  }
+
+  if (target.tier === "complex") {
+    return {
+      primaryFormat: "mermaid-json",
+      fallbackFormat: "svg",
+      reason: "Complex diagrams default to mermaid-json.",
+    };
+  }
+
+  if (target.tier === "simple") {
+    return {
+      primaryFormat: "svg",
+      fallbackFormat: "mermaid-json",
+      reason: "Simple diagrams default to SVG.",
+    };
+  }
+
+  if (route.family === "architecture" || route.family === "workflow") {
+    return {
+      primaryFormat: "svg",
+      fallbackFormat: "mermaid-json",
+      reason: "Standard architecture/workflow requests prefer SVG.",
+    };
+  }
+
+  return {
+    primaryFormat: "mermaid-json",
+    fallbackFormat: "svg",
+    reason: "Standard non-architecture visuals default to mermaid-json.",
+  };
+}
+
 function getMermaidJsonSchema(diagramType: MermaidDiagramType): string {
   switch (diagramType) {
     case "flowchart":
@@ -145,6 +244,7 @@ function buildVisualContract(question: string): string {
   const route = routeMermaidDiagram(question);
   const target = getSvgComplexityTarget(question);
   const profile = getVisualDiagramProfile(question);
+  const output = resolveVisualOutputDecision(question);
   const minimumNodeCount = Math.max(6, target.minNodes);
   const preferredMinNodes = Math.max(profile.preferredNodeRange[0], minimumNodeCount);
   const preferredMaxNodes = profile.preferredNodeRange[1];
@@ -154,70 +254,59 @@ function buildVisualContract(question: string): string {
     return "";
   }
 
-  if (route.renderMode === "mermaid-json") {
-    return `
+  return `
             - **VISUAL ROUTING (MANDATORY)**:
               - Preferred family: **${route.family}**.
-              - Preferred output format: **MERMAID-JSON**.
               - Preferred topology: **${route.diagramType}**.
+              - Primary output format: **${output.primaryFormat.toUpperCase()}**.
+              - Fallback output format: **${output.fallbackFormat.toUpperCase()}**.
+              - Routing reason: ${output.reason}
               - Layout style: ${profile.layoutFocus}
               - Emphasis: ${profile.animationFocus}
-              - Diagram guidance: Use the exact typed JSON schema below and nothing else.
+              - Diagram guidance: honor explicit output-format requests from the user.
 
-            - **MERMAID-JSON HARD CONTRACT (MANDATORY)**:
+            - **VISUAL BLOCK HARD CONTRACT (MANDATORY)**:
               - Complexity tier for THIS request: **${target.tier.toUpperCase()}**.
               - Minimum logical blocks: **${minimumNodeCount}** nodes.
               - Preferred detail range: **${preferredMinNodes}-${preferredMaxNodes}** visible nodes when the layout is readable.
               - Hard maximum logical blocks: **${target.maxNodes}**.
               - Minimum connection edges: **${target.minEdges}** relationships.
-              - Output exactly one \`\`\`mermaid-json\`\`\` block.
-              - The JSON must have:
+              - Output exactly one visual block in the primary format unless fallback is needed.
+              - Allowed block languages: \`\`\`svg\`\`\`, \`\`\`mermaid\`\`\`, \`\`\`mermaid-json\`\`\`.
+              - If outputting \`\`\`svg\`\`\`: self-check it starts with \`<svg\` and ends with \`</svg>\`. If not, switch to fallback format.
+              - If outputting \`\`\`mermaid\`\`\`: start with \`${route.diagramType}\`. If syntax confidence is low, switch to fallback format.
+              - If outputting \`\`\`mermaid-json\`\`\`: emit valid parseable JSON. If invalid, switch to fallback format.
+              - For \`\`\`mermaid-json\`\`\`, the JSON must include:
                 - \`diagramType\`: one of \`flowchart\`, \`sequenceDiagram\`, \`stateDiagram-v2\`, \`mindmap\`, \`gantt\`, \`classDiagram\`, or \`erDiagram\`.
                 - \`title\`: short human-readable title.
                 - \`payload\`: the diagram-specific content.
-              - Use this schema:
+              - Use this schema when \`\`\`mermaid-json\`\`\` is selected:
 \`\`\`json
 ${diagramSchema}
 \`\`\`
-               - Keep labels concise and relationships explicit.
-              - Use markdown tables instead of diagrams when a table communicates the answer more clearly.
-              - If the request is not clearly visual, answer in text only.
-  `;
-  }
-
-  return `
-            - **VISUAL ROUTING (MANDATORY)**:
-              - Preferred family: **${route.family}**.
-              - Preferred output format: **MERMAID**.
-              - Preferred topology: **${route.diagramType}**.
-              - Layout style: ${profile.layoutFocus}
-              - Emphasis: ${profile.animationFocus}
-              - Diagram guidance: Use the exact Mermaid syntax for the requested diagram type.
-
-            - **MERMAID HARD CONTRACT (MANDATORY)**:
-              - Use a single \`\`\`mermaid\`\`\` block when a visual is clearly helpful.
-              - Start the block with \`${route.diagramType}\`.
-              - Do not emit SVG unless explicitly requested.
               - Keep labels concise and relationships explicit.
               - Use markdown tables instead of diagrams when a table communicates the answer more clearly.
+              - If the request is not clearly visual, answer in text only.
               - Prefer the routed topology and avoid generic flowchart repetition.
   `;
 }
 
 function buildResponseStructureRules(question: string): string {
   const route = routeMermaidDiagram(question);
+  const output = resolveVisualOutputDecision(question);
 
   if (route.visualIntent) {
-    const visualBlockLanguage = route.renderMode === "mermaid-json" ? "mermaid-json" : "mermaid";
+    const visualBlockLanguage = `${output.primaryFormat} (fallback: ${output.fallbackFormat})`;
 
     return `
             - **VISUAL DECISION LOGIC**:
               1. If the query does not clearly benefit from a visual, answer in text only.
-              2. If a visual helps, use a single routed Mermaid block exactly once.
-              3. Use markdown tables for comparisons, tradeoffs, and structured summaries when they are clearer than prose or diagrams.
+              2. If a visual helps, use exactly one visual block in the primary output format.
+              3. If primary format fails reliability checks, switch once to fallback format.
+              4. Use markdown tables for comparisons, tradeoffs, and structured summaries when they are clearer than prose or diagrams.
 
             - **RESPONSE FORMAT**:
-              Output only the final answer and, if needed, a markdown table or a single \`\`\`${visualBlockLanguage}\`\`\` block.
+              Output only the final answer and, if needed, a markdown table or a single visual code block (${visualBlockLanguage}).
               Do not add commentary, status messages, or preambles.
 `;
   }

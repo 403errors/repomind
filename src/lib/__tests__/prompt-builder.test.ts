@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRepoMindPrompt, formatHistoryText } from "@/lib/prompt-builder";
+import { buildRepoMindPrompt, formatHistoryText, resolveVisualOutputDecision } from "@/lib/prompt-builder";
 
 describe("buildRepoMindPrompt", () => {
     const baseParams = {
@@ -58,13 +58,13 @@ describe("buildRepoMindPrompt", () => {
         expect(result).not.toContain("SVG");
     });
 
-    it("uses a mermaid-json contract for explicit flowchart requests", () => {
+    it("uses mermaid-json for complex flowchart requests", () => {
         const result = buildRepoMindPrompt({
             ...baseParams,
             question: "Create a detailed flowchart for this repo",
         });
 
-        expect(result).toContain("mermaid-json");
+        expect(result).toContain("Primary output format: **MERMAID-JSON**");
         expect(result).toContain("15-20");
         expect(result).toContain("50");
         expect(result).toContain("markdown tables instead of diagrams");
@@ -81,19 +81,57 @@ describe("buildRepoMindPrompt", () => {
         expect(result).toContain('"diagramType": "mindmap"');
     });
 
-    it("falls back to raw Mermaid for unsupported explicit diagram types", () => {
+    it("defaults pie-chart style prompts to mermaid-json under standard complexity", () => {
         const result = buildRepoMindPrompt({
             ...baseParams,
             question: "Create a pie chart for module distribution",
         });
 
-        expect(result).toContain("```mermaid```");
-        expect(result).not.toContain("```mermaid-json```");
+        expect(result).toContain("Primary output format: **MERMAID-JSON**");
+        expect(result).toContain("Fallback output format: **SVG**");
     });
 
     it("keeps the static prompt template free of emoji characters", () => {
         const result = buildRepoMindPrompt(baseParams);
         expect(result).not.toMatch(/\p{Extended_Pictographic}/u);
+    });
+});
+
+describe("resolveVisualOutputDecision", () => {
+    it("honors explicit svg requests", () => {
+        const decision = resolveVisualOutputDecision("Generate an SVG architecture diagram");
+        expect(decision.primaryFormat).toBe("svg");
+        expect(decision.fallbackFormat).toBe("mermaid-json");
+    });
+
+    it("honors explicit mermaid requests", () => {
+        const decision = resolveVisualOutputDecision("Show this as mermaid flow");
+        expect(decision.primaryFormat).toBe("mermaid");
+    });
+
+    it("routes typed diagrams to mermaid-json", () => {
+        const decision = resolveVisualOutputDecision("Create a sequence diagram for API calls");
+        expect(decision.primaryFormat).toBe("mermaid-json");
+    });
+
+    it("routes visual polish prompts to svg", () => {
+        const decision = resolveVisualOutputDecision("Create a beautiful architecture diagram");
+        expect(decision.primaryFormat).toBe("svg");
+    });
+
+    it("routes complex requests to mermaid-json", () => {
+        const decision = resolveVisualOutputDecision("Create a complex distributed workflow diagram");
+        expect(decision.primaryFormat).toBe("mermaid-json");
+    });
+
+    it("routes simple requests to svg", () => {
+        const decision = resolveVisualOutputDecision("Create a simple process flow diagram");
+        expect(decision.primaryFormat).toBe("svg");
+    });
+
+    it("routes standard architecture requests to svg", () => {
+        const decision = resolveVisualOutputDecision("Create an architecture diagram for this repo");
+        expect(decision.primaryFormat).toBe("svg");
     });
 });
 

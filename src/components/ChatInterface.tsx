@@ -406,7 +406,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
 
     const getRepoQueryForServer = (trimmedInput: string, combinedInput: string) => {
         if (trimmedInput.toLowerCase() === ARCHITECTURE_PROMPT.toLowerCase()) {
-            return "Explain the architecture of this repository in detail. Provide a comprehensive overview of the core logic, framework setup, data flow, and key components based on the actual code, not just the README. Include a Mermaid diagram visualizing the architecture.";
+            return "Explain the architecture of this repository in detail. Provide a comprehensive overview of the core logic, framework setup, data flow, and key components based on the actual code, not just the README. Include a visual architecture diagram, preferring an SVG code block when possible (Mermaid is acceptable fallback).";
         }
         return combinedInput;
     };
