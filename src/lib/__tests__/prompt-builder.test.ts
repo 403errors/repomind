@@ -83,6 +83,8 @@ describe("buildRepoMindPrompt", () => {
         expect(result).toContain("Primary output format: **MERMAID-JSON**");
         expect(result).toContain("15-20");
         expect(result).toContain("50");
+        expect(result).toContain('"direction": "TD"');
+        expect(result).toContain("default to top-down (`TD`)");
         expect(result).toContain("markdown tables instead of diagrams");
         expect(result).not.toContain("SVG FEW-SHOT REFERENCE (ONLY FOR SVG PRIMARY FORMAT)");
         expect(result).not.toContain("SVG PRODUCTION RULES (MANDATORY WHEN SVG IS PRIMARY)");

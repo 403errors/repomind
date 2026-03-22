@@ -47,7 +47,7 @@ function prefersReducedMotion(): boolean {
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-async function requestFixedMermaidCode(code: string, timeoutMs = 8000): Promise<string | null> {
+async function requestFixedMermaidCode(code: string, timeoutMs = 30000): Promise<string | null> {
     if (typeof window === "undefined") {
         return null;
     }

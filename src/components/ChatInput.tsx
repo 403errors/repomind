@@ -110,7 +110,7 @@ export function ChatInput({
                     )}
                     style={{
                         scrollbarWidth: 'thin',
-                        scrollbarColor: '#52525b transparent',
+                        scrollbarColor: 'var(--scrollbar-thumb) var(--scrollbar-track)',
                         overflowY: 'hidden'
                     }}
                 />

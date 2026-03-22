@@ -2089,27 +2089,117 @@ async function resolveToolCall(
  * Fix Mermaid diagram syntax using AI.
  * Takes potentially invalid Mermaid code and returns a corrected version.
  */
-export async function fixMermaidSyntax(code: string): Promise<string | null> {
-  try {
-    const prompt = `You are a Mermaid diagram syntax expert. Fix the following Mermaid diagram code to make it valid.
+type MermaidFixDiagramType =
+  | "flowchart"
+  | "sequenceDiagram"
+  | "stateDiagram-v2"
+  | "classDiagram"
+  | "erDiagram"
+  | "mindmap"
+  | "gantt"
+  | "xychart"
+  | "unknown";
 
-CRITICAL RULES:
-1. **Node Labels**: MUST be in double quotes inside brackets: A["Label Text"]
-2. **No Special Characters**: Remove quotes, backticks, HTML tags, and special Unicode from inside node labels
-3. **Edge Labels**: Text on arrows should NOT be quoted: A -- label text --> B
-4. **Complete Nodes**: Every node after an arrow must have an ID and shape: A --> B["Label"]
-5. **Clean Text**: Only use alphanumeric characters, spaces, and basic punctuation (.,;:!?()-_) in labels
-6. **Valid Syntax**: Ensure proper Mermaid syntax for all elements
+function detectMermaidFixDiagramType(code: string): MermaidFixDiagramType {
+  const firstContentLine = (code || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && !line.startsWith("%%"));
+
+  if (!firstContentLine) return "unknown";
+
+  const token = firstContentLine.split(/\s+/)[0] ?? "";
+  const normalized = token.toLowerCase();
+
+  if (normalized === "graph" || normalized === "flowchart") return "flowchart";
+  if (normalized === "sequencediagram" || normalized === "sequence") return "sequenceDiagram";
+  if (normalized === "statediagram-v2" || normalized === "statediagram" || normalized === "state") return "stateDiagram-v2";
+  if (normalized === "classdiagram") return "classDiagram";
+  if (normalized === "erdiagram") return "erDiagram";
+  if (normalized === "mindmap") return "mindmap";
+  if (normalized === "gantt") return "gantt";
+  if (normalized === "xychart" || normalized === "xychart-beta") return "xychart";
+
+  return "unknown";
+}
+
+function buildMermaidFixPrompt(code: string, diagramType: MermaidFixDiagramType): string {
+  const commonRules = `GLOBAL RULES:
+1. Preserve the same Mermaid diagram type; do not convert to a different diagram family.
+2. Return only a valid Mermaid code block and no explanation text.
+3. Remove broken markdown/HTML artifacts and invalid characters that break parsing.
+4. Keep node/class/entity names concise and parse-safe.
+5. Do not add theme/color/style directives such as style, classDef, linkStyle, or %%{init...}%% unless they are strictly required for syntax correctness.`;
+
+  const typeRules = (() => {
+    switch (diagramType) {
+      case "classDiagram":
+        return `TYPE RULES (classDiagram):
+- First line must be exactly: classDiagram
+- Do NOT convert this into flowchart node syntax (no A["Label"] rewriting).
+- Class declarations must use Mermaid class-diagram syntax (e.g., "class Repository").
+- Class members must follow "ClassName : member" format.
+- Relationship connectors must be valid class-diagram connectors: <|--, *--, o--, ..>, --, ..|>.
+- Relationship labels (if present) must follow: "A <|-- B : label".`;
+      case "sequenceDiagram":
+        return `TYPE RULES (sequenceDiagram):
+- First line must be exactly: sequenceDiagram
+- Participants and messages must follow Mermaid sequence syntax.
+- Use valid arrows such as ->>, -->>, -x.`;
+      case "stateDiagram-v2":
+        return `TYPE RULES (stateDiagram-v2):
+- First line must be exactly: stateDiagram-v2
+- Use valid state transitions and [*] start/end markers only where appropriate.`;
+      case "erDiagram":
+        return `TYPE RULES (erDiagram):
+- First line must be exactly: erDiagram
+- Entities must use block syntax and relations must use valid ER cardinality connectors.`;
+      case "mindmap":
+        return `TYPE RULES (mindmap):
+- First line must be exactly: mindmap
+- Maintain valid indentation hierarchy.`;
+      case "gantt":
+        return `TYPE RULES (gantt):
+- First line must be exactly: gantt
+- Keep valid date/task syntax and section blocks.`;
+      case "xychart":
+        return `TYPE RULES (xychart):
+- First line must be exactly: xychart (or xychart with orientation suffix).
+- Keep valid x-axis/y-axis and series syntax.`;
+      case "flowchart":
+        return `TYPE RULES (flowchart):
+- First line must be flowchart <direction>.
+- Use valid edge connectors and ensure referenced nodes are declared or parse-safe.`;
+      default:
+        return `TYPE RULES (unknown):
+- Infer the intended Mermaid type from the code and keep that type consistent.
+- Fix only syntax; do not redesign the diagram.`;
+    }
+  })();
+
+  return `You are a Mermaid diagram syntax expert. Fix the following Mermaid code so it parses successfully.
+
+Target diagram type: ${diagramType}
+
+${commonRules}
+
+${typeRules}
 
 INVALID MERMAID CODE:
 \`\`\`mermaid
 ${code}
 \`\`\`
 
-Return ONLY the corrected Mermaid code in a markdown code block. Do NOT use HTML tags. Do NOT use special characters in labels. Just return:
+Return ONLY:
 \`\`\`mermaid
-[corrected code here]
+[corrected code]
 \`\`\``;
+}
+
+export async function fixMermaidSyntax(code: string): Promise<string | null> {
+  try {
+    const diagramType = detectMermaidFixDiagramType(code);
+    const prompt = buildMermaidFixPrompt(code, diagramType);
 
     const result = await getGenAI()
       .getGenerativeModel({ model: DEFAULT_MODEL })

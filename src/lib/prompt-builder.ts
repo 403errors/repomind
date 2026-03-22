@@ -148,7 +148,7 @@ function getMermaidJsonSchema(diagramType: MermaidDiagramType): string {
   "diagramType": "flowchart",
   "title": "Short title",
   "payload": {
-    "direction": "LR",
+    "direction": "TD",
     "nodes": [
       { "id": "start", "label": "Start", "shape": "rounded" },
       { "id": "end", "label": "End" }
@@ -326,12 +326,16 @@ ${diagramSchema}
               - Keep labels concise and relationships explicit.
               - Layout quality rules:
                 - Avoid long single-lane chains like \`A -> B -> C -> D -> ...\` when node count is high; prefer branched or lane-based layouts.
-                - For flowcharts, default to left-to-right (\`LR\`) unless the user explicitly asks for top-down.
+                - For flowcharts, default to top-down (\`TD\`) unless the user explicitly asks for another direction.
                 - Use subgraphs/branching to create compact readable structure instead of very tall diagrams.
               - Edge readability rules:
                 - Keep edge labels short (ideally <= 4 words) and do not label every edge.
                 - Avoid placing labels on two adjacent edges when that causes overlap.
                 - Do not draw direct self-loop edges (\`A -> A\`); use an intermediate node (\`A -> loop node -> A\`).
+                - Every node must be connected to at least one edge; do not leave isolated nodes.
+              - Theme safety rules:
+                - Do not emit \`style\`, \`classDef\`, \`class\`, \`linkStyle\`, or \`%%{init...}%%\` directives for flowcharts.
+                - Do not hardcode node fill/stroke/text colors; rely on app theme defaults.
               - Output hygiene:
                 - Never include meta text like "Fixing diagram", "Generating diagram", or status narration inside the answer body.
               - Use markdown tables instead of diagrams when a table communicates the answer more clearly.

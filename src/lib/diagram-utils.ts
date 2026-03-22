@@ -220,6 +220,81 @@ function getFirstMermaidNodeId(code: string): string | null {
     return null;
 }
 
+function ensureFlowchartNodeConnectivity(lines: string[]): string[] {
+    if (lines.length === 0) {
+        return lines;
+    }
+
+    const firstContent = lines.find((line) => line.trim().length > 0)?.trim();
+    if (!firstContent || !isFlowchartDeclarationLine(firstContent)) {
+        return lines;
+    }
+
+    const explicitNodePattern = /\b([A-Za-z0-9_-]+)\s*(?:\[\s*"(?:[^"\\]|\\.)*"\s*\]|\(\s*"(?:[^"\\]|\\.)*"\s*\)|\(\(\s*"(?:[^"\\]|\\.)*"\s*\)\)|\{\s*"(?:[^"\\]|\\.)*"\s*\}|\[\(\s*"(?:[^"\\]|\\.)*"\s*\)\]|\{\{\s*"(?:[^"\\]|\\.)*"\s*\}\})/g;
+    const edgePattern = /\b([A-Za-z0-9_-]+)\b\s*(?:-->|-.->|==>|---)\s*(?:\|[^|]*\|\s*)?\b([A-Za-z0-9_-]+)\b/g;
+
+    const nodeOrder: string[] = [];
+    const nodeSet = new Set<string>();
+    const edges: Array<{ from: string; to: string }> = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || isFlowchartDeclarationLine(line) || line.startsWith("subgraph ") || line === "end") {
+            continue;
+        }
+
+        for (const match of line.matchAll(explicitNodePattern)) {
+            const nodeId = match[1];
+            if (!nodeSet.has(nodeId)) {
+                nodeSet.add(nodeId);
+                nodeOrder.push(nodeId);
+            }
+        }
+
+        for (const match of line.matchAll(edgePattern)) {
+            edges.push({ from: match[1], to: match[2] });
+        }
+    }
+
+    if (nodeOrder.length <= 1) {
+        return lines;
+    }
+
+    const connected = new Set<string>();
+    for (const edge of edges) {
+        if (nodeSet.has(edge.from) && nodeSet.has(edge.to)) {
+            connected.add(edge.from);
+            connected.add(edge.to);
+        }
+    }
+
+    const appendedEdges: string[] = [];
+    if (connected.size === 0) {
+        for (let index = 0; index < nodeOrder.length - 1; index += 1) {
+            appendedEdges.push(`  ${nodeOrder[index]} --> ${nodeOrder[index + 1]}`);
+        }
+        return [...lines, ...appendedEdges];
+    }
+
+    let anchor = nodeOrder.find((id) => connected.has(id)) ?? nodeOrder[0];
+    for (const nodeId of nodeOrder) {
+        if (connected.has(nodeId)) {
+            anchor = nodeId;
+            continue;
+        }
+        if (nodeId === anchor) {
+            continue;
+        }
+
+        appendedEdges.push(`  ${anchor} --> ${nodeId}`);
+        connected.add(anchor);
+        connected.add(nodeId);
+        anchor = nodeId;
+    }
+
+    return appendedEdges.length > 0 ? [...lines, ...appendedEdges] : lines;
+}
+
 function getMermaidExpansionLabels(context?: string): string[] {
     const normalized = (context ?? "").toLowerCase();
 
@@ -390,7 +465,7 @@ export function sanitizeMermaidCode(code: string): string {
         }
 
         if (isFlowchartDeclaration(firstLine)) {
-            const direction = firstLine.split(/\s+/)[1] ?? "LR";
+            const direction = firstLine.split(/\s+/)[1] ?? "TD";
             return normalized.replace(firstLine, `flowchart ${direction}`);
         }
 
@@ -409,9 +484,9 @@ export function sanitizeMermaidCode(code: string): string {
         const trimmed = line.trim();
         if (!trimmed) return '';
 
-        // Skip directives and class definitions
+        // Drop model-injected style directives to preserve app theme consistency.
         if (trimmed.match(/^(classDef|class|click|style|linkStyle)\s/)) {
-            return trimmed;
+            return "";
         }
 
         // Handle subgraph
@@ -451,7 +526,7 @@ export function sanitizeMermaidCode(code: string): string {
 
         // Normalize legacy "graph" declaration to canonical "flowchart".
         if (isFlowchartDeclaration(trimmed)) {
-            const direction = trimmed.split(/\s+/)[1] ?? "LR";
+            const direction = trimmed.split(/\s+/)[1] ?? "TD";
             return `flowchart ${direction}`;
         }
 
@@ -477,7 +552,8 @@ export function sanitizeMermaidCode(code: string): string {
         subgraphCount--;
     }
 
-    return finalLines.join('\n');
+    const connectedLines = ensureFlowchartNodeConnectivity(finalLines);
+    return connectedLines.join('\n');
 }
 
 /**
@@ -969,10 +1045,63 @@ function compactDiagramText(value: string, maxLength: number): string {
     return `${compact.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
+function ensureConnectedFlowchartEdges(
+    nodeOrder: string[],
+    edges: Array<{ from: string; to: string; label?: string; type?: string }>
+): Array<{ from: string; to: string; label?: string; type?: string }> {
+    if (nodeOrder.length <= 1) {
+        return edges;
+    }
+
+    const nodeSet = new Set(nodeOrder);
+    const connected = new Set<string>();
+    for (const edge of edges) {
+        if (nodeSet.has(edge.from) && nodeSet.has(edge.to)) {
+            connected.add(edge.from);
+            connected.add(edge.to);
+        }
+    }
+
+    const result = [...edges];
+
+    if (connected.size === 0) {
+        for (let index = 0; index < nodeOrder.length - 1; index += 1) {
+            result.push({
+                from: nodeOrder[index],
+                to: nodeOrder[index + 1],
+                type: "arrow",
+            });
+        }
+        return result;
+    }
+
+    let anchor = nodeOrder.find((id) => connected.has(id)) ?? nodeOrder[0];
+    for (const nodeId of nodeOrder) {
+        if (connected.has(nodeId)) {
+            anchor = nodeId;
+            continue;
+        }
+        if (nodeId === anchor) {
+            continue;
+        }
+
+        result.push({
+            from: anchor,
+            to: nodeId,
+            type: "arrow",
+        });
+        connected.add(anchor);
+        connected.add(nodeId);
+        anchor = nodeId;
+    }
+
+    return result;
+}
+
 function compileFlowchartDiagram(data: MermaidFlowchartDiagramData | Record<string, unknown>): MermaidJsonCompileResult {
     const source = data as MermaidFlowchartDiagramData | Record<string, unknown>;
-    const directionCandidate = typeof source.direction === "string" ? source.direction.toUpperCase() : "LR";
-    const direction = ["TB", "TD", "BT", "RL", "LR"].includes(directionCandidate) ? directionCandidate : "LR";
+    const directionCandidate = typeof source.direction === "string" ? source.direction.toUpperCase() : "TD";
+    const direction = ["TB", "TD", "BT", "RL", "LR"].includes(directionCandidate) ? directionCandidate : "TD";
     const nodes = Array.isArray(source.nodes) ? source.nodes : [];
     const edges = Array.isArray(source.edges) ? source.edges : [];
 
@@ -996,6 +1125,10 @@ function compileFlowchartDiagram(data: MermaidFlowchartDiagramData | Record<stri
             .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
             .map(cleanId)
     );
+    const nodeOrder = nodes
+        .map((node) => (node as MermaidNode).id)
+        .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        .map(cleanId);
 
     const normalizedEdges = edges
         .map((edge) => {
@@ -1011,16 +1144,18 @@ function compileFlowchartDiagram(data: MermaidFlowchartDiagramData | Record<stri
                 type: entry.type,
             };
         })
-        .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        .filter((entry) => existingIds.has(entry.from) && existingIds.has(entry.to));
+    const connectedEdges = ensureConnectedFlowchartEdges(nodeOrder, normalizedEdges);
 
-    const labeledEdgeCount = normalizedEdges.filter((edge) => Boolean(edge.label)).length;
-    const denseEdgeLabels = labeledEdgeCount > Math.max(3, Math.ceil(normalizedEdges.length * 0.55));
+    const labeledEdgeCount = connectedEdges.filter((edge) => Boolean(edge.label)).length;
+    const denseEdgeLabels = labeledEdgeCount > Math.max(3, Math.ceil(connectedEdges.length * 0.55));
     let helperIndex = 1;
     const helperNodeLines: string[] = [];
     const edgeLines: string[] = [];
 
-    for (let index = 0; index < normalizedEdges.length; index += 1) {
-        const edge = normalizedEdges[index];
+    for (let index = 0; index < connectedEdges.length; index += 1) {
+        const edge = connectedEdges[index];
         const normalizedLabel = edge.label && denseEdgeLabels && index % 2 === 1 ? undefined : edge.label;
 
         if (edge.from === edge.to) {

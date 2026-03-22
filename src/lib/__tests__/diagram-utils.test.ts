@@ -104,6 +104,20 @@ describe("sanitizeMermaidCode", () => {
         expect(result).toContain("flowchart");
     });
 
+    it("removes flowchart style directives to preserve app theme", () => {
+        const result = sanitizeMermaidCode(`flowchart TD
+  A["Start"]
+  B["End"]
+  style A fill:#fff,stroke:#111
+  classDef hot fill:#f00
+  class B hot
+  A --> B`);
+
+        expect(result).not.toContain("style A");
+        expect(result).not.toContain("classDef");
+        expect(result).not.toContain("class B");
+    });
+
     it("normalizes xychart-beta declarations to xychart", () => {
         const result = sanitizeMermaidCode("xychart-beta\n  line [1, 2, 3]");
         expect(result).toContain("xychart");
@@ -172,7 +186,7 @@ describe("generateMermaidFromJSON", () => {
                 edges: [{ from: "A", to: "B" }],
             },
         });
-        expect(result).toContain("flowchart LR");
+        expect(result).toContain("flowchart TD");
         expect(result).toContain("Start");
         expect(result).toContain("End");
     });
@@ -186,9 +200,26 @@ describe("generateMermaidFromJSON", () => {
             edges: [{ from: "A", to: "B" }],
         });
 
-        expect(result).toContain("flowchart LR");
+        expect(result).toContain("flowchart TD");
         expect(result).toContain("Start");
         expect(result).toContain("End");
+    });
+
+    it("auto-connects orphan flowchart nodes", () => {
+        const result = generateMermaidFromJSON({
+            diagramType: "flowchart",
+            payload: {
+                nodes: [
+                    { id: "A", label: "Start" },
+                    { id: "B", label: "Process" },
+                    { id: "C", label: "User Interaction" },
+                ],
+                edges: [{ from: "A", to: "B" }],
+            },
+        });
+
+        expect(result).toContain("A --> B");
+        expect(result).toContain("B --> C");
     });
 
     it("respects direction setting", () => {

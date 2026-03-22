@@ -43,7 +43,7 @@ describe("MessageContent", () => {
         );
 
         expect(html).toContain('data-testid="mermaid"');
-        expect(html).toContain("flowchart LR");
+        expect(html).toContain("flowchart TD");
         expect(html).toContain("Start");
     });
 

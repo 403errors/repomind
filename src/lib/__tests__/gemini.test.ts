@@ -93,7 +93,7 @@ vi.mock("@/lib/github", () => ({
     getRepoDependencyAlertsSnapshot: getRepoDependencyAlertsSnapshotMock,
 }));
 
-import { analyzeFileSelection, answerWithContextStream } from "@/lib/gemini";
+import { analyzeFileSelection, answerWithContextStream, fixMermaidSyntax } from "@/lib/gemini";
 
 function toAsyncStream<T>(items: T[]): AsyncIterable<T> {
     return {
@@ -390,5 +390,41 @@ describe("analyzeFileSelection", () => {
         );
 
         expect(selected).toEqual(["src/core.ts", "README.md"]);
+    });
+});
+
+describe("fixMermaidSyntax", () => {
+    beforeEach(() => {
+        getGenAIMock.mockReset();
+        getGenerativeModelMock.mockReset();
+
+        getGenAIMock.mockReturnValue({
+            getGenerativeModel: getGenerativeModelMock,
+        });
+    });
+
+    it("uses classDiagram-specific instructions when fixing class diagrams", async () => {
+        const generateContentMock = vi.fn().mockResolvedValue({
+            response: {
+                text: () => "```mermaid\nclassDiagram\n  class Repository\n```",
+            },
+        });
+
+        getGenerativeModelMock.mockReturnValue({
+            generateContent: generateContentMock,
+        });
+
+        const fixed = await fixMermaidSyntax(`classDiagram
+  class Repository
+  class FileSelector
+  class ChatService
+  Repository --> FileSelector`);
+
+        expect(fixed).toContain("classDiagram");
+        expect(generateContentMock).toHaveBeenCalledTimes(1);
+
+        const prompt = String(generateContentMock.mock.calls[0]?.[0] ?? "");
+        expect(prompt).toContain("Target diagram type: classDiagram");
+        expect(prompt).toContain("Do NOT convert this into flowchart node syntax");
     });
 });
