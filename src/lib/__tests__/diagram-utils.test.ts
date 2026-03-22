@@ -8,6 +8,7 @@ import {
     templates,
     countMermaidFlowchartNodes,
     ensureMermaidMinimumDetail,
+    isSupportedMermaidVisualCode,
 } from "@/lib/diagram-utils";
 
 describe("validateMermaidSyntax", () => {
@@ -102,6 +103,12 @@ describe("sanitizeMermaidCode", () => {
         const result = sanitizeMermaidCode(clean);
         expect(result).toContain("flowchart");
     });
+
+    it("normalizes xychart-beta declarations to xychart", () => {
+        const result = sanitizeMermaidCode("xychart-beta\n  line [1, 2, 3]");
+        expect(result).toContain("xychart");
+        expect(result).not.toContain("xychart-beta");
+    });
 });
 
 describe("extractDiagramType", () => {
@@ -119,6 +126,20 @@ describe("extractDiagramType", () => {
 
     it("extracts 'mindmap'", () => {
         expect(extractDiagramType("mindmap\n  root((RepoMind))")).toBe("mindmap");
+    });
+
+    it("extracts 'xychart' from xychart-beta alias", () => {
+        expect(extractDiagramType("xychart-beta\n  line [1,2,3]")).toBe("xychart");
+    });
+
+    it("returns unknown for removed diagram declarations", () => {
+        expect(extractDiagramType("pie\n  title X")).toBe("unknown");
+    });
+
+    it("enforces supported visual declaration whitelist", () => {
+        expect(isSupportedMermaidVisualCode("xychart\n  line [1,2,3]")).toBe(true);
+        expect(isSupportedMermaidVisualCode("xychart-beta\n  line [1,2,3]")).toBe(true);
+        expect(isSupportedMermaidVisualCode("pie\n  \"A\": 10")).toBe(false);
     });
 
     it("returns 'unknown' for unrecognized input", () => {
@@ -329,6 +350,51 @@ describe("generateMermaidFromJSON", () => {
 
     it("returns null for invalid payloads", () => {
         const result = generateMermaidFromJSON({ diagramType: "gantt", payload: {} });
+        expect(result).toBeNull();
+    });
+
+    it("generates a typed xychart with mixed series", () => {
+        const result = generateMermaidFromJSON({
+            diagramType: "xychart",
+            payload: {
+                orientation: "horizontal",
+                xAxis: { title: "Month", categories: ["Jan", "Feb", "Mar"] },
+                yAxis: { title: "Commits", min: 0, max: 20 },
+                series: [
+                    { type: "bar", values: [6, 11, 9] },
+                    { type: "line", values: [5, 9, 12] },
+                ],
+            },
+        });
+
+        expect(result).toContain("xychart horizontal");
+        expect(result).toContain('x-axis "Month" [Jan, Feb, Mar]');
+        expect(result).toContain('y-axis "Commits" 0 --> 20');
+        expect(result).toContain("bar [6, 11, 9]");
+        expect(result).toContain("line [5, 9, 12]");
+    });
+
+    it("accepts xychart-beta as a legacy diagramType alias in mermaid-json", () => {
+        const result = generateMermaidFromJSON({
+            diagramType: "xychart-beta",
+            payload: {
+                series: [{ type: "line", values: [1, 2, 3] }],
+            },
+        });
+
+        expect(result).toContain("xychart");
+        expect(result).not.toContain("xychart-beta");
+    });
+
+    it("rejects xychart series when category length does not match values", () => {
+        const result = generateMermaidFromJSON({
+            diagramType: "xychart",
+            payload: {
+                xAxis: { categories: ["Jan", "Feb"] },
+                series: [{ type: "line", values: [1, 2, 3] }],
+            },
+        });
+
         expect(result).toBeNull();
     });
 });

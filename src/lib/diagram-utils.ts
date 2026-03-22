@@ -109,6 +109,16 @@ flowchart TB
 
 const MIN_FLOWCHART_NODE_COUNT = 6;
 const VALID_MERMAID_DIAGRAM_TYPES = [...MERMAID_DIAGRAM_DECLARATIONS];
+const SUPPORTED_MERMAID_VISUAL_DIAGRAMS = new Set([
+    "flowchart",
+    "sequenceDiagram",
+    "stateDiagram-v2",
+    "classDiagram",
+    "erDiagram",
+    "mindmap",
+    "gantt",
+    "xychart",
+]);
 
 function isFlowchartDeclarationLine(line: string): boolean {
     return line.startsWith("flowchart ") || line.startsWith("graph ");
@@ -117,6 +127,47 @@ function isFlowchartDeclarationLine(line: string): boolean {
 function isFlowchartDeclaration(code: string): boolean {
     const trimmed = code.trim();
     return trimmed === "flowchart" || trimmed === "graph" || isFlowchartDeclarationLine(trimmed);
+}
+
+function isXychartDeclarationLine(line: string): boolean {
+    return line.startsWith("xychart ") || line.startsWith("xychart-beta ");
+}
+
+function isXychartDeclaration(code: string): boolean {
+    const trimmed = code.trim();
+    return trimmed === "xychart" || trimmed === "xychart-beta" || isXychartDeclarationLine(trimmed);
+}
+
+function getFirstMermaidContentLine(source: string): string | null {
+    const lines = (source || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith("%%"));
+    return lines[0] ?? null;
+}
+
+export function getMermaidDeclarationToken(source: string): string | null {
+    const firstLine = getFirstMermaidContentLine(source);
+    if (!firstLine) return null;
+    const token = firstLine.split(/\s+/)[0];
+    return token || null;
+}
+
+function normalizeMermaidDeclarationToken(token: string): string {
+    if (token === "graph") return "flowchart";
+    if (token === "xychart-beta") return "xychart";
+    return token;
+}
+
+export function getCanonicalMermaidDeclaration(source: string): string | null {
+    const token = getMermaidDeclarationToken(source);
+    if (!token) return null;
+    return normalizeMermaidDeclarationToken(token);
+}
+
+export function isSupportedMermaidVisualCode(source: string): boolean {
+    const declaration = getCanonicalMermaidDeclaration(source);
+    return declaration ? SUPPORTED_MERMAID_VISUAL_DIAGRAMS.has(declaration) : false;
 }
 
 export function countMermaidFlowchartNodes(code: string): number {
@@ -254,7 +305,8 @@ export function validateMermaidSyntax(code: string): { valid: boolean; error?: s
         }
 
         // 1. Check for valid diagram type
-        const hasValidType = VALID_MERMAID_DIAGRAM_TYPES.some((type) => trimmed.startsWith(type));
+        const declaration = getCanonicalMermaidDeclaration(trimmed);
+        const hasValidType = declaration !== null && VALID_MERMAID_DIAGRAM_TYPES.includes(declaration as typeof VALID_MERMAID_DIAGRAM_TYPES[number]);
 
         if (!hasValidType) {
             return { valid: false, error: 'Missing or invalid diagram type declaration' };
@@ -318,17 +370,36 @@ export function sanitizeMermaidCode(code: string): string {
     if (
         diagramType === "mindmap" ||
         diagramType === "gantt" ||
+        diagramType === "xychart" ||
         diagramType === "sequenceDiagram" ||
         diagramType === "classDiagram" ||
         diagramType === "erDiagram" ||
         diagramType === "stateDiagram-v2"
     ) {
-        return sanitized
+        const normalized = sanitized
             .split('\n')
             .map((line) => line.replace(/[ \t]+$/g, ""))
             .filter((line) => line.trim().length > 0)
             .join('\n')
             .trim();
+
+        const firstLine = getFirstMermaidContentLine(normalized);
+        if (!firstLine) {
+            return normalized;
+        }
+
+        if (isFlowchartDeclaration(firstLine)) {
+            const direction = firstLine.split(/\s+/)[1] ?? "TD";
+            return normalized.replace(firstLine, `flowchart ${direction}`);
+        }
+
+        if (isXychartDeclaration(firstLine)) {
+            const suffix = firstLine.split(/\s+/).slice(1).join(" ");
+            const header = suffix ? `xychart ${suffix}` : "xychart";
+            return normalized.replace(firstLine, header);
+        }
+
+        return normalized;
     }
 
     // 3. Process line by line
@@ -383,6 +454,12 @@ export function sanitizeMermaidCode(code: string): string {
             return `flowchart ${direction}`;
         }
 
+        // Normalize legacy "xychart-beta" declaration to canonical "xychart".
+        if (isXychartDeclaration(trimmed)) {
+            const suffix = trimmed.split(/\s+/).slice(1).join(" ");
+            return suffix ? `xychart ${suffix}` : "xychart";
+        }
+
         return trimmed;
     });
 
@@ -412,14 +489,9 @@ export function extractDiagramType(code: string): string {
         return "unknown";
     }
 
-    if (isFlowchartDeclaration(trimmed)) {
-        return "flowchart";
-    }
-
-    for (const diagramType of MERMAID_DIAGRAM_DECLARATIONS) {
-        if (trimmed.startsWith(diagramType)) {
-            return diagramType;
-        }
+    const declaration = getCanonicalMermaidDeclaration(trimmed);
+    if (declaration && SUPPORTED_MERMAID_VISUAL_DIAGRAMS.has(declaration)) {
+        return declaration;
     }
 
     return "unknown";
@@ -469,7 +541,8 @@ export type MermaidJsonDiagramType =
     | "mindmap"
     | "gantt"
     | "classDiagram"
-    | "erDiagram";
+    | "erDiagram"
+    | "xychart";
 
 export interface MermaidNode {
     id: string;
@@ -566,6 +639,27 @@ export interface MermaidGanttDiagramData {
     sections: MermaidGanttSection[];
 }
 
+export interface MermaidXyAxisData {
+    title?: string;
+    categories?: string[];
+    min?: number;
+    max?: number;
+}
+
+export interface MermaidXySeriesData {
+    type: "line" | "bar";
+    values: number[];
+}
+
+export interface MermaidXyChartDiagramData {
+    diagramType: "xychart";
+    title?: string;
+    orientation?: "vertical" | "horizontal";
+    xAxis?: MermaidXyAxisData;
+    yAxis?: MermaidXyAxisData;
+    series: MermaidXySeriesData[];
+}
+
 export interface MermaidClassAttribute {
     name: string;
     type?: string;
@@ -626,6 +720,7 @@ export type MermaidTypedDiagramData =
     | MermaidStateDiagramData
     | MermaidMindmapDiagramData
     | MermaidGanttDiagramData
+    | MermaidXyChartDiagramData
     | MermaidClassDiagramData
     | MermaidErDiagramData;
 
@@ -791,13 +886,18 @@ function normalizeDiagramType(value: unknown): MermaidJsonDiagramType | "flowcha
         return "flowchart";
     }
 
+    if (value === "xychart" || value === "xychart-beta") {
+        return "xychart";
+    }
+
     if (
         value === "sequenceDiagram" ||
         value === "stateDiagram-v2" ||
         value === "mindmap" ||
         value === "gantt" ||
         value === "classDiagram" ||
-        value === "erDiagram"
+        value === "erDiagram" ||
+        value === "xychart"
     ) {
         return value;
     }
@@ -1089,6 +1189,78 @@ function compileGanttDiagram(data: MermaidGanttDiagramData): MermaidJsonCompileR
     return { valid: true, diagramType: "gantt", mermaid: lines.join("\n") };
 }
 
+function formatXyAxisTitle(title?: string): string {
+    const clean = cleanLabel(title ?? "");
+    return clean ? ` "${clean}"` : "";
+}
+
+function formatXyCategory(category: string): string {
+    const clean = cleanLabel(category);
+    if (/^[A-Za-z0-9_.-]+$/.test(clean)) {
+        return clean;
+    }
+    return `"${clean}"`;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+    return typeof value === "number" && Number.isFinite(value);
+}
+
+function compileXychartDiagram(data: MermaidXyChartDiagramData): MermaidJsonCompileResult {
+    if (!Array.isArray(data.series) || data.series.length === 0) {
+        return { valid: false, diagramType: "xychart", error: "XY chart JSON must include at least one series." };
+    }
+
+    const orientation = data.orientation === "horizontal" ? "horizontal" : "vertical";
+    const header = orientation === "horizontal" ? "xychart horizontal" : "xychart";
+    const lines: string[] = [header];
+
+    if (data.title) {
+        lines.push(`  title "${cleanLabel(data.title)}"`);
+    }
+
+    const xAxis = data.xAxis;
+    if (xAxis && Array.isArray(xAxis.categories) && xAxis.categories.length > 0) {
+        const categories = xAxis.categories.map((category) => formatXyCategory(String(category)));
+        lines.push(`  x-axis${formatXyAxisTitle(xAxis.title)} [${categories.join(", ")}]`);
+    } else if (xAxis && isFiniteNumber(xAxis.min) && isFiniteNumber(xAxis.max)) {
+        lines.push(`  x-axis${formatXyAxisTitle(xAxis.title)} ${xAxis.min} --> ${xAxis.max}`);
+    }
+
+    const yAxis = data.yAxis;
+    if (yAxis && isFiniteNumber(yAxis.min) && isFiniteNumber(yAxis.max)) {
+        lines.push(`  y-axis${formatXyAxisTitle(yAxis.title)} ${yAxis.min} --> ${yAxis.max}`);
+    } else if (yAxis?.title) {
+        lines.push(`  y-axis "${cleanLabel(yAxis.title)}"`);
+    }
+
+    const categoryCount = Array.isArray(xAxis?.categories) ? xAxis.categories.length : null;
+    for (const series of data.series) {
+        if (!series || (series.type !== "line" && series.type !== "bar")) {
+            return { valid: false, diagramType: "xychart", error: "Each XY chart series must use type 'line' or 'bar'." };
+        }
+        if (!Array.isArray(series.values) || series.values.length === 0) {
+            return { valid: false, diagramType: "xychart", error: "Each XY chart series must include at least one numeric value." };
+        }
+
+        if (series.values.some((value) => !isFiniteNumber(value))) {
+            return { valid: false, diagramType: "xychart", error: "XY chart series values must be finite numbers." };
+        }
+
+        if (categoryCount !== null && series.values.length !== categoryCount) {
+            return {
+                valid: false,
+                diagramType: "xychart",
+                error: `XY chart series length (${series.values.length}) must match x-axis categories (${categoryCount}).`
+            };
+        }
+
+        lines.push(`  ${series.type} [${series.values.join(", ")}]`);
+    }
+
+    return { valid: true, diagramType: "xychart", mermaid: lines.join("\n") };
+}
+
 function compileClassDiagram(data: MermaidClassDiagramData): MermaidJsonCompileResult {
     if (!Array.isArray(data.classes) || data.classes.length === 0) {
         return { valid: false, diagramType: "classDiagram", error: "Class JSON must include at least one class." };
@@ -1257,6 +1429,15 @@ function compileTypedMermaidJson(data: unknown): MermaidJsonCompileResult {
                 dateFormat: typeof payload.dateFormat === "string" ? payload.dateFormat : "",
                 axisFormat: typeof payload.axisFormat === "string" ? payload.axisFormat : undefined,
                 sections: Array.isArray(payload.sections) ? payload.sections as MermaidGanttSection[] : [],
+            });
+        case "xychart":
+            return compileXychartDiagram({
+                diagramType: "xychart",
+                title: typeof data.title === "string" ? data.title : undefined,
+                orientation: payload.orientation === "horizontal" ? "horizontal" : "vertical",
+                xAxis: isRecord(payload.xAxis) ? payload.xAxis as MermaidXyAxisData : undefined,
+                yAxis: isRecord(payload.yAxis) ? payload.yAxis as MermaidXyAxisData : undefined,
+                series: Array.isArray(payload.series) ? payload.series as MermaidXySeriesData[] : [],
             });
         case "classDiagram":
             return compileClassDiagram({

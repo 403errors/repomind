@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import mermaid from "mermaid";
-import { validateMermaidSyntax, sanitizeMermaidCode, compileMermaidFromJSON } from "@/lib/diagram-utils";
+import {
+    validateMermaidSyntax,
+    sanitizeMermaidCode,
+    compileMermaidFromJSON,
+    getCanonicalMermaidDeclaration,
+    isSupportedMermaidVisualCode,
+} from "@/lib/diagram-utils";
 import { Download, X, Maximize2, ZoomIn, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import html2canvas from "html2canvas-pro";
@@ -26,6 +32,7 @@ const MAX_ANIMATED_PATHS = 24;
 const MAX_ANIMATED_NODES = 24;
 const SVG_NS = "http://www.w3.org/2000/svg";
 const XLINK_NS = "http://www.w3.org/1999/xlink";
+const SUPPORTED_MERMAID_TYPES_LABEL = "flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, mindmap, gantt, xychart";
 
 function extractErrorMessage(error: unknown): string {
     if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
@@ -316,6 +323,18 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                 const detailed = ensureMermaidMinimumDetail(codeToRender, chart);
                 const sanitized = sanitizeMermaidCode(detailed);
                 const validation = validateMermaidSyntax(sanitized);
+                const declaration = getCanonicalMermaidDeclaration(sanitized);
+
+                if (declaration && !isSupportedMermaidVisualCode(sanitized)) {
+                    if (isStreaming) {
+                        return;
+                    }
+                    if (mounted) {
+                        setIsFixing(false);
+                        setError(`Unsupported Mermaid diagram type "${declaration}". Supported types: ${SUPPORTED_MERMAID_TYPES_LABEL}.`);
+                    }
+                    return;
+                }
 
                 if (!validation.valid) {
                     console.warn('⚠️ Validation warning:', validation.error);
@@ -453,6 +472,12 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
             // Layer 3: Manual AI-powered syntax fix (if auto-fix failed or user wants to try again)
             console.log('🔄 Attempting Layer 3: Manual AI-powered fix...');
             const sanitized = sanitizeMermaidCode(codeToRender);
+            const declaration = getCanonicalMermaidDeclaration(sanitized);
+
+            if (declaration && !isSupportedMermaidVisualCode(sanitized)) {
+                setError(`Unsupported Mermaid diagram type "${declaration}". Supported types: ${SUPPORTED_MERMAID_TYPES_LABEL}.`);
+                return;
+            }
 
             const response = await fetch('/api/fix-mermaid', {
                 method: 'POST',

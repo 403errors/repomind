@@ -112,14 +112,50 @@ describe("buildRepoMindPrompt", () => {
         expect(result).toContain('"diagramType": "mindmap"');
     });
 
-    it("defaults pie-chart style prompts to mermaid-json under standard complexity", () => {
+    it("routes chart style prompts to typed xychart mermaid-json", () => {
         const result = buildRepoMindPrompt({
             ...baseParams,
-            question: "Create a pie chart for module distribution",
+            question: "Create a line chart for module activity",
         });
 
         expect(result).toContain("Primary output format: **MERMAID-JSON**");
         expect(result).toContain("Fallback output format: **MERMAID**");
+        expect(result).toContain('"diagramType": "xychart"');
+    });
+
+    it("lists only the unified supported mermaid-json diagram types", () => {
+        const result = buildRepoMindPrompt({
+            ...baseParams,
+            question: "Create an architecture flowchart",
+        });
+
+        expect(result).toContain("`flowchart`, `sequenceDiagram`, `stateDiagram-v2`, `mindmap`, `gantt`, `classDiagram`, `erDiagram`, or `xychart`");
+        expect(result).not.toContain("quadrantChart");
+        expect(result).not.toContain("requirementDiagram");
+        expect(result).not.toContain("timeline");
+        expect(result).not.toContain("C4Context");
+    });
+
+    it("defaults to single visual and prefers one visual plus table", () => {
+        const result = buildRepoMindPrompt({
+            ...baseParams,
+            question: "show architecture and api sequence",
+        });
+
+        expect(result).toContain("use exactly one visual block in the primary output format");
+        expect(result).toContain("Prefer one visual + table over two visuals");
+        expect(result).toContain("a single visual code block");
+    });
+
+    it("allows up to two visuals only on explicit request", () => {
+        const result = buildRepoMindPrompt({
+            ...baseParams,
+            question: "Create two diagrams: one architecture flowchart and one API sequence diagram",
+        });
+
+        expect(result).toContain("Explicit multiple-visual request: yes");
+        expect(result).toContain("Output up to two visual blocks only because the query explicitly requests multiple visuals");
+        expect(result).toContain("up to two visual code blocks");
     });
 
     it("keeps the static prompt template free of emoji characters", () => {

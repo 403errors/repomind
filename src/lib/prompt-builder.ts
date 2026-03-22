@@ -49,12 +49,14 @@ interface VisualOutputDecision {
 }
 
 const TYPED_MERMAID_JSON_DIAGRAMS = new Set<MermaidDiagramType>([
+  "flowchart",
   "sequenceDiagram",
   "classDiagram",
   "erDiagram",
   "stateDiagram-v2",
   "gantt",
   "mindmap",
+  "xychart",
 ]);
 
 const SVG_EXPLICIT_PATTERN = /\b(svg|scalable vector graphic|scalable vector graphics)\b/i;
@@ -254,6 +256,20 @@ function getMermaidJsonSchema(diagramType: MermaidDiagramType): string {
     }
   }
 }`;
+    case "xychart":
+      return `{
+  "diagramType": "xychart",
+  "title": "Short title",
+  "payload": {
+    "orientation": "vertical",
+    "xAxis": { "title": "Month", "categories": ["Jan", "Feb", "Mar"] },
+    "yAxis": { "title": "Commits", "min": 0, "max": 20 },
+    "series": [
+      { "type": "bar", "values": [6, 11, 9] },
+      { "type": "line", "values": [5, 9, 12] }
+    ]
+  }
+}`;
     default:
       return "Use valid Mermaid syntax and keep the structure concise.";
   }
@@ -264,6 +280,7 @@ function buildVisualContract(question: string): string {
   const target = getSvgComplexityTarget(question);
   const profile = getVisualDiagramProfile(question);
   const output = resolveVisualOutputDecision(question);
+  const allowTwoVisuals = route.multipleVisualsRequested && Boolean(route.secondaryDiagramType);
   const minimumNodeCount = Math.max(6, target.minNodes);
   const preferredMinNodes = Math.max(profile.preferredNodeRange[0], minimumNodeCount);
   const preferredMaxNodes = profile.preferredNodeRange[1];
@@ -282,6 +299,8 @@ function buildVisualContract(question: string): string {
               - Routing reason: ${output.reason}
               - Layout style: ${profile.layoutFocus}
               - Emphasis: ${profile.animationFocus}
+              - Explicit multiple-visual request: ${allowTwoVisuals ? "yes" : "no"}
+              - Secondary topology (if needed): ${allowTwoVisuals ? route.secondaryDiagramType : "none"}
               - Diagram guidance: honor explicit output-format requests from the user.
 
             - **VISUAL BLOCK HARD CONTRACT (MANDATORY)**:
@@ -290,12 +309,14 @@ function buildVisualContract(question: string): string {
               - Preferred detail range: **${preferredMinNodes}-${preferredMaxNodes}** visible nodes when the layout is readable.
               - Hard maximum logical blocks: **${target.maxNodes}**.
               - Minimum connection edges: **${target.minEdges}** relationships.
-              - Output exactly one visual block in the primary format unless fallback is needed.
+              - ${allowTwoVisuals
+                ? `Output up to two visual blocks only because the query explicitly requests multiple visuals. Use primary topology first, then \`${route.secondaryDiagramType}\` only if needed for correctness.`
+                : "Output exactly one visual block in the primary format unless fallback is needed."}
               - Allowed block languages: \`\`\`mermaid\`\`\`, \`\`\`mermaid-json\`\`\`.
               - If outputting \`\`\`mermaid\`\`\`: start with \`${route.diagramType}\`. If syntax confidence is low, switch to fallback format.
               - If outputting \`\`\`mermaid-json\`\`\`: emit valid parseable JSON. If invalid, switch to fallback format.
               - For \`\`\`mermaid-json\`\`\`, the JSON must include:
-                - \`diagramType\`: one of \`flowchart\`, \`sequenceDiagram\`, \`stateDiagram-v2\`, \`mindmap\`, \`gantt\`, \`classDiagram\`, or \`erDiagram\`.
+                - \`diagramType\`: one of \`flowchart\`, \`sequenceDiagram\`, \`stateDiagram-v2\`, \`mindmap\`, \`gantt\`, \`classDiagram\`, \`erDiagram\`, or \`xychart\`.
                 - \`title\`: short human-readable title.
                 - \`payload\`: the diagram-specific content.
               - Use this schema when \`\`\`mermaid-json\`\`\` is selected:
@@ -312,6 +333,7 @@ ${diagramSchema}
 function buildResponseStructureRules(question: string): string {
   const route = routeMermaidDiagram(question);
   const output = resolveVisualOutputDecision(question);
+  const allowTwoVisuals = route.multipleVisualsRequested && Boolean(route.secondaryDiagramType);
 
   if (route.visualIntent) {
     const visualBlockLanguage = `${output.primaryFormat} (fallback: ${output.fallbackFormat})`;
@@ -320,11 +342,16 @@ function buildResponseStructureRules(question: string): string {
             - **VISUAL DECISION LOGIC**:
               1. If the query does not clearly benefit from a visual, answer in text only.
               2. If a visual helps, use exactly one visual block in the primary output format.
-              3. If primary format fails reliability checks, switch once to fallback format.
-              4. Use markdown tables for comparisons, tradeoffs, and structured summaries when they are clearer than prose or diagrams.
+              3. Use a second visual only when the query explicitly requires multiple visuals and the second view materially improves correctness.
+              4. Prefer one visual + table over two visuals when either can answer the query well.
+              5. If primary format fails reliability checks, switch once to fallback format.
+              6. Use markdown tables for comparisons, tradeoffs, and structured summaries when they are clearer than prose or diagrams.
+              ${allowTwoVisuals
+                ? `7. This query explicitly allows up to two visuals; if used, second visual topology should be \`${route.secondaryDiagramType}\`.`
+                : ""}
 
             - **RESPONSE FORMAT**:
-              Output only the final answer and, if needed, a markdown table or a single visual code block (${visualBlockLanguage}).
+              Output only the final answer and, if needed, a markdown table or ${allowTwoVisuals ? "up to two visual code blocks" : "a single visual code block"} (${visualBlockLanguage}).
               Do not add commentary, status messages, or preambles.
 `;
   }
