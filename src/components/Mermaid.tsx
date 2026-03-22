@@ -108,8 +108,8 @@ async function requestFixedMermaidCode(payload: MermaidFixRequestPayload, timeou
             return null;
         }
 
-        const payload = await response.json() as { fixed?: unknown };
-        return typeof payload.fixed === "string" && payload.fixed.trim().length > 0 ? payload.fixed : null;
+        const data = await response.json() as { fixed?: unknown };
+        return typeof data.fixed === "string" && data.fixed.trim().length > 0 ? data.fixed : null;
     } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
             console.warn("Mermaid fix request timed out");
