@@ -19,4 +19,13 @@ describe("color contrast helpers", () => {
         expect(light).not.toBeNull();
         expect(dark!).toBeGreaterThan(light!);
     });
+
+    it("keeps branded palette at AA contrast with white text", () => {
+        const palette = ["#4f46e5", "#1d4ed8", "#0e7490", "#047857", "#6d28d9", "#b45309", "#be185d", "#1f2937"];
+        for (const color of palette) {
+            const contrast = getContrastRatio(color, "#f8fafc");
+            expect(contrast).not.toBeNull();
+            expect(contrast!).toBeGreaterThanOrEqual(4.5);
+        }
+    });
 });

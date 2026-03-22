@@ -9,22 +9,27 @@ const mermaidInitSource = readFileSync(
 );
 
 describe("mermaid init theme", () => {
-    it("includes ER-specific contrast overrides", () => {
-        expect(MERMAID_THEME_VARIABLES.mainBkg).toBe("#18181b");
-        expect(MERMAID_THEME_VARIABLES.nodeTextColor).toBe("#e4e4e7");
-        expect(MERMAID_THEME_VARIABLES.rowOdd).toBe("#27272a");
-        expect(MERMAID_THEME_VARIABLES.rowEven).toBe("#1f1f23");
+    it("includes branded high-contrast defaults", () => {
+        expect(MERMAID_THEME_VARIABLES.primaryColor).toBe("#4f46e5");
+        expect(MERMAID_THEME_VARIABLES.mainBkg).toBe("#111827");
+        expect(MERMAID_THEME_VARIABLES.nodeTextColor).toBe("#f8fafc");
+        expect(MERMAID_THEME_VARIABLES.lineColor).toBe("#6366f1");
+        expect(MERMAID_THEME_VARIABLES.rowOdd).toBe("#1f2937");
+        expect(MERMAID_THEME_VARIABLES.rowEven).toBe("#0f172a");
         expect(MERMAID_THEME_CSS).toContain(".er .entityBox");
         expect(MERMAID_THEME_CSS).toContain(".er .relationshipLabelBox");
         expect(MERMAID_THEME_CSS).toContain(".er g.row-rect-odd path");
         expect(MERMAID_THEME_CSS).toContain(".er .label");
     });
 
-    it("provides xychart defaults and avoids brittle mindmap/xychart selectors", () => {
+    it("provides xychart defaults and shared edge/node style hooks", () => {
         expect(MERMAID_THEME_VARIABLES.xyChart.backgroundColor).toBe("transparent");
-        expect(MERMAID_THEME_VARIABLES.xyChart.plotColorPalette).toContain("#60a5fa");
+        expect(MERMAID_THEME_VARIABLES.xyChart.plotColorPalette).toContain("#4f46e5");
         expect(MERMAID_THEME_CSS).not.toContain(".mindmap .node:nth-of-type");
         expect(MERMAID_THEME_CSS).not.toContain(".xychart .plot");
+        expect(MERMAID_THEME_CSS).toContain(".edgePath path");
+        expect(MERMAID_THEME_CSS).toContain("stroke-width: 1.5px");
+        expect(MERMAID_THEME_CSS).toContain(".cluster rect");
     });
 
     it("sets compact tidy-tree defaults for mindmaps", () => {

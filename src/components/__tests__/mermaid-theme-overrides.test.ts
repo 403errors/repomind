@@ -23,6 +23,10 @@ describe("Mermaid diagram post-render theming hooks", () => {
         expect(mermaidComponentSource).toContain("MINDMAP_EDGE_STROKE_WIDTH");
         expect(mermaidComponentSource).toContain("resolveMindmapEdgeColor");
         expect(mermaidComponentSource).toContain("getEdgeTerminalPoint");
+        expect(mermaidComponentSource).toContain("applyGenericDiagramThemeOverrides");
+        expect(mermaidComponentSource).toContain("GENERIC_DIAGRAM_EDGE_STROKE_WIDTH");
+        expect(mermaidComponentSource).toContain("--diagram-color-line");
+        expect(mermaidComponentSource).toContain("marker path, .marker");
     });
 
     it("forces xychart background transparency and themed plot colors", () => {

@@ -58,6 +58,7 @@ const MINDMAP_BLACK_COLOR_TOKENS = new Set([
 ]);
 const MINDMAP_EDGE_STROKE_WIDTH = "1.5";
 const MINDMAP_EDGE_TRIM_PX = 10;
+const GENERIC_DIAGRAM_EDGE_STROKE_WIDTH = "1.5";
 
 function resolveThemeVar(variable: string, fallback: string): string {
     if (typeof window === "undefined") {
@@ -738,12 +739,60 @@ function applyXyChartThemeOverrides(svgElement: SVGSVGElement): void {
     });
 }
 
+function applyGenericDiagramThemeOverrides(svgElement: SVGSVGElement): void {
+    const lineColor = resolveThemeVar("--diagram-color-line", "#6366f1");
+    const nodeFill = resolveThemeVar("--diagram-color-surface", "#111827");
+    const nodeStroke = resolveThemeVar("--diagram-color-border", "#475569");
+    const textColor = resolveThemeVar("--diagram-color-text-on-color", "#f8fafc");
+    const clusterFill = resolveThemeVar("--diagram-color-secondary", "#1f2937");
+
+    const nodeShapes = svgElement.querySelectorAll<SVGElement>(
+        ".node rect, .node polygon, .node circle, .node ellipse, .classBox, .classTitle, .actor rect, .stateDiagram .state rect, .stateDiagram .state polygon"
+    );
+    nodeShapes.forEach((shape) => {
+        shape.style.setProperty("fill", nodeFill, "important");
+        shape.style.setProperty("stroke", nodeStroke, "important");
+    });
+
+    const clusters = svgElement.querySelectorAll<SVGElement>(".cluster rect");
+    clusters.forEach((cluster) => {
+        cluster.style.setProperty("fill", clusterFill, "important");
+        cluster.style.setProperty("stroke", nodeStroke, "important");
+    });
+
+    const textElements = svgElement.querySelectorAll<SVGTextElement>(".label, .label text, .nodeLabel, .cluster-label, text");
+    textElements.forEach((text) => {
+        text.style.setProperty("fill", textColor, "important");
+    });
+
+    const edgeElements = svgElement.querySelectorAll<SVGElement>(
+        ".edgePath path, path.flowchart-link, .relation, .stateDiagram .transition, .messageLine0, .messageLine1, .loopLine"
+    );
+    edgeElements.forEach((edge) => {
+        if (edge.closest("defs")) return;
+        edge.style.setProperty("stroke", lineColor, "important");
+        edge.style.setProperty("stroke-width", GENERIC_DIAGRAM_EDGE_STROKE_WIDTH, "important");
+        edge.style.setProperty("stroke-linecap", "round", "important");
+        edge.style.setProperty("stroke-linejoin", "round", "important");
+        edge.style.setProperty("filter", "none", "important");
+        edge.style.setProperty("opacity", "1", "important");
+        edge.style.setProperty("fill", "none", "important");
+    });
+
+    const markers = svgElement.querySelectorAll<SVGElement>("marker path, .marker");
+    markers.forEach((marker) => {
+        marker.style.setProperty("stroke", lineColor, "important");
+        marker.style.setProperty("fill", lineColor, "important");
+    });
+}
+
 function applyDiagramThemeOverrides(svgElement: SVGSVGElement, chartSource: string): void {
     const declaration = getCanonicalMermaidDeclaration(chartSource ?? "");
     if (declaration === "mindmap") {
         applyMindmapThemeOverrides(svgElement);
         return;
     }
+    applyGenericDiagramThemeOverrides(svgElement);
     if (declaration === "xychart") {
         applyXyChartThemeOverrides(svgElement);
     }
