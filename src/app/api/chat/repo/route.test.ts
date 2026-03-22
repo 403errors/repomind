@@ -93,7 +93,8 @@ describe("POST /api/chat/repo", () => {
             "anon_actor",
             [],
             undefined,
-            "flash"
+            "flash",
+            false
         );
         expect(getToolBudgetUsageMock).toHaveBeenCalledWith("repo", "anonymous", "anon_actor");
         expect(trackAuthenticatedQueryEventMock).not.toHaveBeenCalled();
@@ -160,9 +161,14 @@ describe("POST /api/chat/repo", () => {
         expect(generateAnswerStreamMock).not.toHaveBeenCalled();
     });
 
-    it("returns anon usage limit error when budget is exhausted", async () => {
+    it("continues streaming with tool calls disabled when budget is exhausted", async () => {
         authMock.mockResolvedValue(null);
         getToolBudgetUsageMock.mockResolvedValueOnce({ used: 10, limit: 10, remaining: 0 });
+        generateAnswerStreamMock.mockImplementation(async function* () {
+            yield { type: "status", message: "Tool calls are paused for this window.", progress: 50 };
+            yield { type: "content", text: "fallback answer", append: true };
+            yield { type: "complete", relevantFiles: [] };
+        });
 
         const request = new NextRequest("http://localhost/api/chat/repo", {
             method: "POST",
@@ -179,14 +185,13 @@ describe("POST /api/chat/repo", () => {
         });
 
         const response = await POST(request);
-        const body = await response.json();
+        const text = await response.text();
 
-        expect(response.status).toBe(429);
-        expect(body).toEqual({
-            error: "Anonymous tool usage limit reached for repo chat.",
-            code: "ANON_USAGE_LIMIT_EXCEEDED",
-        });
-        expect(generateAnswerStreamMock).not.toHaveBeenCalled();
+        expect(response.status).toBe(200);
+        expect(generateAnswerStreamMock).toHaveBeenCalled();
+        expect(generateAnswerStreamMock.mock.calls[0]?.[9]).toBe(true);
+        expect(text).toContain("fallback answer");
+        expect(consumeToolBudgetUsageMock).not.toHaveBeenCalled();
     });
 
     it("tracks analytics for authenticated users", async () => {
@@ -225,5 +230,70 @@ describe("POST /api/chat/repo", () => {
             userAgent: "Mozilla/5.0 (iPhone; Mobile)",
         });
         expect(consumeToolBudgetUsageMock).toHaveBeenCalledWith("repo", "authenticated", "user_123", 3);
+    });
+
+    it("does not bill native web-search tool units", async () => {
+        authMock.mockResolvedValue({
+            user: { id: "user_123", email: "user@example.com" },
+        });
+        generateAnswerStreamMock.mockImplementation(async function* () {
+            yield { type: "tool", name: "googleSearch", usageUnits: 2 };
+            yield { type: "content", text: "hello" };
+            yield { type: "complete", relevantFiles: [] };
+        });
+
+        const request = new NextRequest("http://localhost/api/chat/repo", {
+            method: "POST",
+            body: JSON.stringify({
+                query: "What does this repo do?",
+                repoDetails: { owner: "owner", repo: "repo" },
+                filePaths: [],
+                history: [],
+                modelPreference: "flash",
+            }),
+            headers: {
+                "content-type": "application/json",
+                "user-agent": "Mozilla/5.0",
+            },
+        });
+
+        const response = await POST(request);
+        await response.text();
+
+        expect(response.status).toBe(200);
+        expect(consumeToolBudgetUsageMock).not.toHaveBeenCalled();
+    });
+
+    it("bills only one unit when a non-billable tool-intent event is followed by a billable completion event", async () => {
+        authMock.mockResolvedValue({
+            user: { id: "user_123", email: "user@example.com" },
+        });
+        generateAnswerStreamMock.mockImplementation(async function* () {
+            yield { type: "tool", name: "fetch_recent_commits", usageUnits: 1, billable: false };
+            yield { type: "tool", name: "fetch_recent_commits", usageUnits: 1, billable: true };
+            yield { type: "content", text: "hello" };
+            yield { type: "complete", relevantFiles: [] };
+        });
+
+        const request = new NextRequest("http://localhost/api/chat/repo", {
+            method: "POST",
+            body: JSON.stringify({
+                query: "What does this repo do?",
+                repoDetails: { owner: "owner", repo: "repo" },
+                filePaths: [],
+                history: [],
+                modelPreference: "flash",
+            }),
+            headers: {
+                "content-type": "application/json",
+                "user-agent": "Mozilla/5.0",
+            },
+        });
+
+        const response = await POST(request);
+        await response.text();
+
+        expect(response.status).toBe(200);
+        expect(consumeToolBudgetUsageMock).toHaveBeenCalledWith("repo", "authenticated", "user_123", 1);
     });
 });

@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { FileCode, ChevronRight, ArrowLeft, Sparkles, Menu, MessageCircle, Shield, Download, Trash2, X, GitFork } from "lucide-react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { FileCode, ChevronRight, ArrowLeft, Sparkles, Menu, MessageCircle, Shield, Download, Trash2, X, GitFork, Wrench } from "lucide-react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { BotIcon } from "@/components/icons/BotIcon";
@@ -38,6 +38,7 @@ import { BadgeModal } from "./chat/BadgeModal";
 import { SecurityScanModal } from "./chat/SecurityScanModal";
 import { buildSecurityScanMessage } from "./chat/security-scan-message";
 import { StreamStatus } from "./chat/StreamStatus";
+import { ToolQuotaModal } from "./chat/ToolQuotaModal";
 
 const REPO_SUGGESTIONS = [
     "Show me the user flow chart",
@@ -62,6 +63,29 @@ interface ChatInterfaceProps {
 type SubmitMode = "normal" | "quick_scan" | "deep_scan";
 type HttpError = Error & { status?: number; code?: string };
 type ChatRunStatus = "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+type ToolQuotaScope = "repo" | "profile";
+type ToolQuotaAudience = "anonymous" | "authenticated";
+
+interface ToolQuotaState {
+    scope: ToolQuotaScope;
+    audience: ToolQuotaAudience;
+    used: number;
+    limit: number;
+    remaining: number;
+    resetAt: string;
+    windowSecondsRemaining: number;
+    exhausted: boolean;
+}
+
+const SUPPORT_EMAIL = "pieisnot22by7@gmail.com";
+
+function formatDuration(seconds: number): string {
+    const normalized = Math.max(0, Math.floor(seconds));
+    const hours = Math.floor(normalized / 3600);
+    const minutes = Math.floor((normalized % 3600) / 60);
+    const secs = normalized % 60;
+    return [hours, minutes, secs].map((value) => value.toString().padStart(2, "0")).join(":");
+}
 
 function areRepoMessagesEquivalent(left: RepoChatMessage[], right: RepoChatMessage[]): boolean {
     if (left.length !== right.length) return false;
@@ -185,10 +209,41 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
     const [loginModalCopy, setLoginModalCopy] = useState<{ title?: string; description?: string }>({});
     const [deepScansData, setDeepScansData] = useState<{ used: number; total: number; resetsAt: string; isUnlimited: boolean } | null>(null);
     const [latestScanId, setLatestScanId] = useState<string | null>(null);
+    const [toolQuota, setToolQuota] = useState<ToolQuotaState | null>(null);
+    const [showToolQuotaModal, setShowToolQuotaModal] = useState(false);
+    const [quotaNowMs, setQuotaNowMs] = useState(() => Date.now());
     const activeRunKey = useMemo(() => `repomind:chatRun:repo:${repoContext.owner}:${repoContext.repo}`, [repoContext.owner, repoContext.repo]);
 
     const handleSubmitRef = useRef<((e?: React.FormEvent, overrideText?: string, submitMode?: SubmitMode, scanAiAssist?: boolean) => Promise<void>) | null>(null);
     const isSubmittingRef = useRef(false);
+
+    const refreshToolQuota = useCallback(async () => {
+        try {
+            const response = await fetch("/api/chat/quota?scope=repo");
+            if (!response.ok) {
+                return null;
+            }
+            const quota = await response.json() as ToolQuotaState;
+            setToolQuota(quota);
+            return quota;
+        } catch {
+            return null;
+        }
+    }, []);
+
+    const quotaSecondsRemaining = useMemo(() => {
+        if (!toolQuota) {
+            return 0;
+        }
+        const resetAtMs = Number.isFinite(Date.parse(toolQuota.resetAt)) ? Date.parse(toolQuota.resetAt) : 0;
+        if (!resetAtMs) {
+            return Math.max(0, toolQuota.windowSecondsRemaining);
+        }
+        return Math.max(0, Math.ceil((resetAtMs - quotaNowMs) / 1000));
+    }, [toolQuota, quotaNowMs]);
+
+    const quotaResetLabel = useMemo(() => formatDuration(quotaSecondsRemaining), [quotaSecondsRemaining]);
+    const isToolQuotaExhausted = Boolean(toolQuota?.remaining === 0);
 
     // Fetch deep scan limits on mount/session change
     useEffect(() => {
@@ -201,6 +256,17 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 .catch(console.error);
         }
     }, [session?.user, showSecurityModal, repoContext.owner, repoContext.repo]);
+
+    useEffect(() => {
+        void refreshToolQuota();
+    }, [refreshToolQuota, session?.user?.id]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            setQuotaNowMs(Date.now());
+        }, 1000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     // Fetch owner profile on mount
     useEffect(() => {
@@ -480,6 +546,27 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
         return modelMsgId;
     };
 
+    const replaceOrAppendModelMessage = (
+        targetMessageId: string | null | undefined,
+        messageFactory: (id: string) => RepoChatMessage
+    ) => {
+        setMessages((prev) => {
+            if (targetMessageId && prev.some((message) => message.id === targetMessageId)) {
+                return prev.map((message) =>
+                    message.id === targetMessageId ? messageFactory(targetMessageId) : message
+                );
+            }
+            return [...prev, messageFactory((Date.now() + 1).toString())];
+        });
+    };
+
+    const removeMessageById = (targetMessageId: string | null | undefined) => {
+        if (!targetMessageId) {
+            return;
+        }
+        setMessages((prev) => prev.filter((message) => message.id !== targetMessageId));
+    };
+
     const runRepoStreamingFlow = async (
         modelMsgId: string,
         combinedInputForServer: string,
@@ -736,9 +823,11 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
             return;
         }
 
+        const previousToolQuotaRemaining = toolQuota?.remaining ?? null;
+        let modelMsgId: string | null = null;
         try {
             const combinedInputForServer = getRepoQueryForServer(trimmedInput, combinedInput);
-            const modelMsgId = startRepoStreamMessage(selectedModelPreference);
+            modelMsgId = startRepoStreamMessage(selectedModelPreference);
             await runRepoStreamingFlow(modelMsgId, combinedInputForServer, selectedModelPreference);
         } catch (error: unknown) {
 
@@ -752,22 +841,19 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
             const userFacingError = getUserFacingAnalysisError(error, errorCode);
 
             if (isAnonUsageLimit) {
-                toast.error("Login required for more repo tooling", {
-                    description: "Anonymous repo-tool usage limit reached.",
+                toast.error("Repo tool calls exhausted", {
+                    description: "Anonymous repo tool budget reached. Sign in to unlock 30 calls per day.",
                     duration: 5000,
                 });
-                setLoginModalCopy({
-                    title: "Login To Continue Repo Chat",
-                    description: "Unlock 3x tool budget, Thinking Mode, and faster repo answers by signing in.",
-                });
-                setShowLoginModal(true);
+                removeMessageById(modelMsgId);
+                setShowToolQuotaModal(true);
             } else if (isAuthUsageLimit) {
-                const limitMessage: RepoChatMessage = {
-                    id: (Date.now() + 1).toString(),
+                replaceOrAppendModelMessage(modelMsgId, (id) => ({
+                    id,
                     role: "model",
                     content: "Usage limit reached for repo chat tools.\n\nPlease contact **pieisnot22by7@gmail.com** for extended limits.",
-                };
-                setMessages((prev) => [...prev, limitMessage]);
+                }));
+                setShowToolQuotaModal(true);
             } else if (isAuthError) {
                 toast.error("Sign in required", {
                     description: "Your session has expired or is invalid. Please sign in and try again.",
@@ -778,6 +864,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                     description: "Please sign in with GitHub to continue repo analysis features.",
                 });
                 setShowLoginModal(true);
+                removeMessageById(modelMsgId);
             } else if (isPayloadTooLarge) {
                 toast.error("Request too large", {
                     description: "This repository is large. Ask about a specific folder or feature and try again.",
@@ -795,20 +882,32 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
             }
 
             if (!isAuthError && !isAnonUsageLimit && !isAuthUsageLimit) {
-                const errorMsg: RepoChatMessage = {
-                    id: (Date.now() + 1).toString(),
+                replaceOrAppendModelMessage(modelMsgId, (id) => ({
+                    id,
                     role: "model",
                     content: isPayloadTooLarge
                         ? "This request was too large to process. Try a narrower question focused on a specific module or folder."
                         : `I encountered an error while analyzing the code.\n\n${userFacingError}`,
-                };
-                setMessages((prev) => [...prev, errorMsg]);
+                }));
             }
         } finally {
             setLoading(false);
             isSubmittingRef.current = false;
             if (typeof window !== "undefined") {
                 window.sessionStorage.removeItem(activeRunKey);
+            }
+            const latestQuota = await refreshToolQuota();
+            if (
+                latestQuota &&
+                previousToolQuotaRemaining !== null &&
+                previousToolQuotaRemaining > 0 &&
+                latestQuota.remaining === 0
+            ) {
+                toast.error("Tool calls paused", {
+                    description: "Repo tool calls are now paused for this window. You can continue in no-tool mode.",
+                    duration: 5500,
+                });
+                setShowToolQuotaModal(true);
             }
         }
     };
@@ -954,6 +1053,23 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                             <span>{formatTokenCount(totalTokens)} / <span className="opacity-50">{formatTokenCount(MAX_TOKENS)}</span></span>
                         </div>
 
+                        {toolQuota && (
+                            <button
+                                type="button"
+                                onClick={() => setShowToolQuotaModal(true)}
+                                className={cn(
+                                    "hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border shadow-inner shrink-0 transition-colors",
+                                    isToolQuotaExhausted
+                                        ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                                        : "bg-zinc-900 text-zinc-400 border-white/5 hover:text-white hover:border-white/15"
+                                )}
+                                title="Open tool quota details"
+                            >
+                                <Wrench className="w-3.5 h-3.5" />
+                                <span>{toolQuota.remaining} / {toolQuota.limit}</span>
+                            </button>
+                        )}
+
                         {/* Utility Bar */}
                         <div className="flex items-center gap-0.5 pl-3 border-l border-white/10 shrink-0">
                             <SearchModal
@@ -1020,6 +1136,17 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                             loading &&
                             scanning &&
                             isLatestMessage;
+                        const isActiveModelStreamState =
+                            msg.role === "model" &&
+                            loading &&
+                            isLatestMessage &&
+                            (Boolean(msg.scanStatus) || Boolean(msg.streamStatus) || msg.modelUsed === "thinking");
+                        const shouldHideStaleModelRow =
+                            msg.role === "model" && !msg.content && !isActiveModelStreamState;
+
+                        if (shouldHideStaleModelRow) {
+                            return null;
+                        }
 
                         return (
                             <div
@@ -1248,7 +1375,13 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                         value={input}
                         onChange={setInput}
                         onSubmit={handleSubmit}
-                        placeholder={totalTokens >= MAX_TOKENS ? "Conversation limit reached. Please clear chat." : "Ask about the code, architecture, or features..."}
+                        placeholder={
+                            totalTokens >= MAX_TOKENS
+                                ? "Conversation limit reached. Please clear chat."
+                                : isToolQuotaExhausted
+                                    ? "Repo tool calls are paused for this window. You can still ask in no-tool mode."
+                                    : "Ask about the code, architecture, or features..."
+                        }
                         disabled={totalTokens >= MAX_TOKENS}
                         loading={loading}
                         allowEmptySubmit={Boolean(referenceText)}
@@ -1299,6 +1432,20 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                 title={loginModalCopy.title}
                 description={loginModalCopy.description}
             />
+
+            {toolQuota && (
+                <ToolQuotaModal
+                    isOpen={showToolQuotaModal}
+                    onClose={() => setShowToolQuotaModal(false)}
+                    scope="repo"
+                    audience={toolQuota.audience}
+                    used={toolQuota.used}
+                    limit={toolQuota.limit}
+                    remaining={toolQuota.remaining}
+                    resetCountdown={quotaResetLabel}
+                    supportEmail={SUPPORT_EMAIL}
+                />
+            )}
         </div>
     );
 }

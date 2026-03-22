@@ -60,24 +60,7 @@ export async function POST(req: NextRequest) {
         }
 
         const usage = await getToolBudgetUsage("profile", audience, actorId);
-        if (usage.remaining <= 0) {
-            if (audience === "anonymous") {
-                return NextResponse.json(
-                    {
-                        error: "Anonymous tool usage limit reached for profile chat.",
-                        code: "ANON_USAGE_LIMIT_EXCEEDED",
-                    },
-                    { status: 429 }
-                );
-            }
-            return NextResponse.json(
-                {
-                    error: "Profile chat usage limit reached. Please contact pieisnot22by7@gmail.com.",
-                    code: "AUTH_USAGE_LIMIT_EXCEEDED",
-                },
-                { status: 429 }
-            );
-        }
+        const disableToolCalls = usage.remaining <= 0;
 
         if (userId) {
             await trackAuthenticatedQueryEvent(userId);
@@ -138,9 +121,10 @@ export async function POST(req: NextRequest) {
                         cacheActorId: actorId,
                         crossRepoEnabled: Boolean(crossRepoEnabled),
                         history: Array.isArray(history) ? history : [],
+                        disableToolCalls,
                     });
                     for await (const chunk of generator) {
-                        if (chunk.type === "tool") {
+                        if (chunk.type === "tool" && chunk.billable !== false && chunk.name !== "googleSearch") {
                             toolUnitsConsumed += Math.max(1, chunk.usageUnits ?? 1);
                         }
                         if (chunk.type === "content") {
@@ -171,7 +155,7 @@ export async function POST(req: NextRequest) {
                         const data = JSON.stringify(chunk) + "\n";
                         safeEnqueue(data);
                     }
-                    if (toolUnitsConsumed > 0) {
+                    if (!disableToolCalls && toolUnitsConsumed > 0) {
                         await consumeToolBudgetUsage("profile", audience, actorId, toolUnitsConsumed);
                     }
                     controller.close();

@@ -86,7 +86,45 @@ function normalizeMessages(rawMessages: unknown): Message[] {
 
     return rawMessages
         .map(normalizeMessage)
-        .filter((message): message is Message => Boolean(message));
+        .filter((message): message is Message => Boolean(message))
+        .filter((message) => !isStaleEmptyModelPlaceholder(message));
+}
+
+function hasNonEmptyArray(value: unknown): boolean {
+    return Array.isArray(value) && value.length > 0;
+}
+
+function hasNonEmptyString(value: unknown): boolean {
+    return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasMeaningfulModelPayload(message: Message): boolean {
+    const candidate = message as Record<string, unknown>;
+
+    return (
+        hasNonEmptyArray(candidate.reasoningSteps) ||
+        hasNonEmptyArray(candidate.relevantFiles) ||
+        hasNonEmptyArray(candidate.vulnerabilities) ||
+        hasNonEmptyArray(candidate.toolsUsed) ||
+        hasNonEmptyArray(candidate.processingSummary) ||
+        hasNonEmptyString(candidate.scanStatus) ||
+        hasNonEmptyString(candidate.scanId) ||
+        hasNonEmptyString(candidate.commitFreshnessLabel) ||
+        hasNonEmptyString(candidate.sourceScope) ||
+        candidate.isQuickSecurityScan === true
+    );
+}
+
+function isStaleEmptyModelPlaceholder(message: Message): boolean {
+    if (message.role !== "model") {
+        return false;
+    }
+
+    if (message.content.trim().length > 0) {
+        return false;
+    }
+
+    return !hasMeaningfulModelPayload(message);
 }
 
 /**

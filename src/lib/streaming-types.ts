@@ -6,7 +6,7 @@ import type { ChatMessageBase } from "@/lib/chat-types";
 
 export type StreamUpdate =
     | { type: "status"; message: string; progress: number }
-    | { type: "tool"; name: string; detail?: string; usageUnits?: number }
+    | { type: "tool"; name: string; detail?: string; usageUnits?: number; billable?: boolean }
     | { type: "thought"; text: string }
     | { type: "content"; text: string; append: boolean }
     | { type: "files"; files: string[] }

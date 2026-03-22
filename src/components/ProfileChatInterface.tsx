@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { Github, Users, BookMarked, ArrowLeft, Sparkles, MessageCircle, Trash2, Download, X } from "lucide-react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { Github, Users, BookMarked, ArrowLeft, Sparkles, MessageCircle, Trash2, Download, X, Wrench } from "lucide-react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 
@@ -25,6 +25,7 @@ import { ReasoningBlock } from "./ReasoningBlock";
 import { MessageContent } from "./chat/MessageContent";
 import { useMessageSelection } from "./chat/useMessageSelection";
 import { StreamStatus } from "./chat/StreamStatus";
+import { ToolQuotaModal } from "./chat/ToolQuotaModal";
 
 interface ProfileChatInterfaceProps {
     profile: GitHubProfile;
@@ -43,6 +44,29 @@ const PROFILE_SUGGESTIONS = [
 
 type HttpError = Error & { status?: number; code?: string };
 type ChatRunStatus = "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+type ToolQuotaScope = "repo" | "profile";
+type ToolQuotaAudience = "anonymous" | "authenticated";
+
+interface ToolQuotaState {
+    scope: ToolQuotaScope;
+    audience: ToolQuotaAudience;
+    used: number;
+    limit: number;
+    remaining: number;
+    resetAt: string;
+    windowSecondsRemaining: number;
+    exhausted: boolean;
+}
+
+const SUPPORT_EMAIL = "pieisnot22by7@gmail.com";
+
+function formatDuration(seconds: number): string {
+    const normalized = Math.max(0, Math.floor(seconds));
+    const hours = Math.floor(normalized / 3600);
+    const minutes = Math.floor((normalized % 3600) / 60);
+    const secs = normalized % 60;
+    return [hours, minutes, secs].map((value) => value.toString().padStart(2, "0")).join(":");
+}
 
 function areProfileMessagesEquivalent(left: ProfileChatMessage[], right: ProfileChatMessage[]): boolean {
     if (left.length !== right.length) return false;
@@ -162,14 +186,56 @@ export function ProfileChatInterface({
     const [showLoginModal, setShowLoginModal] = useState(false);
     const [loginModalCopy, setLoginModalCopy] = useState<{ title?: string; description?: string }>({});
     const [connectionLost, setConnectionLost] = useState(false);
+    const [toolQuota, setToolQuota] = useState<ToolQuotaState | null>(null);
+    const [showToolQuotaModal, setShowToolQuotaModal] = useState(false);
+    const [quotaNowMs, setQuotaNowMs] = useState(() => Date.now());
     const isSubmittingRef = useRef(false);
     const activeRunKey = useMemo(() => `repomind:chatRun:profile:${profile.login}`, [profile.login]);
+
+    const refreshToolQuota = useCallback(async () => {
+        try {
+            const response = await fetch("/api/chat/quota?scope=profile");
+            if (!response.ok) {
+                return null;
+            }
+            const quota = await response.json() as ToolQuotaState;
+            setToolQuota(quota);
+            return quota;
+        } catch {
+            return null;
+        }
+    }, []);
+
+    const quotaSecondsRemaining = useMemo(() => {
+        if (!toolQuota) {
+            return 0;
+        }
+        const resetAtMs = Number.isFinite(Date.parse(toolQuota.resetAt)) ? Date.parse(toolQuota.resetAt) : 0;
+        if (!resetAtMs) {
+            return Math.max(0, toolQuota.windowSecondsRemaining);
+        }
+        return Math.max(0, Math.ceil((resetAtMs - quotaNowMs) / 1000));
+    }, [toolQuota, quotaNowMs]);
+
+    const quotaResetLabel = useMemo(() => formatDuration(quotaSecondsRemaining), [quotaSecondsRemaining]);
+    const isToolQuotaExhausted = Boolean(toolQuota?.remaining === 0);
 
     useEffect(() => {
         if (!session && crossRepoEnabled) {
             setCrossRepoEnabled(false);
         }
     }, [session, crossRepoEnabled]);
+
+    useEffect(() => {
+        void refreshToolQuota();
+    }, [refreshToolQuota, session?.user?.id]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            setQuotaNowMs(Date.now());
+        }, 1000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     // Load conversation on mount
     const restoreGenerationRef = useRef(0);
@@ -314,6 +380,27 @@ export function ProfileChatInterface({
             },
         ]);
         return modelMsgId;
+    };
+
+    const replaceOrAppendModelMessage = (
+        targetMessageId: string | null | undefined,
+        messageFactory: (id: string) => ProfileChatMessage
+    ) => {
+        setMessages((prev) => {
+            if (targetMessageId && prev.some((message) => message.id === targetMessageId)) {
+                return prev.map((message) =>
+                    message.id === targetMessageId ? messageFactory(targetMessageId) : message
+                );
+            }
+            return [...prev, messageFactory((Date.now() + 1).toString())];
+        });
+    };
+
+    const removeMessageById = (targetMessageId: string | null | undefined) => {
+        if (!targetMessageId) {
+            return;
+        }
+        setMessages((prev) => prev.filter((message) => message.id !== targetMessageId));
     };
 
     const runProfileStreamingFlow = async (modelMsgId: string, combinedInput: string) => {
@@ -531,8 +618,10 @@ export function ProfileChatInterface({
         clearReference();
         setLoading(true);
 
+        const previousToolQuotaRemaining = toolQuota?.remaining ?? null;
+        let modelMsgId: string | null = null;
         try {
-            const modelMsgId = startProfileStreamMessage(modelPreference);
+            modelMsgId = startProfileStreamMessage(modelPreference);
             await runProfileStreamingFlow(modelMsgId, combinedInput);
         } catch (error: unknown) {
             console.error(error);
@@ -545,22 +634,19 @@ export function ProfileChatInterface({
             const userFacingError = getUserFacingAnalysisError(error, errorCode);
 
             if (isAnonUsageLimit) {
-                toast.error("Login required for more profile tooling", {
-                    description: "Anonymous profile-tool usage limit reached.",
+                toast.error("Profile tool calls exhausted", {
+                    description: "Anonymous profile tool budget reached. Sign in to unlock 30 calls per day.",
                     duration: 5000,
                 });
-                setLoginModalCopy({
-                    title: "Login To Continue Profile Analysis",
-                    description: "Unlock 3x tool budget, cross-repo analysis, Thinking Mode, and faster profile answers.",
-                });
-                setShowLoginModal(true);
+                removeMessageById(modelMsgId);
+                setShowToolQuotaModal(true);
             } else if (isAuthUsageLimit) {
-                const limitMessage: ProfileChatMessage = {
-                    id: (Date.now() + 1).toString(),
+                replaceOrAppendModelMessage(modelMsgId, (id) => ({
+                    id,
                     role: "model",
                     content: "Usage limit reached for profile chat tools.\n\nPlease contact **pieisnot22by7@gmail.com** for extended limits.",
-                };
-                setMessages((prev) => [...prev, limitMessage]);
+                }));
+                setShowToolQuotaModal(true);
             } else if (isAuthError) {
                 toast.error("Sign in required", {
                     description: "Your session has expired or is invalid. Please sign in and try again.",
@@ -571,6 +657,7 @@ export function ProfileChatInterface({
                     description: "Please sign in with GitHub to continue profile analysis features.",
                 });
                 setShowLoginModal(true);
+                removeMessageById(modelMsgId);
             } else if (isPayloadTooLarge) {
                 toast.error("Request too large", {
                     description: "The profile context is too large. Ask a narrower question and try again.",
@@ -588,20 +675,32 @@ export function ProfileChatInterface({
             }
 
             if (!isAuthError && !isAnonUsageLimit && !isAuthUsageLimit) {
-                const errorMsg: ProfileChatMessage = {
-                    id: (Date.now() + 1).toString(),
+                replaceOrAppendModelMessage(modelMsgId, (id) => ({
+                    id,
                     role: "model",
                     content: isPayloadTooLarge
                         ? "This request was too large to process. Try a narrower question focused on a specific project or timeframe."
                         : `I encountered an error while analyzing the profile.\n\n${userFacingError}`,
-                };
-                setMessages((prev) => [...prev, errorMsg]);
+                }));
             }
         } finally {
             setLoading(false);
             isSubmittingRef.current = false;
             if (typeof window !== "undefined") {
                 window.sessionStorage.removeItem(activeRunKey);
+            }
+            const latestQuota = await refreshToolQuota();
+            if (
+                latestQuota &&
+                previousToolQuotaRemaining !== null &&
+                previousToolQuotaRemaining > 0 &&
+                latestQuota.remaining === 0
+            ) {
+                toast.error("Tool calls paused", {
+                    description: "Profile tool calls are now paused for this window. You can continue in no-tool mode.",
+                    duration: 5500,
+                });
+                setShowToolQuotaModal(true);
             }
         }
     };
@@ -691,6 +790,23 @@ export function ProfileChatInterface({
                                 <span>{formatTokenCount(totalTokens)} / {formatTokenCount(MAX_TOKENS)} tokens</span>
                             </div>
 
+                            {toolQuota && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowToolQuotaModal(true)}
+                                    className={cn(
+                                        "hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border",
+                                        isToolQuotaExhausted
+                                            ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                                            : "bg-zinc-800 text-zinc-400 border-white/10 hover:text-white"
+                                    )}
+                                    title="Open tool quota details"
+                                >
+                                    <Wrench className="w-3.5 h-3.5" />
+                                    <span>{toolQuota.remaining} / {toolQuota.limit}</span>
+                                </button>
+                            )}
+
                             <button
                                 onClick={handleExportChat}
                                 className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
@@ -756,6 +872,17 @@ export function ProfileChatInterface({
                 )}
                 {messages.map((msg) => {
                         const isLatestMessage = msg.id === messages[messages.length - 1]?.id;
+                        const isActiveModelStreamState =
+                            msg.role === "model" &&
+                            loading &&
+                            isLatestMessage &&
+                            (Boolean(msg.streamStatus) || msg.modelUsed === "thinking");
+                        const shouldHideStaleModelRow =
+                            msg.role === "model" && !msg.content && !isActiveModelStreamState;
+
+                        if (shouldHideStaleModelRow) {
+                            return null;
+                        }
                         return (
                         <div
                             key={msg.id}
@@ -910,7 +1037,13 @@ export function ProfileChatInterface({
                         value={input}
                         onChange={setInput}
                         onSubmit={handleSubmit}
-                        placeholder={totalTokens >= MAX_TOKENS ? "Conversation limit reached. Please clear chat." : "Ask about their projects, skills, or contributions..."}
+                        placeholder={
+                            totalTokens >= MAX_TOKENS
+                                ? "Conversation limit reached. Please clear chat."
+                                : isToolQuotaExhausted
+                                    ? "Profile tool calls are paused for this window. You can still ask in no-tool mode."
+                                    : "Ask about their projects, skills, or contributions..."
+                        }
                         disabled={totalTokens >= MAX_TOKENS}
                         loading={loading}
                         allowEmptySubmit={Boolean(referenceText)}
@@ -954,6 +1087,20 @@ export function ProfileChatInterface({
                 title={loginModalCopy.title}
                 description={loginModalCopy.description}
             />
+
+            {toolQuota && (
+                <ToolQuotaModal
+                    isOpen={showToolQuotaModal}
+                    onClose={() => setShowToolQuotaModal(false)}
+                    scope="profile"
+                    audience={toolQuota.audience}
+                    used={toolQuota.used}
+                    limit={toolQuota.limit}
+                    remaining={toolQuota.remaining}
+                    resetCountdown={quotaResetLabel}
+                    supportEmail={SUPPORT_EMAIL}
+                />
+            )}
         </div >
     );
 }

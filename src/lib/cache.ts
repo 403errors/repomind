@@ -45,6 +45,17 @@ interface CommitSnapshotCachePayload<T> {
     fetchedAt: number;
 }
 
+export interface ToolBudgetUsage {
+    used: number;
+    limit: number;
+    remaining: number;
+}
+
+export interface ToolBudgetWindowUsage extends ToolBudgetUsage {
+    resetAt: string;
+    windowSecondsRemaining: number;
+}
+
 // Helper to handle KV errors gracefully
 async function safeKvOperation<T>(operation: () => Promise<T>): Promise<T | null> {
     try {
@@ -103,13 +114,39 @@ function getAnonConsecutiveNamespace(owner: string, repo: string, policy?: FileC
     return `public:${actor}:${owner}/${repo}`;
 }
 
-function getToolBudgetKey(scope: ToolBudgetScope, audience: CacheAudience, actorId?: string): string {
+function getToolBudgetKey(scope: ToolBudgetScope, audience: CacheAudience, actorId?: string, day?: string): string {
     const actor = actorId?.trim() || "unknown";
-    return `tool_budget:${scope}:${audience}:${actor}`;
+    const budgetDay = day ?? getCurrentBudgetDay();
+    return `tool_budget:${scope}:${audience}:${actor}:${budgetDay}`;
 }
 
 function getToolBudgetLimit(audience: CacheAudience): number {
     return audience === "anonymous" ? TOOL_BUDGET_MAX_ANON : TOOL_BUDGET_MAX_AUTH;
+}
+
+function getCurrentBudgetDay(nowMs: number = Date.now()): string {
+    return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+function getNextUtcMidnightMs(nowMs: number = Date.now()): number {
+    const now = new Date(nowMs);
+    return Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() + 1,
+        0,
+        0,
+        0,
+        0
+    );
+}
+
+function getBudgetResetInfo(nowMs: number = Date.now()): { resetAt: string; windowSecondsRemaining: number } {
+    const nextMidnightMs = getNextUtcMidnightMs(nowMs);
+    return {
+        resetAt: new Date(nextMidnightMs).toISOString(),
+        windowSecondsRemaining: Math.max(1, Math.ceil((nextMidnightMs - nowMs) / 1000)),
+    };
 }
 
 function getProfileCommitSnapshotKey(username: string, limit: number): string {
@@ -166,7 +203,7 @@ export async function getToolBudgetUsage(
     scope: ToolBudgetScope,
     audience: CacheAudience,
     actorId?: string
-): Promise<{ used: number; limit: number; remaining: number }> {
+): Promise<ToolBudgetUsage> {
     const key = getToolBudgetKey(scope, audience, actorId);
     const usedRaw = await safeKvOperation(() => kv.get<number>(key));
     const used = typeof usedRaw === "number" ? usedRaw : 0;
@@ -175,29 +212,42 @@ export async function getToolBudgetUsage(
     return { used, limit, remaining };
 }
 
+export async function getToolBudgetWindowUsage(
+    scope: ToolBudgetScope,
+    audience: CacheAudience,
+    actorId?: string
+): Promise<ToolBudgetWindowUsage> {
+    const usage = await getToolBudgetUsage(scope, audience, actorId);
+    return {
+        ...usage,
+        ...getBudgetResetInfo(),
+    };
+}
+
 export async function consumeToolBudgetUsage(
     scope: ToolBudgetScope,
     audience: CacheAudience,
     actorId: string | undefined,
     units: number = 1
-): Promise<{ used: number; limit: number; remaining: number }> {
+): Promise<ToolBudgetWindowUsage> {
     const key = getToolBudgetKey(scope, audience, actorId);
     const normalizedUnits = Math.max(0, Math.floor(units));
     if (normalizedUnits === 0) {
-        return getToolBudgetUsage(scope, audience, actorId);
+        return getToolBudgetWindowUsage(scope, audience, actorId);
     }
 
+    const { resetAt, windowSecondsRemaining } = getBudgetResetInfo();
     const nextRaw = await safeKvOperation(() => kv.incrby(key, normalizedUnits));
     const next = typeof nextRaw === "number" ? nextRaw : normalizedUnits;
-    if (next === normalizedUnits) {
-        await safeKvOperation(() => kv.expire(key, TTL_BUDGET_WINDOW));
-    }
+    await safeKvOperation(() => kv.expire(key, Math.max(1, Math.min(TTL_BUDGET_WINDOW, windowSecondsRemaining + 60))));
 
     const limit = getToolBudgetLimit(audience);
     return {
         used: next,
         limit,
         remaining: Math.max(0, limit - next),
+        resetAt,
+        windowSecondsRemaining,
     };
 }
 

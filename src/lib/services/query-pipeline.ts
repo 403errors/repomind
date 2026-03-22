@@ -37,6 +37,7 @@ export interface RepoQueryParams {
     history?: { role: "user" | "model"; content: string }[];
     profileData?: GitHubProfile;
     modelPreference?: ModelPreference;
+    disableToolCalls?: boolean;
 }
 
 /**
@@ -78,7 +79,8 @@ export interface QueryPipelineDeps {
         repoDetails: { owner: string; repo: string },
         profileData?: GitHubProfile,
         history?: { role: "user" | "model"; content: string }[],
-        modelPreference?: ModelPreference
+        modelPreference?: ModelPreference,
+        disableToolCalls?: boolean
     ) => AsyncGenerator<string>;
 }
 
@@ -193,7 +195,7 @@ export async function* executeRepoQueryStream(
         streamAnswer = answerWithContextStream,
     } = deps;
 
-    const { query, owner, repo, filePaths, fileShas, fileCachePolicy, history = [], profileData, modelPreference } = params;
+    const { query, owner, repo, filePaths, fileShas, fileCachePolicy, history = [], profileData, modelPreference, disableToolCalls = false } = params;
 
     try {
         const pipelineStartMs = Date.now();
@@ -337,13 +339,22 @@ export async function* executeRepoQueryStream(
             progress: 85,
         };
 
+        if (disableToolCalls) {
+            yield {
+                type: "status",
+                message: "Tool calls are paused for this window. Continuing without repository tools.",
+                progress: 86,
+            };
+        }
+
         const stream = streamAnswer(
             query,
             context,
             { owner, repo },
             profileData,
             history,
-            modelPreference
+            modelPreference,
+            disableToolCalls
         );
         const toolsUsed = new Set<string>();
         let commitFreshnessLabel: string | undefined;
@@ -364,6 +375,7 @@ export async function* executeRepoQueryStream(
                         name?: unknown;
                         detail?: unknown;
                         usageUnits?: unknown;
+                        billable?: unknown;
                     };
                     if (typeof parsed.name === "string") {
                         toolsUsed.add(parsed.name);
@@ -372,6 +384,7 @@ export async function* executeRepoQueryStream(
                             name: parsed.name,
                             detail: typeof parsed.detail === "string" ? parsed.detail : undefined,
                             usageUnits: typeof parsed.usageUnits === "number" ? parsed.usageUnits : undefined,
+                            billable: typeof parsed.billable === "boolean" ? parsed.billable : undefined,
                         };
                     }
                 } catch {

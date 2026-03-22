@@ -773,7 +773,8 @@ export async function* answerWithContextStream(
   repoDetails: { owner: string; repo: string },
   _profileData?: GitHubProfile,
   history: { role: "user" | "model"; content: string }[] = [],
-  modelPreference: ModelPreference = "flash"
+  modelPreference: ModelPreference = "flash",
+  disableFunctionTools = false
 ): AsyncGenerator<string> {
   const historyText = formatHistoryText(history);
   let enrichedContext = context;
@@ -787,6 +788,7 @@ export async function* answerWithContextStream(
           name: "googleSearch",
           detail: snapshot.searchQuery,
           usageUnits: 1,
+          billable: false,
         })}`;
         yield "STATUS:External context added. Preparing answer";
       } else {
@@ -819,7 +821,7 @@ export async function* answerWithContextStream(
     - If user asks for more, you MUST fetch 10 and say: "Note: Currently, the limit for fetching commits is 10. Please contact **${SUPPORT_EMAIL}** if you need more usage. I will provide the answer on the basis of the latest 10 commits."`;
   }
 
-  const tools = buildTools(repoDetails);
+  const tools = disableFunctionTools ? [] : buildTools(repoDetails);
   const modelName = getChatModelForPreference(modelPreference);
   const functionDeclarationCount = countFunctionDeclarations(tools);
 
@@ -844,6 +846,9 @@ export async function* answerWithContextStream(
   try {
     console.log(`[answerWithContextStream] Sending Phase 1 request stream...`);
     yield `STATUS:Analyzing context and reasoning with AI...`;
+    if (disableFunctionTools) {
+      yield "STATUS:Tool calls are paused for this window. Continuing without repository tools.";
+    }
     const firstResult = await chat.sendMessageStream(prompt);
 
     for await (const chunk of firstResult.stream) {
@@ -927,6 +932,7 @@ export async function* answerWithContextStream(
         name: normalizeFunctionName(call.name),
         detail,
         usageUnits: 1,
+        billable: false,
       })}`;
       yield `STATUS:Calling ${detail}`;
     }
@@ -939,7 +945,10 @@ export async function* answerWithContextStream(
         yield `STATUS:${res.statusMessage}`;
       }
       if (res.toolEvent) {
-        yield `TOOL:${JSON.stringify(res.toolEvent)}`;
+        yield `TOOL:${JSON.stringify({
+          ...res.toolEvent,
+          billable: res.toolEvent.billable ?? true,
+        })}`;
       }
       if (res.commitFreshnessLabel) {
         yield `META:${JSON.stringify({ commitFreshnessLabel: res.commitFreshnessLabel })}`;
@@ -1084,7 +1093,7 @@ async function resolveToolCall(
 ): Promise<{
   functionResponseData: Record<string, unknown>;
   statusMessage?: string;
-  toolEvent?: { name: string; detail?: string; usageUnits?: number };
+  toolEvent?: { name: string; detail?: string; usageUnits?: number; billable?: boolean };
   commitFreshnessLabel?: string;
 }> {
   const callName = typeof call.name === "string" ? call.name : "";

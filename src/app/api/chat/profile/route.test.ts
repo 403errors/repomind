@@ -154,9 +154,14 @@ describe("POST /api/chat/profile", () => {
         expect(processProfileQueryStreamMock).not.toHaveBeenCalled();
     });
 
-    it("returns anon usage limit error when budget is exhausted", async () => {
+    it("continues streaming with tool calls disabled when budget is exhausted", async () => {
         authMock.mockResolvedValue(null);
         getToolBudgetUsageMock.mockResolvedValueOnce({ used: 10, limit: 10, remaining: 0 });
+        processProfileQueryStreamMock.mockImplementation(async function* () {
+            yield { type: "status", message: "Tool calls are paused for this window.", progress: 50 };
+            yield { type: "content", text: "fallback answer", append: true };
+            yield { type: "complete", relevantFiles: [] };
+        });
 
         const request = new NextRequest("http://localhost/api/chat/profile", {
             method: "POST",
@@ -171,14 +176,13 @@ describe("POST /api/chat/profile", () => {
         });
 
         const response = await POST(request);
-        const body = await response.json();
+        const text = await response.text();
 
-        expect(response.status).toBe(429);
-        expect(body).toEqual({
-            error: "Anonymous tool usage limit reached for profile chat.",
-            code: "ANON_USAGE_LIMIT_EXCEEDED",
-        });
-        expect(processProfileQueryStreamMock).not.toHaveBeenCalled();
+        expect(response.status).toBe(200);
+        expect(processProfileQueryStreamMock).toHaveBeenCalled();
+        expect(processProfileQueryStreamMock.mock.calls[0]?.[3]).toMatchObject({ disableToolCalls: true });
+        expect(text).toContain("fallback answer");
+        expect(consumeToolBudgetUsageMock).not.toHaveBeenCalled();
     });
 
     it("tracks analytics for authenticated users", async () => {
@@ -215,5 +219,66 @@ describe("POST /api/chat/profile", () => {
             userAgent: "Mozilla/5.0 (iPhone; Mobile)",
         });
         expect(consumeToolBudgetUsageMock).toHaveBeenCalledWith("profile", "authenticated", "user_123", 2);
+    });
+
+    it("does not bill native web-search tool units", async () => {
+        authMock.mockResolvedValue({
+            user: { id: "user_123", email: "user@example.com" },
+        });
+        processProfileQueryStreamMock.mockImplementation(async function* () {
+            yield { type: "tool", name: "googleSearch", usageUnits: 4 };
+            yield { type: "content", text: "hello" };
+            yield { type: "complete", relevantFiles: [] };
+        });
+
+        const request = new NextRequest("http://localhost/api/chat/profile", {
+            method: "POST",
+            body: JSON.stringify({
+                query: "Summarize profile",
+                profileContext: {},
+                modelPreference: "flash",
+            }),
+            headers: {
+                "content-type": "application/json",
+                "user-agent": "Mozilla/5.0",
+            },
+        });
+
+        const response = await POST(request);
+        await response.text();
+
+        expect(response.status).toBe(200);
+        expect(consumeToolBudgetUsageMock).not.toHaveBeenCalled();
+    });
+
+    it("bills only one unit when a non-billable tool-intent event is followed by a billable completion event", async () => {
+        authMock.mockResolvedValue({
+            user: { id: "user_123", email: "user@example.com" },
+        });
+        processProfileQueryStreamMock.mockImplementation(async function* () {
+            yield { type: "tool", name: "fetch_recent_commits", usageUnits: 1, billable: false };
+            yield { type: "tool", name: "fetch_recent_commits", usageUnits: 1, billable: true };
+            yield { type: "content", text: "hello" };
+            yield { type: "complete", relevantFiles: [] };
+        });
+
+        const request = new NextRequest("http://localhost/api/chat/profile", {
+            method: "POST",
+            body: JSON.stringify({
+                query: "Summarize profile",
+                profileContext: {},
+                modelPreference: "flash",
+            }),
+            headers: {
+                "content-type": "application/json",
+                "user-agent": "Mozilla/5.0",
+            },
+        });
+
+        const response = await POST(request);
+        await response.text();
+
+        expect(response.status).toBe(200);
+        expect(consumeToolBudgetUsageMock).toHaveBeenCalledWith("profile", "authenticated", "user_123", 1);
     });
 });

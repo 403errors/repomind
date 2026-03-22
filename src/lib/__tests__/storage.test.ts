@@ -33,6 +33,7 @@ import {
     saveConversation,
     loadConversation,
     clearConversation,
+    loadProfileConversation,
 } from "@/lib/storage";
 
 beforeEach(() => {
@@ -136,6 +137,25 @@ describe("saveConversation and loadConversation", () => {
         expect(second.modelUsed).toBe("thinking");
     });
 
+    it("drops stale empty model placeholders while preserving meaningful model payloads", async () => {
+        localStorage.setItem("repomind_chat_owner_repo", JSON.stringify({
+            owner: "owner",
+            repo: "repo",
+            timestamp: Date.now(),
+            messages: [
+                { id: "u1", role: "user", content: "hello" },
+                { id: "stale", role: "model", content: "", streamStatus: "Selecting relevant files" },
+                { id: "scan", role: "model", content: "", scanStatus: "quick_running" },
+                { id: "reasoning", role: "model", content: "", reasoningSteps: ["Thinking"] },
+                { id: "answer", role: "model", content: "done" },
+            ],
+        }));
+
+        const loaded = await loadConversation("owner", "repo");
+        expect(loaded).not.toBeNull();
+        expect(loaded?.map((message) => message.id)).toEqual(["u1", "scan", "reasoning", "answer"]);
+    });
+
     it("treats successful empty cloud response as authoritative and clears stale local cache", async () => {
         localStorage.setItem("repomind_chat_owner_repo", JSON.stringify({
             owner: "owner",
@@ -203,6 +223,25 @@ describe("saveConversation and loadConversation", () => {
 
         expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("DELETE");
+    });
+});
+
+describe("loadProfileConversation normalization", () => {
+    it("drops stale empty model placeholders in profile chat history", async () => {
+        localStorage.setItem("repomind_profile_octocat", JSON.stringify({
+            username: "octocat",
+            timestamp: Date.now(),
+            messages: [
+                { id: "u1", role: "user", content: "hello" },
+                { id: "stale", role: "model", content: "", streamStatus: "Preparing profile analysis" },
+                { id: "reasoning", role: "model", content: "", reasoningSteps: ["Working"] },
+                { id: "m1", role: "model", content: "summary" },
+            ],
+        }));
+
+        const loaded = await loadProfileConversation("octocat");
+        expect(loaded).not.toBeNull();
+        expect(loaded?.map((message) => message.id)).toEqual(["u1", "reasoning", "m1"]);
     });
 });
 

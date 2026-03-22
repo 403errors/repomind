@@ -121,4 +121,31 @@ describe("executeRepoQuery", () => {
             undefined
         );
     });
+
+    it("passes disableToolCalls to the answer stream dependency", async () => {
+        getLatestRepoQueryAnswerMock.mockResolvedValue(null);
+        getCachedRepoQueryAnswerMock.mockResolvedValue(null);
+
+        const analyzeFiles = vi.fn().mockResolvedValue(["src/core.ts"]);
+        const fetchFiles = vi.fn().mockResolvedValue([
+            { path: "src/core.ts", content: "export const value = 1;" },
+        ]);
+        const streamAnswer = vi.fn(async function* () {
+            yield "No-tool response";
+        });
+
+        await executeRepoQuery(
+            {
+                query: "summarize core logic",
+                owner: "acme",
+                repo: "widget",
+                filePaths: ["src/core.ts"],
+                disableToolCalls: true,
+            },
+            { analyzeFiles, fetchFiles, streamAnswer }
+        );
+
+        expect(streamAnswer).toHaveBeenCalled();
+        expect(streamAnswer.mock.calls[0]?.[6]).toBe(true);
+    });
 });

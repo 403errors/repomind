@@ -244,6 +244,44 @@ describe("answerWithContextStream", () => {
         );
     });
 
+    it("disables function tools when disableFunctionTools is true", async () => {
+        const sendMessageStreamMock = vi.fn().mockResolvedValue({
+            stream: toAsyncStream([
+                {
+                    candidates: [{ content: { parts: [{ text: "No-tool answer" }] } }],
+                },
+            ]),
+            response: Promise.resolve({
+                functionCalls: () => [],
+            }),
+        });
+
+        getGenerativeModelMock.mockReturnValue({
+            startChat: () => ({
+                sendMessageStream: sendMessageStreamMock,
+            }),
+        });
+
+        const chunks: string[] = [];
+        for await (const chunk of answerWithContextStream(
+            "Summarize recent activity",
+            "repo context",
+            { owner: "acme", repo: "widget" },
+            undefined,
+            [],
+            "flash",
+            true
+        )) {
+            chunks.push(chunk);
+        }
+
+        expect(getGenerativeModelMock).toHaveBeenCalledWith(expect.objectContaining({
+            tools: [],
+        }));
+        expect(chunks).toContain("STATUS:Tool calls are paused for this window. Continuing without repository tools.");
+        expect(chunks).toContain("No-tool answer");
+    });
+
     it("reuses the same chat session for tool follow-up so thought signatures stay intact", async () => {
         getRecentRepoCommitsSnapshotMock.mockResolvedValue({
             success: true,
@@ -330,6 +368,15 @@ describe("answerWithContextStream", () => {
                 },
             },
         ]);
+        const toolEvents = chunks
+            .filter((chunk) => chunk.startsWith("TOOL:"))
+            .map((chunk) => JSON.parse(chunk.replace("TOOL:", "")) as { name?: string; billable?: boolean });
+        expect(toolEvents).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ name: "fetch_recent_commits", billable: false }),
+                expect.objectContaining({ name: "fetch_recent_commits", billable: true }),
+            ])
+        );
         expect(chunks).toContain("Final answer");
     });
 

@@ -12,6 +12,7 @@ export function mapProfileStreamChunk(chunk: string): StreamUpdate {
                 name?: unknown;
                 detail?: unknown;
                 usageUnits?: unknown;
+                billable?: unknown;
             };
             if (typeof parsed.name === "string") {
                 return {
@@ -19,6 +20,7 @@ export function mapProfileStreamChunk(chunk: string): StreamUpdate {
                     name: parsed.name,
                     detail: typeof parsed.detail === "string" ? parsed.detail : undefined,
                     usageUnits: typeof parsed.usageUnits === "number" ? parsed.usageUnits : undefined,
+                    billable: typeof parsed.billable === "boolean" ? parsed.billable : undefined,
                 };
             }
         } catch {

@@ -561,7 +561,8 @@ export async function* generateAnswerStream(
     cacheActorId?: string,
     history: { role: "user" | "model"; content: string }[] = [],
     profileData?: GitHubProfile,
-    modelPreference: ModelPreference = "flash"
+    modelPreference: ModelPreference = "flash",
+    disableToolCalls = false
 ): AsyncGenerator<StreamUpdate> {
     let visibility: "public" | "private" = "public";
     try {
@@ -587,6 +588,7 @@ export async function* generateAnswerStream(
         history,
         profileData,
         modelPreference,
+        disableToolCalls,
     });
 }
 
@@ -621,12 +623,14 @@ export async function* processProfileQueryStream(
         cacheActorId?: string;
         crossRepoEnabled?: boolean;
         history?: { role: "user" | "model"; content: string }[];
+        disableToolCalls?: boolean;
     } = {}
 ): AsyncGenerator<StreamUpdate> {
     const isThinking = modelPreference === "thinking";
     const cacheAudience = options.cacheAudience ?? "anonymous";
     const cacheActorId = options.cacheActorId;
     const history = options.history ?? [];
+    const disableToolCalls = options.disableToolCalls ?? false;
     let commitFreshnessLabel = profileContext.recentCommitFreshnessLabel;
     const toolsUsed = new Set<string>();
     const pipelineStartMs = Date.now();
@@ -725,6 +729,13 @@ export async function* processProfileQueryStream(
                 : "Checking real-time data and preparing response...",
             progress: 75
         };
+        if (disableToolCalls) {
+            yield {
+                type: "status",
+                message: "Tool calls are paused for this window. Continuing without profile tools.",
+                progress: 76,
+            };
+        }
 
         const stream = answerWithContextStream(
             query,
@@ -732,7 +743,8 @@ export async function* processProfileQueryStream(
             { owner: profileContext.username, repo: "profile" },
             profileContext.profile,
             history,
-            modelPreference
+            modelPreference,
+            disableToolCalls
         );
         const answerStartMs = Date.now();
 

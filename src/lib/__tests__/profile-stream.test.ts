@@ -27,6 +27,15 @@ describe("mapProfileStreamChunk", () => {
         });
     });
 
+    it("preserves billable flag from TOOL chunks", () => {
+        expect(mapProfileStreamChunk("TOOL:{\"name\":\"fetch_recent_commits\",\"usageUnits\":1,\"billable\":false}")).toEqual({
+            type: "tool",
+            name: "fetch_recent_commits",
+            usageUnits: 1,
+            billable: false,
+        });
+    });
+
     it("maps non-prefixed chunks to content updates", () => {
         expect(mapProfileStreamChunk("Final answer chunk")).toEqual({
             type: "content",
