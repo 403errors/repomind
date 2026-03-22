@@ -111,6 +111,11 @@ export const initMermaid = () => {
             messageMargin: 52,
             boxMargin: 12,
         },
+        mindmap: {
+            padding: 6,
+            maxNodeWidth: 170,
+            layoutAlgorithm: "tidy-tree",
+        },
         themeVariables: MERMAID_THEME_VARIABLES,
         themeCSS: MERMAID_THEME_CSS,
     });

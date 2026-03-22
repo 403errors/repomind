@@ -1090,7 +1090,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                                                     />
                                                 </button>
                                             )}
-                                            <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words overflow-hidden w-full min-w-0">
+                                            <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words [overflow-wrap:anywhere] overflow-x-hidden w-full min-w-0">
                                                 {isStreamingScanPlaceholder && (
                                                     <div className="not-prose flex items-center gap-2 py-1 text-sm font-medium text-zinc-300">
                                                         <span>{msg.scanStatus === "deep_running" ? "Deep Scan Running" : "Quick Scan Running"}</span>

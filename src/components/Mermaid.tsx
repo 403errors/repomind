@@ -9,7 +9,7 @@ import {
     getCanonicalMermaidDeclaration,
     isSupportedMermaidVisualCode,
 } from "@/lib/diagram-utils";
-import { Download, X, Maximize2, ZoomIn, Sparkles } from "lucide-react";
+import { Download, X, Maximize2, ZoomIn, Sparkles, Copy, FileCode, Eye } from "lucide-react";
 import { toast } from "sonner";
 import html2canvas from "html2canvas-pro";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,6 +18,7 @@ import { initMermaid } from "@/lib/mermaid-init";
 import { APP_FONT_STACK } from "@/lib/design-tokens";
 import { ensureMermaidMinimumDetail } from "@/lib/diagram-utils";
 import { resolveRouteBeadCount, shouldAnimateDedicatedPreview, shouldEnableLoopingBeads } from "@/lib/mermaid-animation";
+import { pickContrastingTextColor } from "@/lib/color-contrast";
 
 // Initialize mermaid once
 initMermaid();
@@ -25,6 +26,7 @@ initMermaid();
 interface MermaidProps {
     chart: string;
     isStreaming?: boolean;
+    rawCode?: string;
 }
 
 const MAX_ANIMATED_PATHS = 24;
@@ -40,6 +42,22 @@ const MINDMAP_BRANCH_COLORS = [
     { fillVar: "--mindmap-branch-5-fill", strokeVar: "--mindmap-branch-5-stroke", fallbackFill: "#b45309", fallbackStroke: "#fcd34d" },
     { fillVar: "--mindmap-branch-6-fill", strokeVar: "--mindmap-branch-6-stroke", fallbackFill: "#be185d", fallbackStroke: "#f9a8d4" },
 ] as const;
+const MINDMAP_SECTION_PATTERN = /^section-(-?\d+)$/;
+const MINDMAP_EDGE_SECTION_PATTERN = /^section-edge-(-?\d+)$/;
+const MINDMAP_EDGE_SELECTOR = "[class*='section-edge-'], g.edge, path.edge, line.edge, polyline.edge";
+const MINDMAP_BLACK_COLOR_TOKENS = new Set([
+    "#000",
+    "#000000",
+    "black",
+    "rgb(0,0,0)",
+    "rgba(0,0,0,1)",
+    "rgba(0,0,0,1.0)",
+    "hsl(0,0%,0%)",
+    "hsla(0,0%,0%,1)",
+    "hsla(0,0%,0%,1.0)",
+]);
+const MINDMAP_EDGE_STROKE_WIDTH = "1.5";
+const MINDMAP_EDGE_TRIM_PX = 10;
 
 function resolveThemeVar(variable: string, fallback: string): string {
     if (typeof window === "undefined") {
@@ -215,63 +233,461 @@ function resetAnimatedSvgStyles(svgElement: SVGSVGElement): void {
     });
 }
 
-function getMindmapSectionIndex(classList: DOMTokenList): number {
+function normalizeColorToken(color: string): string {
+    return color.replace(/\s+/g, "").toLowerCase();
+}
+
+function isMindmapBlackColor(color: string): boolean {
+    return MINDMAP_BLACK_COLOR_TOKENS.has(normalizeColorToken(color));
+}
+
+function resolveMindmapPalette(): string[] {
+    const fallbackPalette = MINDMAP_BRANCH_COLORS.map((entry) => entry.fallbackStroke);
+    const resolvedPalette = MINDMAP_BRANCH_COLORS.map((entry, index) => {
+        const resolved = resolveThemeVar(entry.strokeVar, fallbackPalette[index] ?? "#60a5fa");
+        return isMindmapBlackColor(resolved) ? (fallbackPalette[index] ?? "#60a5fa") : resolved;
+    });
+
+    for (let index = 1; index < resolvedPalette.length; index += 1) {
+        const current = normalizeColorToken(resolvedPalette[index] ?? "");
+        const previous = normalizeColorToken(resolvedPalette[index - 1] ?? "");
+        if (!current || current !== previous) continue;
+
+        const replacement = resolvedPalette.find((candidate, candidateIndex) => {
+            if (candidateIndex === index) return false;
+            const normalized = normalizeColorToken(candidate ?? "");
+            return normalized.length > 0 && normalized !== previous && !isMindmapBlackColor(candidate ?? "");
+        }) ?? fallbackPalette.find((candidate) => normalizeColorToken(candidate) !== previous);
+
+        if (replacement) {
+            resolvedPalette[index] = replacement;
+        }
+    }
+
+    return resolvedPalette;
+}
+
+function getMindmapSectionFromClassList(classList: DOMTokenList): number | null {
     for (const className of Array.from(classList)) {
-        const match = /^section-(-?\d+)$/.exec(className);
+        const match = MINDMAP_EDGE_SECTION_PATTERN.exec(className) ?? MINDMAP_SECTION_PATTERN.exec(className);
         if (!match) continue;
         const section = Number.parseInt(match[1], 10);
         if (!Number.isFinite(section) || section < 0) {
             return 0;
         }
-        return section % MINDMAP_BRANCH_COLORS.length;
+        return section;
+    }
+    return null;
+}
+
+function getMindmapSectionForElement(element: Element): number {
+    let current: Element | null = element;
+    while (current) {
+        const section = getMindmapSectionFromClassList(current.classList);
+        if (section !== null) {
+            return section;
+        }
+        current = current.parentElement;
     }
     return 0;
 }
 
-function applyMindmapThemeOverrides(svgElement: SVGSVGElement): void {
-    const palette = MINDMAP_BRANCH_COLORS.map((entry) => ({
-        fill: resolveThemeVar(entry.fillVar, entry.fallbackFill),
-        stroke: resolveThemeVar(entry.strokeVar, entry.fallbackStroke),
-    }));
-    const textColor = resolveThemeVar("--mindmap-branch-text", "#f8fafc");
+function getMindmapNodeCenter(node: SVGGElement): { x: number; y: number } {
+    try {
+        const box = node.getBBox();
+        return { x: box.x + (box.width / 2), y: box.y + (box.height / 2) };
+    } catch {
+        return { x: 0, y: 0 };
+    }
+}
 
+function getSvgCenter(svgElement: SVGSVGElement): { x: number; y: number } {
+    const viewBox = svgElement.viewBox?.baseVal;
+    if (viewBox && Number.isFinite(viewBox.width) && Number.isFinite(viewBox.height) && viewBox.width > 0 && viewBox.height > 0) {
+        return { x: viewBox.x + (viewBox.width / 2), y: viewBox.y + (viewBox.height / 2) };
+    }
+
+    const width = Number.parseFloat(svgElement.getAttribute("width") ?? "");
+    const height = Number.parseFloat(svgElement.getAttribute("height") ?? "");
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+        return { x: width / 2, y: height / 2 };
+    }
+
+    return { x: 0, y: 0 };
+}
+
+function squaredDistance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return (dx * dx) + (dy * dy);
+}
+
+type MindmapNodeTier = "root" | "category" | "leaf";
+
+interface MindmapNodeMeta {
+    node: SVGGElement;
+    center: { x: number; y: number };
+    box: { x: number; y: number; width: number; height: number };
+    section: number;
+    tier: MindmapNodeTier;
+}
+
+function getMindmapNodeBox(node: SVGGElement): { x: number; y: number; width: number; height: number } {
+    try {
+        const box = node.getBBox();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+    } catch {
+        return { x: 0, y: 0, width: 0, height: 0 };
+    }
+}
+
+function classifyMindmapNodeTiers(svgElement: SVGSVGElement): MindmapNodeMeta[] {
+    const nodes = Array.from(svgElement.querySelectorAll<SVGGElement>("g.mindmap-node"));
+    if (nodes.length === 0) return [];
+
+    const metas = nodes.map((node) => {
+        const box = getMindmapNodeBox(node);
+        const center = box.width > 0 || box.height > 0
+            ? { x: box.x + (box.width / 2), y: box.y + (box.height / 2) }
+            : getMindmapNodeCenter(node);
+        return {
+            node,
+            box,
+            center,
+            section: getMindmapSectionForElement(node),
+            tier: "leaf" as MindmapNodeTier,
+        };
+    });
+
+    const svgCenter = getSvgCenter(svgElement);
+    let rootMeta = metas[0];
+    for (const meta of metas) {
+        if (squaredDistance(meta.center, svgCenter) < squaredDistance(rootMeta.center, svgCenter)) {
+            rootMeta = meta;
+        }
+    }
+    rootMeta.tier = "root";
+
+    const bySection = new Map<number, MindmapNodeMeta[]>();
+    for (const meta of metas) {
+        if (meta === rootMeta) continue;
+        const bucket = bySection.get(meta.section) ?? [];
+        bucket.push(meta);
+        bySection.set(meta.section, bucket);
+    }
+
+    bySection.forEach((sectionNodes) => {
+        let nearest = sectionNodes[0];
+        for (const candidate of sectionNodes) {
+            if (squaredDistance(candidate.center, rootMeta.center) < squaredDistance(nearest.center, rootMeta.center)) {
+                nearest = candidate;
+            }
+        }
+        nearest.tier = "category";
+    });
+
+    return metas;
+}
+
+function distancePointToNodeBox(point: { x: number; y: number }, box: { x: number; y: number; width: number; height: number }): number {
+    if (box.width <= 0 || box.height <= 0) {
+        return Number.POSITIVE_INFINITY;
+    }
+    const clampedX = Math.max(box.x, Math.min(point.x, box.x + box.width));
+    const clampedY = Math.max(box.y, Math.min(point.y, box.y + box.height));
+    return Math.hypot(point.x - clampedX, point.y - clampedY);
+}
+
+function findNearestMindmapNodeMeta(point: { x: number; y: number }, nodes: MindmapNodeMeta[]): MindmapNodeMeta | null {
+    let nearest: MindmapNodeMeta | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const node of nodes) {
+        const distance = distancePointToNodeBox(point, node.box);
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearest = node;
+        }
+    }
+
+    return nearest;
+}
+
+function parseSvgPolylinePoints(value: string): Array<{ x: number; y: number }> {
+    return value
+        .trim()
+        .split(/\s+/)
+        .map((point) => {
+            const [x, y] = point.split(",").map((part) => Number.parseFloat(part));
+            return { x, y };
+        })
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+}
+
+function resolveEdgeGeometryElement(edgeElement: SVGElement): SVGElement | null {
+    const tag = edgeElement.tagName.toLowerCase();
+    if (tag === "path" || tag === "line" || tag === "polyline") {
+        return edgeElement;
+    }
+    return edgeElement.querySelector<SVGElement>("path, line, polyline");
+}
+
+function getEdgeTerminalPoint(edgeElement: SVGElement, terminal: "start" | "end"): { x: number; y: number } | null {
+    const geometry = resolveEdgeGeometryElement(edgeElement);
+    if (!geometry) return null;
+
+    const tag = geometry.tagName.toLowerCase();
+    if (tag === "line") {
+        const x = Number.parseFloat(geometry.getAttribute(terminal === "start" ? "x1" : "x2") ?? "");
+        const y = Number.parseFloat(geometry.getAttribute(terminal === "start" ? "y1" : "y2") ?? "");
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y };
+    }
+
+    if (tag === "polyline") {
+        const points = parseSvgPolylinePoints(geometry.getAttribute("points") ?? "");
+        if (points.length === 0) return null;
+        return terminal === "start" ? points[0] ?? null : points[points.length - 1] ?? null;
+    }
+
+    if (tag === "path") {
+        const path = geometry as SVGPathElement;
+        try {
+            const totalLength = path.getTotalLength();
+            if (!Number.isFinite(totalLength) || totalLength <= 0) return null;
+            const distance = terminal === "start" ? 0 : totalLength;
+            const point = path.getPointAtLength(distance);
+            return { x: point.x, y: point.y };
+        } catch {
+            return null;
+        }
+    }
+
+    return null;
+}
+
+function resolveMindmapEdgeColor(
+    edgeElement: SVGElement,
+    nodeMetaList: MindmapNodeMeta[],
+    sectionColor: string,
+    rootEdgeColor: string,
+    categoryEdgeColor: string
+): string {
+    const startPoint = getEdgeTerminalPoint(edgeElement, "start");
+    if (!startPoint) return sectionColor;
+    const sourceNode = findNearestMindmapNodeMeta(startPoint, nodeMetaList);
+    if (!sourceNode) return sectionColor;
+    if (sourceNode.tier === "root") {
+        return rootEdgeColor;
+    }
+    if (sourceNode.tier === "category") {
+        return categoryEdgeColor;
+    }
+    return sectionColor;
+}
+
+function elevateMindmapNodesAboveEdges(svgElement: SVGSVGElement): void {
     const mindmapNodes = Array.from(svgElement.querySelectorAll<SVGGElement>("g.mindmap-node"));
+    const parentBuckets = new Map<Element, SVGGElement[]>();
+
     mindmapNodes.forEach((node) => {
-        const sectionIndex = getMindmapSectionIndex(node.classList);
-        const sectionPalette = palette[sectionIndex] ?? palette[0];
-        const nodeShapes = node.querySelectorAll<SVGElement>(".label-container, .node-bkg, rect, polygon, circle, ellipse, path");
-        nodeShapes.forEach((shape) => {
-            shape.style.setProperty("fill", sectionPalette.fill, "important");
-            shape.style.setProperty("stroke", sectionPalette.stroke, "important");
+        const parent = node.parentElement;
+        if (!parent) return;
+        const bucket = parentBuckets.get(parent) ?? [];
+        bucket.push(node);
+        parentBuckets.set(parent, bucket);
+    });
+
+    parentBuckets.forEach((nodes, parent) => {
+        nodes.forEach((node) => {
+            parent.appendChild(node);
         });
-        const nodeLines = node.querySelectorAll<SVGLineElement>("line");
+    });
+}
+
+function applyMindmapEdgeGeometryTrim(edgeElement: SVGElement, trimPx: number): void {
+    const tag = edgeElement.tagName.toLowerCase();
+    if (tag === "line") {
+        const x1 = Number.parseFloat(edgeElement.getAttribute("x1") ?? "");
+        const y1 = Number.parseFloat(edgeElement.getAttribute("y1") ?? "");
+        const x2 = Number.parseFloat(edgeElement.getAttribute("x2") ?? "");
+        const y2 = Number.parseFloat(edgeElement.getAttribute("y2") ?? "");
+        if ([x1, y1, x2, y2].some((value) => !Number.isFinite(value))) return;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.hypot(dx, dy);
+        if (!Number.isFinite(length) || length <= 0) return;
+        const appliedTrim = Math.min(trimPx, (length / 2) - 0.5);
+        if (appliedTrim <= 0) return;
+        const ux = dx / length;
+        const uy = dy / length;
+        edgeElement.setAttribute("x1", String(x1 + (ux * appliedTrim)));
+        edgeElement.setAttribute("y1", String(y1 + (uy * appliedTrim)));
+        edgeElement.setAttribute("x2", String(x2 - (ux * appliedTrim)));
+        edgeElement.setAttribute("y2", String(y2 - (uy * appliedTrim)));
+        return;
+    }
+
+    if (tag === "polyline") {
+        const rawPoints = edgeElement.getAttribute("points") ?? "";
+        const parsedPoints = parseSvgPolylinePoints(rawPoints);
+
+        if (parsedPoints.length < 2) return;
+
+        const first = parsedPoints[0];
+        const second = parsedPoints[1];
+        const penultimate = parsedPoints[parsedPoints.length - 2];
+        const last = parsedPoints[parsedPoints.length - 1];
+        if (!first || !second || !penultimate || !last) return;
+
+        const trimEndpoint = (from: { x: number; y: number }, toward: { x: number; y: number }) => {
+            const dx = toward.x - from.x;
+            const dy = toward.y - from.y;
+            const length = Math.hypot(dx, dy);
+            if (!Number.isFinite(length) || length <= 0) return from;
+            const appliedTrim = Math.min(trimPx, (length / 2) - 0.5);
+            if (appliedTrim <= 0) return from;
+            const ux = dx / length;
+            const uy = dy / length;
+            return { x: from.x + (ux * appliedTrim), y: from.y + (uy * appliedTrim) };
+        };
+
+        parsedPoints[0] = trimEndpoint(first, second);
+        parsedPoints[parsedPoints.length - 1] = trimEndpoint(last, penultimate);
+
+        edgeElement.setAttribute("points", parsedPoints.map((point) => `${point.x},${point.y}`).join(" "));
+        return;
+    }
+
+    if (tag === "path") {
+        const path = edgeElement as SVGPathElement;
+        try {
+            const rawPath = path.getAttribute("d") ?? "";
+            const isSingleStraightSegment = /^\s*[Mm][^A-Za-z]*[Ll][^A-Za-z]*\s*$/.test(rawPath);
+            if (!isSingleStraightSegment) return;
+
+            const totalLength = path.getTotalLength();
+            if (!Number.isFinite(totalLength) || totalLength <= 0) return;
+            const appliedTrim = Math.min(trimPx, (totalLength / 2) - 0.5);
+            if (appliedTrim <= 0) return;
+            const start = path.getPointAtLength(appliedTrim);
+            const end = path.getPointAtLength(totalLength - appliedTrim);
+            path.setAttribute("d", `M ${start.x} ${start.y} L ${end.x} ${end.y}`);
+        } catch {
+            // If the browser cannot resolve path length for this edge, keep original geometry.
+        }
+    }
+}
+
+function resolveMindmapBranchTextColor(backgroundColor: string): string {
+    const darkText = resolveThemeVar("--mindmap-branch-text-dark", "#0f172a");
+    const lightText = resolveThemeVar("--mindmap-branch-text-light", "#f8fafc");
+    return pickContrastingTextColor(backgroundColor, darkText, lightText);
+}
+
+function applyMindmapThemeOverrides(svgElement: SVGSVGElement): void {
+    const palette = resolveMindmapPalette();
+    const centerFill = resolveThemeVar("--mindmap-center-fill", "#4f46e5");
+    const centerStroke = resolveThemeVar("--mindmap-center-stroke", "#4338ca");
+    const centerText = resolveThemeVar("--mindmap-center-text", "#f8fafc");
+    const categoryFill = resolveThemeVar("--mindmap-category-fill", "#1f2937");
+    const categoryStroke = resolveThemeVar("--mindmap-category-stroke", "#475569");
+    const categoryText = resolveThemeVar("--mindmap-category-text", "#e2e8f0");
+    const sectionOrder = new Map<number, number>();
+    const getSectionColor = (section: number): string => {
+        if (!sectionOrder.has(section)) {
+            sectionOrder.set(section, sectionOrder.size);
+        }
+        const paletteIndex = sectionOrder.get(section) ?? 0;
+        const color = palette[paletteIndex % palette.length];
+        return color ?? palette[0] ?? "#60a5fa";
+    };
+
+    elevateMindmapNodesAboveEdges(svgElement);
+    const nodeMetaList = classifyMindmapNodeTiers(svgElement);
+    const nodeMetaByElement = new Map(nodeMetaList.map((meta) => [meta.node, meta]));
+
+    nodeMetaList.forEach((meta) => {
+        const { node, section, tier } = meta;
+        const sectionColor = getSectionColor(section);
+        const leafTextColor = resolveMindmapBranchTextColor(sectionColor);
+        const nodeFill = tier === "root" ? centerFill : tier === "category" ? categoryFill : sectionColor;
+        const nodeStroke = tier === "root" ? centerStroke : tier === "category" ? categoryStroke : sectionColor;
+        const nodeTextColor = tier === "root" ? centerText : tier === "category" ? categoryText : leafTextColor;
+        const nodeStrokeWidth = tier === "root" ? "2.5" : tier === "category" ? "2" : "1.75";
+
+        const nodeBodies = node.querySelectorAll<SVGElement>(".label-container, .node-bkg, rect, polygon, circle, ellipse");
+        nodeBodies.forEach((shape) => {
+            shape.style.setProperty("fill", nodeFill, "important");
+            shape.style.setProperty("fill-opacity", "1", "important");
+            shape.style.setProperty("stroke", nodeStroke, "important");
+            shape.style.setProperty("stroke-width", nodeStrokeWidth, "important");
+
+            if (tier === "category" && shape.tagName.toLowerCase() === "rect") {
+                shape.setAttribute("rx", "8");
+                shape.setAttribute("ry", "8");
+            }
+        });
+
+        const nodeLines = node.querySelectorAll<SVGElement>("line, polyline, path");
         nodeLines.forEach((line) => {
-            line.style.setProperty("stroke", sectionPalette.stroke, "important");
+            line.style.setProperty("stroke", nodeStroke, "important");
+            line.style.setProperty("stroke-width", nodeStrokeWidth, "important");
         });
-        const nodeText = node.querySelectorAll<SVGTextElement>("text");
-        nodeText.forEach((text) => {
-            text.style.setProperty("fill", textColor, "important");
+
+        const nodeTextElements = node.querySelectorAll<SVGTextElement>("text");
+        nodeTextElements.forEach((textElement) => {
+            textElement.style.setProperty("fill", nodeTextColor, "important");
         });
     });
 
-    palette.forEach((sectionPalette, sectionIndex) => {
-        const sectionEdges = svgElement.querySelectorAll<SVGElement>(`.section-edge-${sectionIndex}`);
-        sectionEdges.forEach((edge) => {
-            edge.style.setProperty("stroke", sectionPalette.stroke, "important");
-            if (edge.tagName.toLowerCase() !== "g") {
-                edge.style.setProperty("fill", "none", "important");
-            }
-            const edgePaths = edge.querySelectorAll<SVGElement>("path, line, polyline");
-            edgePaths.forEach((path) => {
-                path.style.setProperty("stroke", sectionPalette.stroke, "important");
-                path.style.setProperty("fill", "none", "important");
-            });
+    const edgeElements = svgElement.querySelectorAll<SVGElement>(MINDMAP_EDGE_SELECTOR);
+    edgeElements.forEach((edge) => {
+        const section = getMindmapSectionForElement(edge);
+        const sectionColor = getSectionColor(section);
+        const edgeColor = resolveMindmapEdgeColor(edge, nodeMetaList, sectionColor, centerStroke, categoryStroke);
+
+        edge.style.setProperty("stroke", edgeColor, "important");
+        edge.style.setProperty("stroke-width", MINDMAP_EDGE_STROKE_WIDTH, "important");
+        edge.style.setProperty("stroke-linecap", "round", "important");
+        edge.style.setProperty("stroke-linejoin", "round", "important");
+        edge.style.setProperty("filter", "none", "important");
+        edge.style.setProperty("opacity", "1", "important");
+        if (edge.tagName.toLowerCase() !== "g") {
+            edge.style.setProperty("fill", "none", "important");
+        }
+
+        const edgePaths = edge.querySelectorAll<SVGElement>("path, line, polyline, polygon");
+        edgePaths.forEach((edgePath) => {
+            edgePath.style.setProperty("stroke", edgeColor, "important");
+            edgePath.style.setProperty("fill", "none", "important");
+            edgePath.style.setProperty("stroke-width", MINDMAP_EDGE_STROKE_WIDTH, "important");
+            edgePath.style.setProperty("stroke-linecap", "round", "important");
+            edgePath.style.setProperty("stroke-linejoin", "round", "important");
+            edgePath.style.setProperty("filter", "none", "important");
+            applyMindmapEdgeGeometryTrim(edgePath, MINDMAP_EDGE_TRIM_PX);
         });
+
+        applyMindmapEdgeGeometryTrim(edge, MINDMAP_EDGE_TRIM_PX);
     });
 
     const allMindmapText = svgElement.querySelectorAll<SVGTextElement>(".mindmap-node-label, .mindmap-node text");
-    allMindmapText.forEach((text) => {
-        text.style.setProperty("fill", textColor, "important");
+    allMindmapText.forEach((textElement) => {
+        const owningNode = textElement.closest<SVGGElement>("g.mindmap-node");
+        const meta = owningNode ? nodeMetaByElement.get(owningNode) : null;
+        if (!meta) return;
+
+        if (meta.tier === "root") {
+            textElement.style.setProperty("fill", centerText, "important");
+            return;
+        }
+        if (meta.tier === "category") {
+            textElement.style.setProperty("fill", categoryText, "important");
+            return;
+        }
+
+        const sectionColor = getSectionColor(meta.section);
+        textElement.style.setProperty("fill", resolveMindmapBranchTextColor(sectionColor), "important");
     });
 }
 
@@ -430,13 +846,15 @@ function runMermaidEntranceAnimations(svgElement: SVGSVGElement, chart: string, 
 }
 
 
-export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
+export const Mermaid = ({ chart, isStreaming = false, rawCode }: MermaidProps) => {
     const [svg, setSvg] = useState<string>("");
     const [renderedChart, setRenderedChart] = useState<string>("");
     const [isBrowser, setIsBrowser] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isFixing, setIsFixing] = useState(false);
+    const [isRawView, setIsRawView] = useState(false);
+    const [copiedRaw, setCopiedRaw] = useState(false);
     const diagramRef = useRef<HTMLDivElement>(null);
     const modalRef = useRef<HTMLDivElement>(null);
     const lastAnimatedSvgRef = useRef("");
@@ -448,6 +866,12 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
     // look like the UI is blocked. Only show it if we are fixing the diagram or if we have no SVG at all
     // and are NOT in the middle of a stream (i.e. first render or explicit generation).
     const showOverlay = !svg && (isFixing || isGenerating);
+    const activeMermaidSource = useMemo(() => {
+        if (rawCode && rawCode.trim().length > 0) {
+            return rawCode;
+        }
+        return renderedChart || chart || "";
+    }, [rawCode, renderedChart, chart]);
 
     // Use a stable ID based on chart content to prevent re-renders
     const id = useMemo(() => {
@@ -805,22 +1229,47 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
         }
     };
 
+    const handleCopyRawCode = async (e?: React.MouseEvent) => {
+        e?.stopPropagation();
+        if (!activeMermaidSource.trim()) {
+            toast.error("No Mermaid code to copy");
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(activeMermaidSource);
+            setCopiedRaw(true);
+            window.setTimeout(() => setCopiedRaw(false), 1800);
+            toast.success("Mermaid code copied");
+        } catch {
+            toast.error("Failed to copy Mermaid code");
+        }
+    };
+
     return (
         <>
             <div
-                className={`my-4 group relative isolate ${isGenerating ? "cursor-default" : "cursor-zoom-in"}`}
+                className={`my-4 group relative isolate ${isGenerating || isRawView ? "cursor-default" : "cursor-zoom-in"}`}
                 onClick={() => {
-                    if (!isGenerating && svg) {
+                    if (!isGenerating && svg && !isRawView) {
                         setIsModalOpen(true);
                     }
                 }}
             >
-                <div
-                    ref={diagramRef}
-                    className="diagram-inline-content overflow-hidden max-h-[80vh] p-2 md:p-4 rounded-lg border border-white/5 hover:border-white/10 transition-colors flex items-center justify-center min-w-0"
-                    dangerouslySetInnerHTML={{ __html: svg }}
-                    style={{ minHeight: svg ? 'auto' : '200px' }}
-                />
+                {isRawView ? (
+                    <div
+                        className="overflow-hidden max-h-[80vh] p-2 md:p-4 rounded-lg border border-white/5 hover:border-white/10 transition-colors min-w-0"
+                        style={{ minHeight: activeMermaidSource ? 'auto' : '200px' }}
+                    >
+                        <pre className="m-0 max-h-[72vh] overflow-auto rounded-lg border border-white/10 bg-zinc-950/80 p-4 text-xs leading-relaxed text-zinc-200 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{activeMermaidSource || "No Mermaid code available."}</pre>
+                    </div>
+                ) : (
+                    <div
+                        ref={diagramRef}
+                        className="diagram-inline-content overflow-hidden max-h-[80vh] p-2 md:p-4 rounded-lg border border-white/5 hover:border-white/10 transition-colors flex items-center justify-center min-w-0"
+                        dangerouslySetInnerHTML={{ __html: svg }}
+                        style={{ minHeight: svg ? 'auto' : '200px' }}
+                    />
+                )}
                 <style>{`
                     .diagram-inline-content svg {
                         width: auto !important;
@@ -839,15 +1288,40 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
 
                 {/* Overlay controls */}
                 {!isGenerating && svg && (
-                    <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                    <div className="absolute top-2 right-2 flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
                         <button
-                            onClick={exportToPNG}
-                            className="p-2 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg backdrop-blur-sm"
-                            title="Export as PNG"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsRawView((prev) => !prev);
+                            }}
+                            className="p-2 bg-zinc-800/85 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg backdrop-blur-sm"
+                            title={isRawView ? "Show preview" : "Show raw Mermaid code"}
                         >
-                            <Download className="w-4 h-4" />
+                            {isRawView ? <Eye className="w-4 h-4" /> : <FileCode className="w-4 h-4" />}
                         </button>
                         <button
+                            onClick={handleCopyRawCode}
+                            className="p-2 bg-zinc-800/85 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg backdrop-blur-sm"
+                            title="Copy Mermaid code"
+                        >
+                            <Copy className={`w-4 h-4 ${copiedRaw ? "text-emerald-400" : ""}`} />
+                        </button>
+                        {!isRawView && (
+                            <button
+                                onClick={exportToPNG}
+                                className="p-2 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg backdrop-blur-sm"
+                                title="Export as PNG"
+                            >
+                                <Download className="w-4 h-4" />
+                            </button>
+                        )}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (!isRawView) {
+                                    setIsModalOpen(true);
+                                }
+                            }}
                             className="p-2 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg backdrop-blur-sm"
                             title="View Fullscreen"
                         >
@@ -908,10 +1382,28 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                                 <div className="flex shrink-0 items-center justify-between p-4 bg-transparent">
                                     <h3 className="text-sm font-medium text-zinc-400 flex items-center gap-2">
                                         <ZoomIn className="w-4 h-4" />
-                                        Diagram Preview
+                                        {isRawView ? "Mermaid Raw Code" : "Diagram Preview"}
                                     </h3>
                                     <div className="flex items-center gap-2">
                                         {!isGenerating && svg && (
+                                            <>
+                                                <button
+                                                    onClick={() => setIsRawView((prev) => !prev)}
+                                                    className="p-2 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                                                    title={isRawView ? "Show preview" : "Show raw Mermaid code"}
+                                                >
+                                                    {isRawView ? <Eye className="w-5 h-5" /> : <FileCode className="w-5 h-5" />}
+                                                </button>
+                                                <button
+                                                    onClick={handleCopyRawCode}
+                                                    className="p-2 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                                                    title="Copy Mermaid code"
+                                                >
+                                                    <Copy className={`w-5 h-5 ${copiedRaw ? "text-emerald-400" : ""}`} />
+                                                </button>
+                                            </>
+                                        )}
+                                        {!isGenerating && svg && !isRawView && (
                                             <button
                                                 onClick={exportToPNG}
                                                 className="p-2 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"
@@ -956,11 +1448,17 @@ export const Mermaid = ({ chart, isStreaming = false }: MermaidProps) => {
                                     `}</style>
                                     <div className="h-full w-full overflow-hidden">
                                         <div className="h-full w-full grid place-items-center">
-                                            <div
-                                                ref={modalRef}
-                                                className="h-full w-full flex items-center justify-center overflow-hidden"
-                                                dangerouslySetInnerHTML={{ __html: svg }}
-                                            />
+                                            {isRawView ? (
+                                                <div className="h-full w-full overflow-auto rounded-lg border border-white/10 bg-zinc-950/80 p-4 text-xs leading-relaxed text-zinc-200 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                                                    {activeMermaidSource || "No Mermaid code available."}
+                                                </div>
+                                            ) : (
+                                                <div
+                                                    ref={modalRef}
+                                                    className="h-full w-full flex items-center justify-center overflow-hidden"
+                                                    dangerouslySetInnerHTML={{ __html: svg }}
+                                                />
+                                            )}
                                         </div>
                                     </div>
                                 </div>

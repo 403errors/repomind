@@ -75,7 +75,7 @@ export function ReasoningBlock({ steps, isStreaming }: ReasoningBlockProps) {
                 onClick={() => hasRealThoughts && setIsExpanded(v => !v)}
                 disabled={!hasRealThoughts}
                 className={cn(
-                    "flex items-center gap-2 mb-1.5 group outline-none max-w-full text-left min-h-10 min-w-0",
+                    "flex items-start sm:items-center gap-2 mb-1.5 group outline-none max-w-full text-left min-h-10 min-w-0",
                     !hasRealThoughts && "cursor-default"
                 )}
             >
@@ -111,7 +111,7 @@ export function ReasoningBlock({ steps, isStreaming }: ReasoningBlockProps) {
 
                 {/* Inline current reasoning step (shown when collapsed) */}
                 {!isExpanded && currentStep && (
-                    <div className="text-xs text-zinc-500 truncate flex-1 min-w-0 pr-4">
+                    <div className="text-xs text-zinc-500 flex-1 min-w-0 pr-2 whitespace-normal break-words [overflow-wrap:anywhere] sm:truncate sm:whitespace-nowrap sm:pr-4">
                         {getCurrentStepTitle(currentStep)}
                     </div>
                 )}

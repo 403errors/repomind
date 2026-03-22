@@ -127,7 +127,7 @@ export default function RepoSearch({
                     <button
                         type="submit"
                         disabled={loading}
-                        className="bg-white text-black p-2 md:p-3 rounded-md hover:bg-zinc-200 transition-colors disabled:opacity-50 shrink-0"
+                        className="p-2 md:p-3 rounded-md transition-all disabled:opacity-60 shrink-0 text-white border border-purple-300/35 bg-gradient-to-br from-purple-700 via-purple-600 to-indigo-600 hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0 shadow-[0_10px_30px_-15px_rgba(147,51,234,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60"
                     >
                         {loading || isFetchingSuggestions ? (
                             <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />

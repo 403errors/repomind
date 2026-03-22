@@ -825,7 +825,7 @@ export function ProfileChatInterface({
                                                 />
                                             </button>
                                         )}
-                                        <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words overflow-hidden w-full min-w-0">
+                                        <div className="prose prose-invert prose-sm max-w-none leading-relaxed break-words [overflow-wrap:anywhere] overflow-x-hidden w-full min-w-0">
                                             {msg.content && (
                                                 <MessageContent
                                                     content={msg.content + (loading && isLatestMessage ? "▋" : "")}

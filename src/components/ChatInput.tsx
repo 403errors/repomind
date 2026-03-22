@@ -220,11 +220,13 @@ export function ChatInput({
                     <button
                         type="submit"
                         disabled={loading || disabled || (!value.trim() && !allowEmptySubmit)}
-                        className="p-1 rounded-lg transition-all"
+                        className="p-1 rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60"
                     >
                         <div className={cn(
-                            "w-10 h-10 rounded-2xl flex items-center justify-center transition-all shadow-xl",
-                            !disabled && value.trim() ? "bg-gradient-to-tr from-purple-600 to-indigo-600 text-white hover:scale-105 active:scale-95 shadow-purple-500/20" : "bg-zinc-800 text-zinc-500 opacity-50 shadow-none border border-white/5"
+                            "w-10 h-10 rounded-2xl flex items-center justify-center transition-all border",
+                            !disabled && value.trim()
+                                ? "bg-gradient-to-br from-purple-700 via-purple-600 to-indigo-600 text-white border-purple-300/35 shadow-[0_10px_30px_-15px_rgba(147,51,234,0.85)] hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0"
+                                : "bg-zinc-800/80 text-zinc-500 border-white/10 opacity-60 shadow-none"
                         )}>
                             <Send className="w-4.5 h-4.5" />
                         </div>

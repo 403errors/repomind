@@ -12,6 +12,17 @@ describe("Mermaid diagram post-render theming hooks", () => {
         expect(mermaidComponentSource).toContain("g.mindmap-node");
         expect(mermaidComponentSource).toContain("section-edge-");
         expect(mermaidComponentSource).toContain("--mindmap-branch-1-fill");
+        expect(mermaidComponentSource).toContain("MINDMAP_EDGE_SELECTOR");
+        expect(mermaidComponentSource).toContain("isMindmapBlackColor");
+        expect(mermaidComponentSource).toContain("getSectionColor(section)");
+        expect(mermaidComponentSource).toContain("--mindmap-center-fill");
+        expect(mermaidComponentSource).toContain("--mindmap-category-fill");
+        expect(mermaidComponentSource).toContain("classifyMindmapNodeTiers");
+        expect(mermaidComponentSource).toContain("pickContrastingTextColor");
+        expect(mermaidComponentSource).toContain("applyMindmapEdgeGeometryTrim");
+        expect(mermaidComponentSource).toContain("MINDMAP_EDGE_STROKE_WIDTH");
+        expect(mermaidComponentSource).toContain("resolveMindmapEdgeColor");
+        expect(mermaidComponentSource).toContain("getEdgeTerminalPoint");
     });
 
     it("forces xychart background transparency and themed plot colors", () => {
