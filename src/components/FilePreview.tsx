@@ -184,14 +184,14 @@ export function FilePreview({ isOpen, filePath, repoOwner, repoName, onClose }: 
                     className="relative w-full max-w-5xl max-h-[90vh] bg-zinc-900 border border-white/10 rounded-xl shadow-2xl flex flex-col overflow-hidden"
                 >
                     {/* Header */}
-                    <div className="flex items-center justify-between p-4 border-b border-white/10 bg-zinc-900/80 backdrop-blur-sm">
-                        <div className="flex items-center gap-3">
-                            <FileIcon filename={filePath?.split('/').pop() || ''} className="w-5 h-5" />
-                            <h2 className="text-white font-semibold truncate max-w-md" title={filePath || ''}>
+                    <div className="flex items-center justify-between gap-4 p-4 border-b border-white/10 bg-zinc-900/80 backdrop-blur-sm">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <FileIcon filename={filePath?.split('/').pop() || ''} className="w-5 h-5 flex-shrink-0" />
+                            <h2 className="text-white font-semibold truncate" title={filePath || ''}>
                                 {filePath}
                             </h2>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-shrink-0">
                             {fileInfo?.download_url && (
                                 <a
                                     href={fileInfo.download_url}

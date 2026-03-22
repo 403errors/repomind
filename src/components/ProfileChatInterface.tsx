@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 
 import { BotIcon } from "@/components/icons/BotIcon";
-import { UserIcon } from "@/components/icons/UserIcon";
+import { UserAvatar } from "./UserAvatar";
 import { CopySquaresIcon } from "@/components/icons/CopySquaresIcon";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -773,7 +773,7 @@ export function ProfileChatInterface({
                                 {msg.role === "model" ? (
                                     <BotIcon className="w-full h-full" />
                                 ) : (
-                                    <UserIcon className="w-full h-full text-zinc-300" />
+                                    <UserAvatar className="w-full h-full" />
                                 )}
                             </div>
 
@@ -839,7 +839,7 @@ export function ProfileChatInterface({
                                     </div>
                                 )}
                                 {msg.role === "model" && (msg.commitFreshnessLabel || (msg.toolsUsed && msg.toolsUsed.length > 0) || msg.sourceScope || (msg.processingSummary && msg.processingSummary.length > 0)) && (
-                                    <div className="text-[11px] text-zinc-500 pl-1">
+                                    <div className="hidden md:block text-[11px] text-zinc-500 pl-1">
                                         {msg.sourceScope && <span>Scope: {msg.sourceScope}</span>}
                                         {msg.commitFreshnessLabel && <span>{msg.commitFreshnessLabel}</span>}
                                         {msg.toolsUsed && msg.toolsUsed.length > 0 && (

@@ -95,7 +95,7 @@ export function ChatInput({
         <div className="relative group/input max-w-4xl mx-auto">
 
 
-            <div className="relative flex items-end bg-zinc-900/50 backdrop-blur-xl border border-white/10 rounded-2xl p-2 focus-within:ring-2 focus-within:ring-purple-600/30 transition-all shadow-2xl">
+            <div className="relative flex items-center bg-zinc-900/50 backdrop-blur-xl border border-white/10 rounded-2xl p-2 focus-within:ring-2 focus-within:ring-purple-600/30 transition-all shadow-2xl">
                 <textarea
                     ref={textareaRef}
                     value={value}
@@ -105,7 +105,7 @@ export function ChatInput({
                     disabled={disabled}
                     rows={1}
                     className={cn(
-                        "block w-full bg-transparent border-none px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:ring-0 transition-all resize-none min-h-[52px] max-h-[200px]",
+                        "block w-full bg-transparent border-none px-4 py-3 text-white text-base placeholder-zinc-500 focus:outline-none focus:ring-0 transition-all resize-none min-h-[52px] max-h-[200px]",
                         disabled && "opacity-50 cursor-not-allowed"
                     )}
                     style={{
@@ -115,7 +115,7 @@ export function ChatInput({
                     }}
                 />
 
-                <div className="flex items-center gap-1.5 pb-1 pr-2" ref={dropdownRef}>
+                <div className="flex items-center gap-1.5 pr-2" ref={dropdownRef}>
                     {showCrossRepoToggle && (
                         <button
                             type="button"

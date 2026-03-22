@@ -415,6 +415,16 @@ export async function fetchRecentProfileCommitSnapshot(username: string) {
     return getRecentProfileCommitsSnapshot(username, 20);
 }
 
+export async function fetchGitHubAvatarUrl(username: string) {
+    try {
+        const profile = await getProfile(username);
+        return { url: profile.avatar_url };
+    } catch (e) {
+        console.error("Failed to fetch GitHub avatar URL:", e);
+        return { error: "Failed to fetch avatar" };
+    }
+}
+
 export async function fetchPublicStats() {
     return getPublicStats();
 }
