@@ -1,7 +1,6 @@
 import { ProfileLoader } from "@/components/ProfileLoader";
 import { RepoLoader } from "@/components/RepoLoader";
-import { ArrowLeft, Search } from "lucide-react";
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { normalizeGitHubInput } from "@/lib/utils";
 import { getProfile, getRepo } from "@/lib/github";
 import {
@@ -155,17 +154,7 @@ export default async function ChatPage({
     const query = rawQuery ? normalizeGitHubInput(rawQuery) : undefined;
 
     if (!query) {
-        return (
-            <div className="flex flex-col items-center justify-center h-screen bg-black text-white gap-4">
-                <Search className="w-12 h-12 text-zinc-600" />
-                <h1 className="text-2xl font-bold">No Query Provided</h1>
-                <p className="text-zinc-400">Please search for a GitHub user or repository</p>
-                <Link href="/" className="mt-4 px-6 py-3 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors flex items-center gap-2">
-                    <ArrowLeft className="w-4 h-4" />
-                    Back to Home
-                </Link>
-            </div>
-        );
+        redirect("/");
     }
 
     // If it's a profile query (no slash), load immediately with ProfileLoader
