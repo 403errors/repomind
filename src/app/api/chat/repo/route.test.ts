@@ -98,7 +98,43 @@ describe("POST /api/chat/repo", () => {
         );
         expect(getToolBudgetUsageMock).toHaveBeenCalledWith("repo", "anonymous", "anon_actor");
         expect(trackAuthenticatedQueryEventMock).not.toHaveBeenCalled();
-        expect(trackEventMock).not.toHaveBeenCalled();
+        // Anonymous visitors should be tracked via trackEvent with the anon actorId
+        expect(trackEventMock).toHaveBeenCalledWith("anon_actor", "query", expect.objectContaining({ device: "desktop" }));
+    });
+
+    it("tracks anonymous visitors via trackEvent with anon_ actorId", async () => {
+        authMock.mockResolvedValue(null);
+        getAnonymousActorIdMock.mockReturnValue("anon_abc123");
+        generateAnswerStreamMock.mockImplementation(async function* () {
+            yield { type: "complete", relevantFiles: [] };
+        });
+
+        const request = new NextRequest("http://localhost/api/chat/repo", {
+            method: "POST",
+            body: JSON.stringify({
+                query: "Explain the code",
+                repoDetails: { owner: "owner", repo: "repo" },
+                filePaths: [],
+                history: [],
+                modelPreference: "flash",
+            }),
+            headers: {
+                "content-type": "application/json",
+                "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17)",
+                "x-vercel-ip-country": "US",
+            },
+        });
+
+        const response = await POST(request);
+        await response.text();
+
+        expect(response.status).toBe(200);
+        expect(trackAuthenticatedQueryEventMock).not.toHaveBeenCalled();
+        expect(trackEventMock).toHaveBeenCalledWith("anon_abc123", "query", {
+            country: "US",
+            device: "desktop",
+            userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17)",
+        });
     });
 
     it("returns INVALID_SESSION when user exists without id", async () => {
@@ -194,7 +230,7 @@ describe("POST /api/chat/repo", () => {
         expect(consumeToolBudgetUsageMock).not.toHaveBeenCalled();
     });
 
-    it("tracks analytics for authenticated users", async () => {
+    it("tracks analytics for authenticated users via trackAuthenticatedQueryEvent only", async () => {
         authMock.mockResolvedValue({
             user: { id: "user_123", email: "user@example.com" },
         });
@@ -223,12 +259,9 @@ describe("POST /api/chat/repo", () => {
         await response.text();
 
         expect(response.status).toBe(200);
-        expect(trackAuthenticatedQueryEventMock).toHaveBeenCalledWith("user_123");
-        expect(trackEventMock).toHaveBeenCalledWith("user_123", "query", {
-            country: "IN",
-            device: "mobile",
-            userAgent: "Mozilla/5.0 (iPhone; Mobile)",
-        });
+        // Auth user tracked via trackAuthenticatedQueryEvent, NOT trackEvent
+        expect(trackAuthenticatedQueryEventMock).toHaveBeenCalledWith("user_123", undefined);
+        expect(trackEventMock).not.toHaveBeenCalled();
         expect(consumeToolBudgetUsageMock).toHaveBeenCalledWith("repo", "authenticated", "user_123", 3);
     });
 

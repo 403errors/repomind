@@ -53,12 +53,16 @@ export async function POST(req: NextRequest) {
         const usage = await getToolBudgetUsage("repo", audience, actorId);
         const disableToolCalls = usage.remaining <= 0;
 
+        const userAgent = req.headers.get("user-agent") ?? "";
+        const country = req.headers.get("x-vercel-ip-country") ?? "Unknown";
+        const device = /mobile/i.test(userAgent) ? "mobile" : "desktop";
         if (userId) {
-            await trackAuthenticatedQueryEvent(userId);
-            const userAgent = req.headers.get("user-agent") ?? "";
-            const country = req.headers.get("x-vercel-ip-country") ?? "Unknown";
-            const device = /mobile/i.test(userAgent) ? "mobile" : "desktop";
-            await trackEvent(userId, "query", { country, device, userAgent });
+            // Pass actorId as anonId only when the user was previously anonymous
+            // (actorId === userId for auth users, so passing undefined is safe here).
+            await trackAuthenticatedQueryEvent(userId, undefined);
+        } else {
+            // actorId is an anon_-prefixed hash for unauthenticated visitors
+            await trackEvent(actorId, "query", { country, device, userAgent });
         }
 
         let normalizedFileShas: Record<string, string> | undefined;

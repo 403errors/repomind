@@ -95,7 +95,41 @@ describe("POST /api/chat/profile", () => {
         );
         expect(getToolBudgetUsageMock).toHaveBeenCalledWith("profile", "anonymous", "anon_actor");
         expect(trackAuthenticatedQueryEventMock).not.toHaveBeenCalled();
-        expect(trackEventMock).not.toHaveBeenCalled();
+        // Anonymous visitors should be tracked via trackEvent with the anon actorId
+        expect(trackEventMock).toHaveBeenCalledWith("anon_actor", "query", expect.objectContaining({ device: "desktop" }));
+    });
+
+    it("tracks anonymous visitors via trackEvent with anon_ actorId", async () => {
+        authMock.mockResolvedValue(null);
+        getAnonymousActorIdMock.mockReturnValue("anon_xyz789");
+        processProfileQueryStreamMock.mockImplementation(async function* () {
+            yield { type: "complete", relevantFiles: [] };
+        });
+
+        const request = new NextRequest("http://localhost/api/chat/profile", {
+            method: "POST",
+            body: JSON.stringify({
+                query: "Summarize profile",
+                profileContext: {},
+                modelPreference: "flash",
+            }),
+            headers: {
+                "content-type": "application/json",
+                "user-agent": "Dalvik/2.1.0 (Linux; Android 14)",
+                "x-vercel-ip-country": "DE",
+            },
+        });
+
+        const response = await POST(request);
+        await response.text();
+
+        expect(response.status).toBe(200);
+        expect(trackAuthenticatedQueryEventMock).not.toHaveBeenCalled();
+        expect(trackEventMock).toHaveBeenCalledWith("anon_xyz789", "query", {
+            country: "DE",
+            device: "desktop",
+            userAgent: "Dalvik/2.1.0 (Linux; Android 14)",
+        });
     });
 
     it("returns INVALID_SESSION when user exists without id", async () => {
@@ -185,7 +219,7 @@ describe("POST /api/chat/profile", () => {
         expect(consumeToolBudgetUsageMock).not.toHaveBeenCalled();
     });
 
-    it("tracks analytics for authenticated users", async () => {
+    it("tracks analytics for authenticated users via trackAuthenticatedQueryEvent only", async () => {
         authMock.mockResolvedValue({
             user: { id: "user_123", email: "user@example.com" },
         });
@@ -212,12 +246,9 @@ describe("POST /api/chat/profile", () => {
         await response.text();
 
         expect(response.status).toBe(200);
-        expect(trackAuthenticatedQueryEventMock).toHaveBeenCalledWith("user_123");
-        expect(trackEventMock).toHaveBeenCalledWith("user_123", "query", {
-            country: "IN",
-            device: "mobile",
-            userAgent: "Mozilla/5.0 (iPhone; Mobile)",
-        });
+        // Auth user tracked via trackAuthenticatedQueryEvent, NOT trackEvent
+        expect(trackAuthenticatedQueryEventMock).toHaveBeenCalledWith("user_123", undefined);
+        expect(trackEventMock).not.toHaveBeenCalled();
         expect(consumeToolBudgetUsageMock).toHaveBeenCalledWith("profile", "authenticated", "user_123", 2);
     });
 

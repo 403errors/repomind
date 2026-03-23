@@ -62,12 +62,14 @@ export async function POST(req: NextRequest) {
         const usage = await getToolBudgetUsage("profile", audience, actorId);
         const disableToolCalls = usage.remaining <= 0;
 
+        const userAgent = req.headers.get("user-agent") ?? "";
+        const country = req.headers.get("x-vercel-ip-country") ?? "Unknown";
+        const device = /mobile/i.test(userAgent) ? "mobile" : "desktop";
         if (userId) {
-            await trackAuthenticatedQueryEvent(userId);
-            const userAgent = req.headers.get("user-agent") ?? "";
-            const country = req.headers.get("x-vercel-ip-country") ?? "Unknown";
-            const device = /mobile/i.test(userAgent) ? "mobile" : "desktop";
-            await trackEvent(userId, "query", { country, device, userAgent });
+            await trackAuthenticatedQueryEvent(userId, undefined);
+        } else {
+            // actorId is an anon_-prefixed hash for unauthenticated visitors
+            await trackEvent(actorId, "query", { country, device, userAgent });
         }
 
         const username = typeof profileContext?.username === "string" ? profileContext.username : undefined;
