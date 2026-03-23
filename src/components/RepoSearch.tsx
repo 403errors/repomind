@@ -63,7 +63,7 @@ export default function RepoSearch({
             if (!loading) {
                 fetchSuggestions();
             }
-        }, 300);
+        }, 100);
 
         return () => {
             isCancelled = true;
@@ -124,17 +124,25 @@ export default function RepoSearch({
                         placeholder="GitHub URL, username, or repo"
                         className="flex-1 bg-transparent border-none outline-none text-white px-3 py-2 md:px-4 md:py-3 placeholder-zinc-500 text-sm md:text-base w-full min-w-0"
                     />
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="p-2 md:p-3 rounded-md transition-all disabled:opacity-60 shrink-0 text-white border border-purple-300/35 bg-gradient-to-br from-purple-700 via-purple-600 to-indigo-600 hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0 shadow-[0_10px_30px_-15px_rgba(147,51,234,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60"
-                    >
-                        {loading || isFetchingSuggestions ? (
-                            <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
-                        ) : (
-                            <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                    <AnimatePresence>
+                        {input.length > 0 && (
+                            <motion.button
+                                initial={{ opacity: 0, x: 10, scale: 0.9 }}
+                                animate={{ opacity: 1, x: 0, scale: 1 }}
+                                exit={{ opacity: 0, x: 10, scale: 0.9 }}
+                                transition={{ duration: 0.15, ease: "easeOut" }}
+                                type="submit"
+                                disabled={loading}
+                                className="p-2 md:p-3 rounded-md transition-all disabled:opacity-60 shrink-0 text-zinc-400 hover:text-white hover:bg-white/5 active:scale-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/10"
+                            >
+                                {loading || isFetchingSuggestions ? (
+                                    <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
+                                ) : (
+                                    <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                                )}
+                            </motion.button>
                         )}
-                    </button>
+                    </AnimatePresence>
                 </div>
                 <AnimatePresence>
                     {showSuggestions && (
