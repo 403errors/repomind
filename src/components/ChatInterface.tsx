@@ -1419,6 +1419,24 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
 
                 <form id="chat-form" onSubmit={handleSubmit} className="max-w-4xl mx-auto relative">
                     <ChatInput
+                        quotaNode={toolQuota && (
+                            <button
+                                type="button"
+                                onClick={() => setShowToolQuotaModal(true)}
+                                className={cn(
+                                    "flex md:hidden items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold border transition-all",
+                                    isToolQuotaExhausted
+                                        ? "bg-amber-900/20 text-amber-300 border-amber-500/30 hover:bg-amber-900/30"
+                                        : "bg-zinc-800/50 text-zinc-400 border-white/5 hover:bg-zinc-800 hover:text-zinc-300"
+                                )}
+                                title="Open tool quota details"
+                            >
+                                <Wrench className="w-3 h-3" />
+                                <span className="uppercase tracking-wider">
+                                    {toolQuota.remaining} / {toolQuota.limit}
+                                </span>
+                            </button>
+                        )}
                         value={input}
                         onChange={setInput}
                         onSubmit={handleSubmit}

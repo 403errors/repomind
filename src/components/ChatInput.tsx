@@ -23,6 +23,7 @@ interface ChatInputProps {
     repositoryFiles?: { path: string; type?: "blob" | "tree" }[];
     taggedFiles?: string[];
     onTaggedFilesChange?: (files: string[]) => void;
+    quotaNode?: React.ReactNode;
 }
 
 export function ChatInput({
@@ -43,6 +44,7 @@ export function ChatInput({
     repositoryFiles = [],
     taggedFiles = [],
     onTaggedFilesChange,
+    quotaNode,
 }: ChatInputProps) {
     const { data: session } = useSession();
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -314,6 +316,7 @@ export function ChatInput({
 
                 <div className="flex items-center gap-1.5 pr-2 pt-2 md:pt-0 pb-1 md:pb-0 z-10 self-end md:self-auto w-full md:w-auto justify-between md:justify-end border-t border-white/5 md:border-t-0 mt-2 md:mt-0" ref={dropdownRef}>
                     <div className="flex items-center gap-1.5 pl-2 md:pl-0">
+                        {quotaNode}
                         {showCrossRepoToggle && (
                             <button
                                 type="button"
