@@ -291,7 +291,13 @@ export function ChatInput({
                         value={value}
                         onChange={(e) => handleChange(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder={taggedFiles.length > 0 ? "Add your message..." : (placeholder || "Type @ to mention files or drag them here...")}
+                        placeholder={taggedFiles.length > 0 
+                            ? "Add your message..." 
+                            : (placeholder 
+                                ? (isMobile ? placeholder.replace("(use @ or drop to tag)", "(use @ to tag)") : placeholder)
+                                : (isMobile ? "Type @ to mention files..." : "Type @ to mention files or drag them here...")
+                            )
+                        }
                         disabled={disabled}
                         rows={1}
                         className={cn(
@@ -412,14 +418,14 @@ export function ChatInput({
 
                     <button
                         type="submit"
-                        disabled={loading || disabled || (!value.trim() && !allowEmptySubmit && taggedFiles.length === 0)}
+                        disabled={loading || disabled || (!value.trim() && !allowEmptySubmit && (taggedFiles?.length || 0) === 0)}
                         className="p-1 rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60"
                     >
                         <div className={cn(
                             "w-10 h-10 rounded-2xl flex items-center justify-center transition-all border",
-                            !disabled && (value.trim() || taggedFiles.length > 0)
-                                ? "bg-gradient-to-br from-purple-700 via-purple-600 to-indigo-600 text-white border-purple-300/35 shadow-[0_10px_30px_-15px_rgba(147,51,234,0.85)] hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0"
-                                : "bg-zinc-800/80 text-zinc-500 border-white/10 opacity-60 shadow-none"
+                            !disabled && (value.trim() || allowEmptySubmit || (taggedFiles?.length || 0) > 0)
+                                ? "bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20 hover:text-purple-300"
+                                : "bg-transparent text-zinc-600 border-transparent opacity-50"
                         )}>
                             <Send className="w-4.5 h-4.5" />
                         </div>

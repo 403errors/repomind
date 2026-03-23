@@ -1427,7 +1427,7 @@ export function ChatInterface({ repoContext, onToggleSidebar, initialPrompt }: C
                                 ? "Conversation limit reached. Please clear chat."
                                 : isToolQuotaExhausted
                                     ? "Repo tool calls are paused for this window. You can still ask in no-tool mode."
-                                    : "Ask about the code, architecture, or features..."
+                                    : "Ask anything about this repository (use @ or drop to tag)..."
                         }
                         disabled={totalTokens >= MAX_TOKENS}
                         loading={loading}

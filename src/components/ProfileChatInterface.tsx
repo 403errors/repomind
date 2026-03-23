@@ -1081,7 +1081,7 @@ export function ProfileChatInterface({
                                 ? "Conversation limit reached. Please clear chat."
                                 : isToolQuotaExhausted
                                     ? "Profile tool calls are paused for this window. You can still ask in no-tool mode."
-                                    : "Ask about their projects, skills, or contributions..."
+                                    : "Ask about their projects, skills (use @ or drop to tag)..."
                         }
                         disabled={totalTokens >= MAX_TOKENS}
                         loading={loading}
