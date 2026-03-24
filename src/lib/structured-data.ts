@@ -36,7 +36,7 @@ export function buildRootStructuredData() {
         "@id": `${baseUrl}#website`,
         url: baseUrl,
         name: "RepoMind",
-        alternateName: ["RepoMind AI", "repomind.in"],
+        alternateName: ["RepoMind AI"],
         potentialAction: {
           "@type": "SearchAction",
           target: `${baseUrl}/chat?q={search_term_string}`,
