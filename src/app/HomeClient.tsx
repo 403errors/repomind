@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import { ArrowRight, ChevronDown, Star, GitFork, MessageSquare, Globe, TrendingUp } from "lucide-react";
-import { fetchGitHubData, getRecentSearches } from "./actions";
+import { getRecentSearches } from "./actions";
 import TrustedByMarquee from "@/components/TrustedByMarquee";
 import InteractiveDemo from "@/components/InteractiveDemo";
 import BentoFeatures from "@/components/BentoFeatures";
@@ -85,13 +85,7 @@ export default function HomeClient({
         setError("");
 
         try {
-            const result = await fetchGitHubData(normalizedInput);
-
-            if (result.error) {
-                setError(result.error);
-            } else {
-                router.push(`/chat?q=${encodeURIComponent(normalizedInput)}`);
-            }
+            router.push(`/chat?q=${encodeURIComponent(normalizedInput)}`);
         } catch {
             setError("Something went wrong. Please try again.");
         } finally {
