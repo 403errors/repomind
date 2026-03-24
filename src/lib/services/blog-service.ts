@@ -23,7 +23,7 @@ const getCachedHomepagePosts = unstable_cache(
 export type SavePostInput = Partial<BlogPost> & { id?: string; slug?: string };
 
 function revalidateBlogRoutes(slugs: Iterable<string>) {
-  revalidateTag(BLOG_HOMEPAGE_CACHE_TAG, "max");
+  revalidateTag(BLOG_HOMEPAGE_CACHE_TAG);
   revalidatePath("/");
   revalidatePath("/blog");
   revalidatePath("/sitemap.xml");
