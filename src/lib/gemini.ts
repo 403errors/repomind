@@ -11,6 +11,8 @@ import { cacheQuerySelection, getCachedQuerySelection } from "./cache";
 import type { FileCachePolicy } from "./cache";
 import type { GitHubProfile } from "./github";
 import { stripEmojiCharacters } from "./no-emoji";
+import { trackSelectionPerformance } from "./analytics";
+import { loadRepoIndex, searchRepoIndex } from "./services/repo-index-service";
 import {
   getRecentRepoCommitsSnapshot,
   getUserRepos,
@@ -528,9 +530,31 @@ export async function analyzeFileSelection(
   repo?: string,
   modelPreference: ModelPreference = "flash",
   history: { role: "user" | "model"; content: string }[] = [],
-  cachePolicy?: FileCachePolicy
+  cachePolicy?: FileCachePolicy,
+  onSelectionSource?: (source: "indexed_tree" | "agentic_scan") => void
 ): Promise<string[]> {
   const maxSelectedFiles = modelPreference === "thinking" ? 50 : 25;
+  const selectionStartMs = Date.now();
+
+  const recordSelection = async (
+    type: "index_hit" | "llm_fallback",
+    files: string[]
+  ): Promise<string[]> => {
+    try {
+      if (type === "index_hit") {
+        onSelectionSource?.("indexed_tree");
+      } else {
+        onSelectionSource?.("agentic_scan");
+      }
+      await trackSelectionPerformance({
+        type,
+        selectionMs: Date.now() - selectionStartMs,
+      });
+    } catch (error) {
+      console.warn("Selection performance tracking failed:", error);
+    }
+    return files;
+  };
 
   // 1. SMART BYPASS: Triggered only when the user explicitly mentions an exact filename
   // Uses word-boundary matching to avoid false positives (e.g. "contributing" hitting CONTRIBUTING.md)
@@ -550,34 +574,42 @@ export async function analyzeFileSelection(
     );
     const result = [...mentionedFiles, ...additionalContext].slice(0, maxSelectedFiles);
     console.log(`⚡ Smart Bypass: Found ${mentionedFiles.length} mentioned files (+ ${result.length - mentionedFiles.length} contextual).`);
-    return result;
+    return recordSelection("index_hit", result);
   }
 
   // 2. QUERY CACHING: Check if we've answered this exact query for this repo before
   if (owner && repo) {
     const cachedSelection = await getCachedQuerySelection(owner, repo, question, cachePolicy);
     if (cachedSelection) {
-      return cachedSelection
+      const filtered = cachedSelection
         .filter((path) => fileTree.includes(path))
         .slice(0, maxSelectedFiles);
+      return recordSelection("index_hit", filtered);
     }
   }
 
-  // 3. AI SELECTION (Fallback)
-
-  // HIERARCHICAL PRUNING for large repos (> 1,000 files)
+  // 3. INDEX-FIRST SELECTION
   let candidates = fileTree;
-  if (fileTree.length > 1000) {
-    const cacheKey = `pruned:${owner}/${repo}:${question.toLowerCase().trim()}`;
-      const cachedPruned = await getCachedQuerySelection(owner ?? "", repo ?? "", cacheKey, cachePolicy);
-    if (cachedPruned) {
-      console.log(`🌳 Pruning Cache Hit for ${owner}/${repo}`);
-      candidates = cachedPruned;
-    } else {
-      console.log(`🌳 Repo too large (${fileTree.length} files), performing hierarchical pruning...`);
-      candidates = await pruneFileTreeHierarchically(question, fileTree);
-      if (owner && repo) {
-        await cacheQuerySelection(owner, repo, cacheKey, candidates, cachePolicy);
+  if (owner && repo) {
+    const index = await loadRepoIndex(owner, repo);
+    if (index) {
+      const search = searchRepoIndex(question, index);
+      const indexFiles = search.files.filter((path) => fileTree.includes(path));
+      const lowConfidence =
+        search.bestScore < search.scoreThreshold ||
+        indexFiles.length < 3 ||
+        indexFiles.length > 150;
+
+      if (!lowConfidence && indexFiles.length > 0) {
+        const selection = indexFiles.slice(0, maxSelectedFiles);
+        if (owner && repo && selection.length > 0) {
+          await cacheQuerySelection(owner, repo, question, selection, cachePolicy);
+        }
+        return recordSelection("index_hit", selection);
+      }
+
+      if (indexFiles.length > 0) {
+        candidates = indexFiles.slice(0, 500);
       }
     }
   }
@@ -629,16 +661,17 @@ ${isDeepThinking ?
       await cacheQuerySelection(owner, repo, question, normalizedSelection, cachePolicy);
     }
 
-    return normalizedSelection;
+    return recordSelection("llm_fallback", normalizedSelection);
   } catch (e) {
     console.error("Failed to parse file selection", e);
     // Fallback to basic files if the pruning/selection fails
-    return fileTree.filter((f) =>
+    const fallback = fileTree.filter((f) =>
       f.toLowerCase() === "readme.md" ||
       f.toLowerCase() === "package.json" ||
       f.toLowerCase() === "go.mod" ||
       f.toLowerCase() === "cargo.toml"
     );
+    return recordSelection("llm_fallback", fallback);
   }
 }
 

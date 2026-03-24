@@ -24,6 +24,9 @@ export interface AnalyticsData {
         maxSize: number;
         history: KVUsagePoint[];
     };
+    searchPerformance?: {
+        byWindow: Record<SelectionPerformanceWindow, SelectionPerformanceMetrics>;
+    };
     reportFunnel?: ReportFunnelMetrics;
     falsePositiveReview?: FalsePositiveReviewSummary;
 }
@@ -47,6 +50,15 @@ export interface LoggedInUserData {
     chatCount: number;
     createdAt: number;
     lastActivityAt: number | null;
+}
+
+export type SelectionPerformanceWindow = "24h" | "7d";
+
+export interface SelectionPerformanceMetrics {
+    avgSelectionMs: number;
+    indexHitRate: number;
+    fallbackRate: number;
+    selections: number;
 }
 
 export const REPORT_CONVERSION_EVENTS = [
@@ -200,6 +212,29 @@ export async function trackEvent(
         await pipeline.exec();
     } catch (error) {
         console.error("Failed to track analytics event:", error);
+    }
+}
+
+export async function trackSelectionPerformance(params: {
+    type: "index_hit" | "index_miss" | "llm_fallback";
+    selectionMs: number;
+}): Promise<void> {
+    try {
+        const dayKey = new Date().toISOString().slice(0, 10);
+        const baseKey = `stats:selection:${dayKey}`;
+        const ttlSeconds = 14 * 24 * 60 * 60;
+        const duration = Math.max(0, Math.round(params.selectionMs));
+
+        const pipeline = kv.pipeline();
+        pipeline.incr(`${baseKey}:count`);
+        pipeline.incrby(`${baseKey}:ms_total`, duration);
+        pipeline.incr(`${baseKey}:${params.type}`);
+        pipeline.expire(`${baseKey}:count`, ttlSeconds);
+        pipeline.expire(`${baseKey}:ms_total`, ttlSeconds);
+        pipeline.expire(`${baseKey}:${params.type}`, ttlSeconds);
+        await pipeline.exec();
+    } catch (error) {
+        console.error("Failed to track selection performance:", error);
     }
 }
 
@@ -534,6 +569,63 @@ async function getManualAnalyticsAdjustments(): Promise<{ visitors: number; quer
     }
 }
 
+function getDayKeyFromTimestamp(timestamp: number): string {
+    return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+async function getSelectionPerformance(window: SelectionPerformanceWindow): Promise<SelectionPerformanceMetrics> {
+    try {
+        const now = Date.now();
+        const dayKeys = new Set<string>();
+
+        if (window === "24h") {
+            dayKeys.add(getDayKeyFromTimestamp(now));
+            dayKeys.add(getDayKeyFromTimestamp(now - 24 * 60 * 60 * 1000));
+        } else {
+            for (let i = 0; i < 7; i += 1) {
+                dayKeys.add(getDayKeyFromTimestamp(now - i * 24 * 60 * 60 * 1000));
+            }
+        }
+
+        const keys = Array.from(dayKeys);
+        const pipeline = kv.pipeline();
+        keys.forEach((dayKey) => {
+            const baseKey = `stats:selection:${dayKey}`;
+            pipeline.get(`${baseKey}:count`);
+            pipeline.get(`${baseKey}:ms_total`);
+            pipeline.get(`${baseKey}:index_hit`);
+            pipeline.get(`${baseKey}:llm_fallback`);
+        });
+        const values = await pipeline.exec() as Array<number | string | null>;
+
+        let selections = 0;
+        let msTotal = 0;
+        let indexHits = 0;
+        let fallbacks = 0;
+
+        for (let i = 0; i < values.length; i += 4) {
+            selections += Number(values[i] || 0);
+            msTotal += Number(values[i + 1] || 0);
+            indexHits += Number(values[i + 2] || 0);
+            fallbacks += Number(values[i + 3] || 0);
+        }
+
+        const avgSelectionMs = selections > 0 ? Math.round(msTotal / selections) : 0;
+        const indexHitRate = selections > 0 ? Number(((indexHits / selections) * 100).toFixed(1)) : 0;
+        const fallbackRate = selections > 0 ? Number(((fallbacks / selections) * 100).toFixed(1)) : 0;
+
+        return {
+            avgSelectionMs,
+            indexHitRate,
+            fallbackRate,
+            selections,
+        };
+    } catch (error) {
+        console.error("Failed to fetch selection performance metrics:", error);
+        return { avgSelectionMs: 0, indexHitRate: 0, fallbackRate: 0, selections: 0 };
+    }
+}
+
 export async function getAnalyticsData(): Promise<AnalyticsData> {
     try {
         // Parallelize fetching independent data
@@ -544,6 +636,8 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
             kvInfo,
             reportFunnel,
             falsePositiveReview,
+            selection24h,
+            selection7d,
         ] = await Promise.all([
             kv.scard("visitors"),
             kv.get<number>("queries:total"),
@@ -563,6 +657,8 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
                     recentSubmissions: [],
                 };
             }),
+            getSelectionPerformance("24h"),
+            getSelectionPerformance("7d"),
         ]);
 
         const totalVisitorsAgg = Number(totalVisitorsAggRaw || 0);
@@ -661,6 +757,12 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
                 maxSize: kvInfo.maxSize,
                 history: kvHistory
             },
+            searchPerformance: {
+                byWindow: {
+                    "24h": selection24h,
+                    "7d": selection7d,
+                },
+            },
             reportFunnel,
             falsePositiveReview,
         };
@@ -676,6 +778,12 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
             countryStats: {},
             recentVisitors: [],
             loggedInUsers: [],
+            searchPerformance: {
+                byWindow: {
+                    "24h": { avgSelectionMs: 0, indexHitRate: 0, fallbackRate: 0, selections: 0 },
+                    "7d": { avgSelectionMs: 0, indexHitRate: 0, fallbackRate: 0, selections: 0 },
+                },
+            },
             reportFunnel: emptyReportFunnelMetrics(),
             falsePositiveReview: {
                 total: 0,

@@ -54,7 +54,8 @@ export interface QueryPipelineDeps {
         repo: string,
         modelPreference?: ModelPreference,
         history?: { role: "user" | "model"; content: string }[],
-        fileCachePolicy?: FileCachePolicy
+        fileCachePolicy?: FileCachePolicy,
+        onSelectionSource?: (source: "indexed_tree" | "agentic_scan") => void
     ) => Promise<string[]>;
 
     /** Fetches file content in batch — defaults to GitHub API */
@@ -223,14 +224,36 @@ export async function* executeRepoQueryStream(
         // Step 1: Select relevant files
         yield {
             type: "status",
-            message: "Selecting relevant files...",
+            message: "Selecting files...",
             progress: 15,
         };
 
         const prunedPaths = pruneFilePaths(filePaths);
         const selectionStartMs = Date.now();
-        const relevantFiles = await analyzeFiles(query, prunedPaths, owner, repo, modelPreference, history, fileCachePolicy);
+        let selectionStatus: "indexed_tree" | "agentic_scan" | null = null;
+        const relevantFiles = await analyzeFiles(
+            query,
+            prunedPaths,
+            owner,
+            repo,
+            modelPreference,
+            history,
+            fileCachePolicy,
+            (source) => {
+                selectionStatus = source;
+            }
+        );
         selectionMs = Date.now() - selectionStartMs;
+
+        if (selectionStatus) {
+            yield {
+                type: "status",
+                message: selectionStatus === "indexed_tree"
+                    ? "Selecting files from indexed tree..."
+                    : "Selecting files using agentic scan...",
+                progress: 22,
+            };
+        }
 
         yield {
             type: "status",

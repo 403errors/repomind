@@ -57,8 +57,16 @@ vi.mock("@vercel/kv", () => ({
                     localCalls.push({ type: "incr", key });
                     return pipeline;
                 },
+                incrby: (key: string) => {
+                    localCalls.push({ type: "incrby", key });
+                    return pipeline;
+                },
                 del: (key: string) => {
                     localCalls.push({ type: "del", key });
+                    return pipeline;
+                },
+                expire: (key: string) => {
+                    localCalls.push({ type: "expire", key });
                     return pipeline;
                 },
                 lpush: () => pipeline,

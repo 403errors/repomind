@@ -35,6 +35,7 @@ import {
     resetReportConversionMetrics,
     type ReportConversionEvent,
 } from "@/lib/analytics";
+import { getRepoIndexStatus } from "@/lib/services/repo-index-service";
 import type { StreamUpdate } from "@/lib/streaming-types";
 import type { GitHubProfile } from "@/lib/github";
 import type { SearchResult } from "@/lib/search-engine";
@@ -387,15 +388,16 @@ export async function fetchGitHubData(input: string) {
         const [owner, repo] = parts;
         try {
             const repoData = await getRepo(owner, repo);
-            const { tree, hiddenFiles } = await getRepoFileTree(
+            const { tree, hiddenFiles, treeSha } = await getRepoFileTree(
                 owner,
                 repo,
                 repoData.default_branch
             );
+            const indexStatus = await getRepoIndexStatus(owner, repo, treeSha);
             if (session?.user?.id) {
                 await recordSearch(session.user.id, input, "repo");
             }
-            return { type: "repo", data: repoData, fileTree: tree, hiddenFiles };
+            return { type: "repo", data: repoData, fileTree: tree, hiddenFiles, indexStatus };
         } catch (e: unknown) {
             return { error: `Repository not found: ${getErrorMessage(e)}` };
         }

@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type HistoryRange = "24h" | "1w" | "1m" | "3m";
+type SelectionRange = "24h" | "7d";
 
 interface StatsDashboardClientProps {
     data: AnalyticsData;
@@ -52,6 +53,7 @@ export default function StatsDashboardClient({
     const [accountRows, setAccountRows] = useState<LoggedInUserData[]>(() => data.loggedInUsers ?? []);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [selectedRange, setSelectedRange] = useState<HistoryRange>("24h");
+    const [selectionRange, setSelectionRange] = useState<SelectionRange>("24h");
     const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'lastSeen', direction: 'desc' });
     const [visibleCount, setVisibleCount] = useState(15);
     const [currentTime, setCurrentTime] = useState(0);
@@ -182,6 +184,12 @@ export default function StatsDashboardClient({
     const weeklyConversionRate = reportFunnel?.weeklyConversionRate ?? 0;
     const falsePositiveReview = data.falsePositiveReview;
     const loggedInUsers = accountRows;
+    const selectionStats = data.searchPerformance?.byWindow?.[selectionRange] ?? {
+        avgSelectionMs: 0,
+        indexHitRate: 0,
+        fallbackRate: 0,
+        selections: 0,
+    };
     const incompleteLoggedInUsers = useMemo(
         () => accountRows.filter((user) => !user.email),
         [accountRows]
@@ -328,6 +336,36 @@ export default function StatsDashboardClient({
                         subValue={`${((data.kvStats?.currentSize || 0) / (data.kvStats?.maxSize || 1) * 100).toFixed(2)}% of ${formatSize(data.kvStats?.maxSize || 0)}`}
                         icon={<Database className="w-5 h-5 text-amber-400" />}
                     />
+                </div>
+
+                <div className="bg-zinc-900/50 border border-white/10 rounded-2xl p-6">
+                    <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+                        <div>
+                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                                <Search className="w-5 h-5 text-cyan-400" />
+                                Search Performance
+                            </h2>
+                            <span className="text-xs text-zinc-500 uppercase tracking-wider">File selection speed + fallback rate</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                            {(["24h", "7d"] as const).map((range) => (
+                                <button
+                                    key={range}
+                                    type="button"
+                                    onClick={() => setSelectionRange(range)}
+                                    className={`rounded-lg border px-3 py-1 font-semibold uppercase tracking-wider transition-colors ${selectionRange === range ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200" : "border-white/10 bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
+                                >
+                                    {range}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <MetricTile label="Avg Selection" value={`${selectionStats.avgSelectionMs} ms`} />
+                        <MetricTile label="Index Hit Rate" value={`${selectionStats.indexHitRate.toFixed(1)}%`} />
+                        <MetricTile label="Fallback Rate" value={`${selectionStats.fallbackRate.toFixed(1)}%`} />
+                        <MetricTile label="Selections" value={selectionStats.selections} />
+                    </div>
                 </div>
 
                 <div className="bg-zinc-900/50 border border-white/10 rounded-2xl p-6">

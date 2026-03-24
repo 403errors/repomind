@@ -23,6 +23,7 @@ interface RepoLoaderData {
     repo: GitHubRepo;
     fileTree: FileNode[];
     hiddenFiles: { path: string; reason: string }[];
+    indexStatus?: "ready" | "building";
 }
 
 const REPO_LOADER_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -107,18 +108,27 @@ export function RepoLoader({ query, initialPrompt }: RepoLoaderProps) {
             const repo = data.data as GitHubRepo;
             const fileTree = data.fileTree as FileNode[];
             const hiddenFiles = data.hiddenFiles || [];
+            const indexStatus = (data as { indexStatus?: "ready" | "building" }).indexStatus;
 
             updateStep("fetch", "complete", "Repository data fetched");
 
-            // Step 2: Analyze structure
+            // Step 2: Indexing status
+            updateStep("index", "loading", "Indexing repository for fast file search...");
+            if (indexStatus === "ready") {
+                updateStep("index", "complete", "Indexed tree ready for instant file selection");
+            } else {
+                updateStep("index", "complete", "Indexing queued in background");
+            }
+
+            // Step 3: Analyze structure
             updateStep("analyze", "loading", `Analyzing ${fileTree.length} files...`);
             updateStep("analyze", "complete", "File structure analyzed");
 
-            // Step 3: Prepare environment
+            // Step 4: Prepare environment
             updateStep("env", "loading", "Preparing chat environment...");
             updateStep("env", "complete", "Ready to chat");
 
-            const nextData = { repo, fileTree, hiddenFiles };
+            const nextData = { repo, fileTree, hiddenFiles, indexStatus };
             setRepoData(nextData);
             writeCachedRepoLoaderData(query, nextData);
 

@@ -18,6 +18,7 @@ import {
   type FileCachePolicy,
 } from "./cache";
 import { unstable_cache } from 'next/cache';
+import { ensureRepoIndexForTree } from "@/lib/services/repo-index-service";
 
 interface ErrorWithStatus {
   status?: number;
@@ -443,7 +444,7 @@ export async function getDefaultBranchHeadSha(owner: string, repo: string): Prom
   return branchData.commit.sha;
 }
 
-export async function getRepoFileTree(owner: string, repo: string, branch: string = "main"): Promise<{ tree: FileNode[], hiddenFiles: { path: string; reason: string }[] }> {
+export async function getRepoFileTree(owner: string, repo: string, branch: string = "main"): Promise<{ tree: FileNode[], hiddenFiles: { path: string; reason: string }[], treeSha: string }> {
   // Get the tree recursively
   // First, get the branch SHA
   let sha = branch;
@@ -462,7 +463,7 @@ export async function getRepoFileTree(owner: string, repo: string, branch: strin
   // Check KV cache for tree
   const cachedTree = await getCachedFileTree(owner, repo, sha);
   if (cachedTree) {
-    return { tree: cachedTree as FileNode[], hiddenFiles: [] }; // Hidden files not cached separately but that's ok
+    return { tree: cachedTree as FileNode[], hiddenFiles: [], treeSha: sha }; // Hidden files not cached separately but that's ok
   }
 
   const { data } = await octokit.rest.git.getTree({
@@ -517,8 +518,9 @@ export async function getRepoFileTree(owner: string, repo: string, branch: strin
 
   // Cache the minimal tree
   await cacheFileTree(owner, repo, sha, minimalTree);
+  void ensureRepoIndexForTree(owner, repo, sha, minimalTree);
 
-  return { tree: minimalTree, hiddenFiles };
+  return { tree: minimalTree, hiddenFiles, treeSha: sha };
 }
 
 /**
