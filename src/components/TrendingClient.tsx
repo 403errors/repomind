@@ -187,7 +187,7 @@ export default function TrendingClient({ initialRepos }: TrendingClientProps) {
                                     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-white text-black text-xs font-bold hover:bg-zinc-200 transition-colors shadow-xl"
                                 >
                                     <MessageSquare size={12} />
-                                    Analyze {repo.repo}
+                                    Analyze
                                 </Link>
                             </div>
                         </motion.div>

@@ -363,7 +363,7 @@ export default function HomeClient({
                                             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-white text-black text-xs font-bold hover:bg-zinc-200 transition-colors"
                                         >
                                             <MessageSquare size={12} />
-                                            Analyze {repo.repo}
+                                            Analyze
                                         </Link>
                                     </div>
                                 </div>
