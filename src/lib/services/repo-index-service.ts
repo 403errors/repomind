@@ -6,6 +6,8 @@ export type RepoIndexEntry = {
     tokens: string[];
     filenameTokens: string[];
     coreBoost: number;
+    semanticGroup?: string;  // "api" | "ui" | "ml" | "config" | "test" | "util" | "other"
+    contextHint?: string;     // e.g., "gemini", "llm", "database", "api-integration"
 };
 
 export type RepoIndex = {
@@ -41,6 +43,50 @@ const CORE_FILE_PATTERNS: Array<{ pattern: RegExp; boost: number }> = [
     { pattern: /(^|\/)src\/index\.(ts|tsx|js|jsx)$/i, boost: 2 },
     { pattern: /(^|\/)src\/app\.(ts|tsx|js|jsx)$/i, boost: 2 },
 ];
+
+// ─── Semantic Grouping ────────────────────────────────────────────────────────
+
+/**
+ * Classifies file paths by semantic domain for better ranking.
+ * Used to boost files when queries are domain-specific.
+ */
+function getSemanticGroup(path: string): string {
+    const patterns = {
+        api: /\/(api|routes|endpoints|server|handler|middleware)\//i,
+        ui: /\/(components|pages|ui|views|layout|screen)\//i,
+        ml: /\/(gemini|ai|model|ml|inference|llm|ai-client)\//i,
+        config: /\.(config|env|settings|constants|setup)\./i,
+        test: /\.(test|spec)\.tsx?$/i,
+        util: /\/(utils|helpers|lib|services)\//i,
+    };
+
+    for (const [group, pattern] of Object.entries(patterns)) {
+        if (pattern.test(path)) {
+            return group;
+        }
+    }
+    return "other";
+}
+
+/**
+ * Extracts context hints from file content (first few lines).
+ * Helps identify AI/ML files, database files, etc. at a glance.
+ */
+function extractContextHint(content: string): string | undefined {
+    if (!content || content.length === 0) return undefined;
+    
+    const firstLines = content.split('\n').slice(0, 3).join(' ').toLowerCase();
+    const keywords = ["gemini", "openai", "llm", "database", "cache", "api", "webhook", "ai-"];
+    
+    for (const keyword of keywords) {
+        if (firstLines.includes(keyword)) {
+            return keyword;
+        }
+    }
+    return undefined;
+}
+
+// ─── Tokenization ─────────────────────────────────────────────────────────────
 
 export function tokenizeText(input: string): string[] {
     const normalized = input
@@ -272,6 +318,37 @@ export async function loadRepoIndex(owner: string, repo: string): Promise<RepoIn
     return index;
 }
 
+/**
+ * Infer semantic groups that are likely relevant to the query.
+ * Used to boost files in matching semantic groups.
+ */
+function inferSemanticGroupsFromQuery(query: string): Set<string> {
+    const lowerQuery = query.toLowerCase();
+    const groups = new Set<string>();
+
+    // ML/AI queries
+    if (/\b(gemini|openai|llm|model|ai|machine learning|inference|neural|embed)\b/.test(lowerQuery)) {
+        groups.add("ml");
+    }
+
+    // API queries
+    if (/\b(api|endpoint|route|handler|request|response|fetch|call)\b/.test(lowerQuery)) {
+        groups.add("api");
+    }
+
+    // UI/Component queries
+    if (/\b(component|ui|page|view|layout|button|form|render)\b/.test(lowerQuery)) {
+        groups.add("ui");
+    }
+
+    // Config queries
+    if (/\b(config|environment|setup|setting|initialize|init|env)\b/.test(lowerQuery)) {
+        groups.add("config");
+    }
+
+    return groups;
+}
+
 export function searchRepoIndex(query: string, index: RepoIndex): RepoIndexSearchResult {
     const queryTokens = tokenizeText(query);
     if (queryTokens.length === 0) {
@@ -279,6 +356,7 @@ export function searchRepoIndex(query: string, index: RepoIndex): RepoIndexSearc
     }
 
     const scoreThreshold = Math.max(3, Math.ceil(queryTokens.length * 0.6));
+    const relevantGroups = inferSemanticGroupsFromQuery(query);
     const scored: Array<{ path: string; score: number }> = [];
 
     for (const entry of index.entries) {
@@ -291,6 +369,11 @@ export function searchRepoIndex(query: string, index: RepoIndex): RepoIndexSearc
         for (const token of queryTokens) {
             if (tokenSet.has(token)) score += 1;
             if (filenameSet.has(token)) score += 2;
+        }
+
+        // Apply semantic grouping boost
+        if (score > 0 && entry.semanticGroup && relevantGroups.has(entry.semanticGroup)) {
+            score *= 1.5;  // 50% boost for matching semantic group
         }
 
         if (score > 0) {

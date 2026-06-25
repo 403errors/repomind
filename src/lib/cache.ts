@@ -635,12 +635,14 @@ export async function cacheQuerySelection(
     repo: string,
     query: string,
     files: string[],
-    policy?: FileCachePolicy
+    policy?: FileCachePolicy,
+    intent?: string
 ): Promise<void> {
     // Normalize query to lowercase and trim to increase hit rate
     const normalizedQuery = query.toLowerCase().trim();
+    const intentSuffix = intent ? `:${intent}` : "";
     const namespace = getQueryCacheNamespace(owner, repo, policy);
-    const key = `query:${namespace}:${normalizedQuery}`;
+    const key = `query:${namespace}:${normalizedQuery}${intentSuffix}`;
     // Cache for 24 hours - queries usually yield same files
     await safeKvOperation(() => kv.setex(key, 86400, files));
 }
@@ -649,11 +651,13 @@ export async function getCachedQuerySelection(
     owner: string,
     repo: string,
     query: string,
-    policy?: FileCachePolicy
+    policy?: FileCachePolicy,
+    intent?: string
 ): Promise<string[] | null> {
     const normalizedQuery = query.toLowerCase().trim();
+    const intentSuffix = intent ? `:${intent}` : "";
     const namespace = getQueryCacheNamespace(owner, repo, policy);
-    const key = `query:${namespace}:${normalizedQuery}`;
+    const key = `query:${namespace}:${normalizedQuery}${intentSuffix}`;
     return await safeKvOperation(() => kv.get<string[]>(key));
 }
 

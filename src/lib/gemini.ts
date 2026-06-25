@@ -521,6 +521,128 @@ async function fetchWebSearchSnapshot(
   return { summary, searchQuery };
 }
 
+// ─── Query Intent Classification ───────────────────────────────────────────────
+
+/**
+ * Classifies user query intent to improve cache key specificity.
+ * Prevents follow-ups with different intents from reusing cached file selections.
+ * 
+ * Example:
+ * - "Explain how Gemini works" → "explanation"
+ * - "Why is Gemini slow?" → "performance"
+ * - "Gemini throws an error" → "error"
+ */
+function classifyQueryIntent(question: string): string {
+  const lowerQuestion = question.toLowerCase();
+
+  // Performance-related queries
+  if (/\b(slow|fast|optimize|bottleneck|performance|speed|latency|efficient|throughput|cpu|memory|timeout)\b/.test(lowerQuestion)) {
+    return "performance";
+  }
+
+  // Error/troubleshooting queries
+  if (/\b(error|bug|crash|fail|issue|problem|why.*break|fix|broken|not.*work|doesn't.*work|doesn't work)\b/.test(lowerQuestion)) {
+    return "error";
+  }
+
+  // Architecture/design queries
+  if (/\b(architecture|design|pattern|structure|how.*work|how does|flow|module|component|layer|abstraction)\b/.test(lowerQuestion)) {
+    return "architecture";
+  }
+
+  // Data/schema/type queries
+  if (/\b(data|input|output|format|schema|type|structure|field|property|interface|contract)\b/.test(lowerQuestion)) {
+    return "data";
+  }
+
+  // Explanation/understanding queries
+  if (/\b(explain|what|tell|describe|understand|meaning|purpose|what is|what does)\b/.test(lowerQuestion)) {
+    return "explanation";
+  }
+
+  // Default: generic
+  return "generic";
+}
+
+// ─── Repository Context Building ──────────────────────────────────────────────
+
+interface RepoContext {
+  architecture: string;
+  primaryLanguages: string[];
+  keyComponents: string[];
+  filesByDomain: Record<string, string[]>;
+}
+
+/**
+ * Analyzes file paths to infer repository structure and context.
+ * Helps the file selector understand the repo architecture and key components.
+ */
+function buildRepoContext(candidates: string[]): RepoContext {
+  const languages = new Set<string>();
+  const filesByDomain: Record<string, string[]> = {
+    api: [],
+    ui: [],
+    ml: [],
+    config: [],
+    test: [],
+    util: [],
+    other: [],
+  };
+
+  // Categorize files by extension and path
+  for (const path of candidates.slice(0, 100)) {
+    // Extract language from extension
+    if (/\.(ts|tsx|js|jsx)$/.test(path)) languages.add("TypeScript/JavaScript");
+    if (/\.py$/.test(path)) languages.add("Python");
+    if (/\.go$/.test(path)) languages.add("Go");
+    if (/\.rs$/.test(path)) languages.add("Rust");
+    if (/\.java$/.test(path)) languages.add("Java");
+
+    // Categorize by domain
+    if (/\/(api|routes|endpoints|server|handler)\//i.test(path)) {
+      filesByDomain.api.push(path.split('/').pop()!);
+    } else if (/\/(components|pages|ui|views)\//i.test(path)) {
+      filesByDomain.ui.push(path.split('/').pop()!);
+    } else if (/\/(gemini|ai|model|ml|llm)\//i.test(path)) {
+      filesByDomain.ml.push(path.split('/').pop()!);
+    } else if (/\.(config|env|settings)\./i.test(path)) {
+      filesByDomain.config.push(path.split('/').pop()!);
+    } else if (/\.(test|spec)\./i.test(path)) {
+      filesByDomain.test.push(path.split('/').pop()!);
+    } else if (/\/(utils|helpers|lib|services)\//i.test(path)) {
+      filesByDomain.util.push(path.split('/').pop()!);
+    } else {
+      filesByDomain.other.push(path.split('/').pop()!);
+    }
+  }
+
+  // Infer architecture
+  let architecture = "Modular";
+  if (filesByDomain.ml.length > 0 && filesByDomain.api.length > 0 && filesByDomain.ui.length > 0) {
+    architecture = "Layered (API + UI + ML/AI)";
+  } else if (filesByDomain.api.length > filesByDomain.ui.length) {
+    architecture = "API-First";
+  } else if (filesByDomain.ui.length > filesByDomain.api.length) {
+    architecture = "UI-First";
+  } else if (filesByDomain.ml.length > 5) {
+    architecture = "ML-Heavy";
+  }
+
+  // Infer key components
+  const keyComponents: string[] = [];
+  if (filesByDomain.ml.length > 0) keyComponents.push("AI/ML Integration");
+  if (filesByDomain.api.length > 0) keyComponents.push("API Layer");
+  if (filesByDomain.ui.length > 0) keyComponents.push("UI Components");
+  if (filesByDomain.util.length > 5) keyComponents.push("Utilities & Services");
+
+  return {
+    architecture,
+    primaryLanguages: Array.from(languages),
+    keyComponents,
+    filesByDomain,
+  };
+}
+
 // ─── File Selection ────────────────────────────────────────────────────────────
 
 export async function analyzeFileSelection(
@@ -577,9 +699,10 @@ export async function analyzeFileSelection(
     return recordSelection("index_hit", result);
   }
 
-  // 2. QUERY CACHING: Check if we've answered this exact query for this repo before
+  // 2. QUERY CACHING: Check if we've answered this exact query with the same intent for this repo before
+  const queryIntent = classifyQueryIntent(question);
   if (owner && repo) {
-    const cachedSelection = await getCachedQuerySelection(owner, repo, question, cachePolicy);
+    const cachedSelection = await getCachedQuerySelection(owner, repo, question, cachePolicy, queryIntent);
     if (cachedSelection) {
       const filtered = cachedSelection
         .filter((path) => fileTree.includes(path))
@@ -603,13 +726,13 @@ export async function analyzeFileSelection(
       if (!lowConfidence && indexFiles.length > 0) {
         const selection = indexFiles.slice(0, maxSelectedFiles);
         if (owner && repo && selection.length > 0) {
-          await cacheQuerySelection(owner, repo, question, selection, cachePolicy);
+          await cacheQuerySelection(owner, repo, question, selection, cachePolicy, queryIntent);
         }
         return recordSelection("index_hit", selection);
       }
 
       if (indexFiles.length > 0) {
-        candidates = indexFiles.slice(0, 500);
+        candidates = indexFiles.slice(0, 50);
       }
     }
   }
@@ -617,36 +740,56 @@ export async function analyzeFileSelection(
   const isDeepThinking = modelPreference === "thinking";
   const historyText = history.length > 0 ? formatHistoryText(history.slice(-4)) : "No previous history.";
 
+  // P5: Build repository context for enhanced file selection
+  const repoContext = buildRepoContext(candidates);
+  const domainHints = Object.entries(repoContext.filesByDomain)
+    .filter(([_, files]) => files.length > 0)
+    .map(([domain, files]) => `${domain}: ${files.slice(0, 3).join(", ")}`)
+    .join("\n  ");
+
   const prompt = `
-    Select relevant files for this query from the list below.
-    Query: "${question}"
-    
-    Recent Chat History:
-    ${historyText}
-    
-    Files:
-    ${candidates.slice(0, 500).join("\n")}
-    
-    Rules:
-    - Return JSON: { "files": ["path/to/file"] }
-    - IMPORTANT: If the query is a follow-up that can be answered ENTIRELY based on the Recent Chat History (e.g., "summarize", "explain more about the above"), return an empty array: { "files": [] }.
-    - Max ${isDeepThinking ? "50" : "25"} files.
-    - Select the MINIMUM number of files necessary to answer the query.
+You are selecting the most relevant source files for a code analysis query.
+
+Repository Context:
+  Architecture: ${repoContext.architecture}
+  Primary Languages: ${repoContext.primaryLanguages.join(", ")}
+  Key Components: ${repoContext.keyComponents.join(", ")}
+  
+Files by Domain:
+  ${domainHints || "(no domains detected)"}
+
+User Query: "${question}"
+
+Recent Chat History:
+${historyText}
+
+Candidate Files to Select From:
+${candidates.slice(0, 50).join("\n")}
+
+Selection Rules:
+- Return JSON: { "files": ["path/to/file"] }
+- IMPORTANT: If the query is a follow-up that can be answered ENTIRELY based on the Recent Chat History (e.g., "summarize", "explain more about the above"), return an empty array: { "files": [] }.
+- Max ${isDeepThinking ? "50" : "25"} files.
+- Select the MINIMUM number of files necessary to answer the query.
+- Use the Repository Context above to prioritize files from relevant domains:
+  * AI/ML queries → prioritize files tagged with "ml"
+  * API queries → prioritize files tagged with "api"
+  * UI queries → prioritize files tagged with "ui"
 ${isDeepThinking ?
-      `    - [DEEP THINKING MODE ACTIVE]: You MUST explicitly search for and select the underlying source code files, application logic, and configuration.
-    - CRITICAL: Treat documentation (like README.md) as an absolute LAST RESORT. You MUST draw answers from the code.
-    - If explaining architecture or systems, prioritize core components, routing, schemas, and main logic files.` :
-      `    - CRITICAL: Prioritize source code files (ts, js, py, etc.) over documentation (md) for technical queries.
-    - Only pick README.md if the query is about "what is this repo", "installation", or high-level features.
-    - For "how does this work" or "logic" queries, MUST select the actual source code files.`}
-    - NO EXPLANATION. JSON ONLY.
-    `;
+      `- [DEEP THINKING MODE ACTIVE]: You MUST explicitly search for and select the underlying source code files, application logic, and configuration.
+- CRITICAL: Treat documentation (like README.md) as an absolute LAST RESORT. You MUST draw answers from the code.
+- If explaining architecture or systems, prioritize core components, routing, schemas, and main logic files.` :
+      `- CRITICAL: Prioritize source code files (ts, js, py, etc.) over documentation (md) for technical queries.
+- Only pick README.md if the query is about "what is this repo", "installation", or high-level features.
+- For "how does this work" or "logic" queries, MUST select the actual source code files.`}
+- NO EXPLANATION. JSON ONLY.
+  `;
 
   try {
-    // For large/complex selections, we use the reasoning model with low thinking to keep it fast
+    // For large/complex selections, we use the reasoning model with HIGH thinking for better accuracy
     const model = getGenAI().getGenerativeModel({
       model: FILE_SELECTOR_MODEL,
-      generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", modelPreference === "thinking" ? "HIGH" : "LOW"),
+      generationConfig: getThinkingGenerationConfig(modelPreference === "thinking", "HIGH"),
     });
 
     const result = await model.generateContent(prompt);
@@ -658,7 +801,7 @@ ${isDeepThinking ?
       .slice(0, maxSelectedFiles);
 
     if (owner && repo && normalizedSelection.length > 0) {
-      await cacheQuerySelection(owner, repo, question, normalizedSelection, cachePolicy);
+      await cacheQuerySelection(owner, repo, question, normalizedSelection, cachePolicy, queryIntent);
     }
 
     return recordSelection("llm_fallback", normalizedSelection);

@@ -481,6 +481,160 @@ describe("analyzeFileSelection", () => {
 
         expect(selected).toEqual(["src/core.ts", "README.md"]);
     });
+
+    it("[P1] always uses HIGH thinking mode for file selection regardless of modelPreference", async () => {
+        const generateContentMock = vi.fn().mockResolvedValue({
+            response: {
+                text: () => "{\"files\":[\"src/index.ts\"]}",
+            },
+        });
+
+        getGenerativeModelMock.mockReturnValue({
+            generateContent: generateContentMock,
+        });
+
+        // Test with modelPreference="flash" (default/low priority)
+        await analyzeFileSelection(
+            "What does this repo do?",
+            ["src/index.ts", "README.md"],
+            "owner",
+            "repo",
+            "flash"  // Low-priority model preference
+        );
+
+        // Verify that getGenerativeModel was called with HIGH thinking config
+        expect(getGenerativeModelMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                generationConfig: expect.objectContaining({
+                    thinkingConfig: expect.objectContaining({
+                        thinking_level: "HIGH"  // Should always be HIGH, not LOW
+                    })
+                })
+            })
+        );
+    });
+
+    it("[P3] caps LLM fallback candidate pool at 50 files to reduce noise", async () => {
+        // Create 150 "matched" files from index search to trigger fallback
+        const largeFileList = Array.from({ length: 150 }, (_, i) => `src/file_${i}.ts`);
+        
+        const generateContentMock = vi.fn().mockResolvedValue({
+            response: {
+                text: () => "{\"files\":[\"src/file_0.ts\",\"src/file_1.ts\"]}",
+            },
+        });
+
+        getGenerativeModelMock.mockReturnValue({
+            generateContent: generateContentMock,
+        });
+
+        await analyzeFileSelection(
+            "What gemini model?",
+            largeFileList
+        );
+
+        // Verify that the prompt sent to generateContent doesn't exceed 50 candidates
+        const promptCall = generateContentMock.mock.calls[0][0];
+        const fileSectionMatch = promptCall.match(/Files:\n([\s\S]*?)Rules:/);
+        
+        if (fileSectionMatch) {
+            const filesSection = fileSectionMatch[1];
+            const fileLinesCount = filesSection.trim().split('\n').filter((line: string) => line.trim().startsWith('src/')).length;
+            expect(fileLinesCount).toBeLessThanOrEqual(50);
+        }
+    });
+
+    it("[P2] separates cache entries for same query with different intents", async () => {
+        // This test verifies that getCachedQuerySelection is called with different intent values
+        // for similar queries with different semantic intents
+        const generateContentMock = vi.fn().mockResolvedValue({
+            response: {
+                text: () => "{\"files\":[\"src/index.ts\"]}",
+            },
+        });
+
+        getGenerativeModelMock.mockReturnValue({
+            generateContent: generateContentMock,
+        });
+
+        // Query 1: Explanation intent
+        getCachedQuerySelectionMock.mockResolvedValue(null);
+        await analyzeFileSelection(
+            "Explain how the Gemini model works",
+            ["src/index.ts", "src/gemini.ts", "src/performance.ts"],
+            "owner",
+            "repo",
+            "flash"
+        );
+
+        // Verify first cache check was called
+        expect(getCachedQuerySelectionMock).toHaveBeenCalledWith(
+            "owner",
+            "repo",
+            "Explain how the Gemini model works",
+            undefined,
+            "explanation"  // Should classify as explanation
+        );
+
+        // Query 2: Performance intent
+        getCachedQuerySelectionMock.mockReset();
+        getCachedQuerySelectionMock.mockResolvedValue(null);
+        await analyzeFileSelection(
+            "Why is the Gemini model so slow?",
+            ["src/index.ts", "src/gemini.ts", "src/performance.ts"],
+            "owner",
+            "repo",
+            "flash"
+        );
+
+        // Verify second cache check was called with different intent
+        expect(getCachedQuerySelectionMock).toHaveBeenCalledWith(
+            "owner",
+            "repo",
+            "Why is the Gemini model so slow?",
+            undefined,
+            "performance"  // Should classify as performance
+        );
+    });
+
+    it("[P5] includes repository context in file selection prompt", async () => {
+        const generateContentMock = vi.fn().mockResolvedValue({
+            response: {
+                text: () => "{\"files\":[\"src/lib/gemini.ts\"]}",
+            },
+        });
+
+        getGenerativeModelMock.mockReturnValue({
+            generateContent: generateContentMock,
+        });
+
+        getCachedQuerySelectionMock.mockResolvedValue(null);
+        
+        // Query with ML/AI context
+        await analyzeFileSelection(
+            "How does the Gemini API integration work?",
+            [
+                "src/lib/gemini.ts",
+                "src/lib/ai-client.ts",
+                "src/api/routes.ts",
+                "src/components/Chat.tsx",
+                "src/config.json"
+            ],
+            "owner",
+            "repo",
+            "flash"
+        );
+
+        // Verify prompt includes repository context information
+        const promptCall = generateContentMock.mock.calls[0][0];
+        
+        expect(promptCall).toContain("Repository Context:");
+        expect(promptCall).toContain("Architecture:");
+        expect(promptCall).toContain("Key Components:");
+        expect(promptCall).toContain("Files by Domain:");
+        // Should include domain hints from actual file analysis
+        expect(promptCall).toMatch(/ml:|api:|ui:|config:/i);
+    });
 });
 
 describe("fixMermaidSyntax", () => {
